@@ -1,0 +1,20 @@
+{
+  "dependencies": {
+    "express": "^4.18.2",
+    "express-generator": "^4.2.0"
+  },
+  "name": "nather-heizung-sanitaer",
+  "description": "Auftragsformular für Nather Heizung-Sanitär",
+  "version": "1.0.0",
+  "main": "nather.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node nather.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://git.asc-vision.de/asc_intern/nather-heizung-sanitaer.git"
+  },
+  "author": "Leon Pllana @ ASC Vision",
+  "license": "ISC"
+}

@@ -1,0 +1,661 @@
+<html lang="en" class=" mtcytyc idc0_350">
+    <head>
+        <meta charset="utf-8">
+        <meta content="width=device-width, initial-scale=1" name="viewport">
+        <meta
+            content="A multi-step form is a long-form broken down into multiple pieces/steps to make an otherwise long form less intimidating for visitors to complete."
+            name="description">
+        <meta content="Sam Norton" name="author">
+        <title>Nather Heizung und Sanitär</title>
+        <!-- FAVICONS -->
+        <link href="favicons/apple-icon-57x57.png" rel="apple-touch-icon" sizes="57x57">
+        <link href="favicons/apple-icon-60x60.png" rel="apple-touch-icon" sizes="60x60">
+        <link href="favicons/apple-icon-72x72.png" rel="apple-touch-icon" sizes="72x72">
+        <link href="favicons/apple-icon-76x76.png" rel="apple-touch-icon" sizes="76x76">
+        <link
+            href="favicons/apple-icon-114x114.png"
+            rel="apple-touch-icon"
+            sizes="114x114">
+        <link
+            href="favicons/apple-icon-120x120.png"
+            rel="apple-touch-icon"
+            sizes="120x120">
+        <link
+            href="favicons/apple-icon-144x144.png"
+            rel="apple-touch-icon"
+            sizes="144x144">
+        <link
+            href="favicons/apple-icon-152x152.png"
+            rel="apple-touch-icon"
+            sizes="152x152">
+        <link
+            href="favicons/apple-icon-180x180.png"
+            rel="apple-touch-icon"
+            sizes="180x180">
+        <link
+            href="favicons/android-icon-192x192.png"
+            rel="icon"
+            sizes="192x192"
+            type="image/png">
+        <link
+            href="favicons/favicon-32x32.png"
+            rel="icon"
+            sizes="32x32"
+            type="image/png">
+        <link
+            href="favicons/favicon-96x96.png"
+            rel="icon"
+            sizes="96x96"
+            type="image/png">
+        <link
+            href="favicons/favicon-16x16.png"
+            rel="icon"
+            sizes="16x16"
+            type="image/png">
+        <meta content="#ffffff" name="msapplication-TileColor">
+        <meta content="favicons/ms-icon-144x144.png" name="msapplication-TileImage">
+        <meta content="#ffffff" name="theme-color">
+        <!-- CSS -->
+        <link
+            rel="stylesheet"
+            href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"
+            integrity="sha512-DTOQO9RWCH3ppGqcWaEA1BIZOC6xxalwEsw9c2QQeAIftl+Vegovlnee1c9QX4TctnWMn13TZye+giMm8e2LwA=="
+            crossorigin="anonymous"
+            referrerpolicy="no-referrer"/>
+        <link
+            href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.9.1/font/bootstrap-icons.css"
+            rel="stylesheet">
+        <link
+            rel="stylesheet"
+            href="https://cdn.jsdelivr.net/npm/@eonasdan/tempus-dominus@6.9.4/dist/css/tempus-dominus.min.css"
+            crossorigin="anonymous">
+        <link
+            href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.9.1/font/bootstrap-icons.css"
+            rel="stylesheet">
+        <link href="bootstrap.min.css" rel="stylesheet">
+        <link href="style.css" rel="stylesheet">
+        <!-- FONT -->
+        <link href="https://fonts.gstatic.com" rel="preconnect">
+        <link
+            href="https://fonts.googleapis.com/css2?family=Josefin+Sans:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;1,200;1,300;1,400;1,500;1,600&amp;display=swap"
+            rel="stylesheet">
+        <style type="text/css" id="operaUserStyle"></style>
+        <script
+            src="chrome-extension://ccnckbpmaceehanjmeomladnmlffdjgn/content/fido2/page-script.js"
+            id="bw-fido2-page-script"></script>
+    </head>
+    <body>
+        <!-- CONTAINER -->
+        <div class="container d-flex align-items-center min-vh-100">
+            <div class="row g-0 justify-content-center">
+                <!-- TITLE -->
+                <div class="col-lg-4 offset-lg-1 mx-0 px-0">
+                    <div id="title-container">
+                        <h2>NATHER Heizung & Sanitär</h2>
+                        <br>
+                        <h3>Auftragsschein</h3>
+                        <br>
+                        <p>Fachbetrieb der Innung Sanitär- und Heizungstechnik</p>
+                        <p>Zwergerstraße 2b<br>
+                            85579 Neubiberg<br>
+                            <a href="tel:+498960190411">Tel.:089 601 904 11</a><br>
+                            <a href="mailto:info@nather-hs.de">E-Mail:info@nather-hs.de</a>
+                        </p>
+                    </div>
+                </div>
+                <!-- FORMS -->
+                <div class="col-lg-7 mx-0 px-0">
+                    <div class="progress">
+                        <div
+                            aria-valuemax="100"
+                            aria-valuemin="0"
+                            aria-valuenow="50"
+                            class="progress-bar progress-bar-striped progress-bar-animated bg-primary"
+                            role="progressbar"
+                            style="width: 0%;"></div>
+                    </div>
+                    <div id="qbox-container">
+                        <form
+                            class="needs-validation"
+                            id="form-wrapper"
+                            method="post"
+                            name="form-wrapper"
+                            novalidate="">
+                            <div id="steps-container">
+                                <div class="step d-block">
+                                    <h4>
+                                        Geben Sie den Auftraggeber und den Rechnungsempfänger an</h4>
+                                    <div class="row">
+                                        <div class="col-xs-12 col-sm-12 col-md-12 col-lg-12">
+                                            <input
+                                                id="empfänger_rg"
+                                                type="text"
+                                                class="form-control"
+                                                placeholder="Rechnungsempfänger"
+                                                aria-label="rechnungsempfaenger"><br>
+                                            <input
+                                                id="auftraggeber"
+                                                type="text"
+                                                class="form-control"
+                                                placeholder="Auftraggeber"
+                                                aria-label="auftraggeber">
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="step d-none">
+                                    <h4>Wählen Sie die vorliegende Auftragsart aus</h4>
+                                    <div class="row">
+                                        <div class="col-xs-12 col-sm-12 col-md-12 col-lg-12">
+                                            <select id="art_auftrag" class="form-select">
+                                                <option selected="selected" disabled="disabled" hidden="hidden">Auftragsart auswählen...</option>
+                                                <option>Arbeits- und Materialnachweis</option>
+                                                <option>Wartung mit Vertrag</option>
+                                                <option>Wartung ohne Vertrag</option>
+                                                <option>Materiallieferung</option>
+                                                <option>Inbetriebnahme</option>
+                                                <option>Gewährleistung</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="step d-none">
+                                    <h4>Geben Sie bitte noch nachfolgende Daten ein:
+                                    </h4>
+                                    <div class="row">
+                                        <div class="col-xs-12 col-sm-12 col-md-12 col-lg-12">
+                                            <input
+                                                id="nr_auftrag"
+                                                type="text"
+                                                class="form-control"
+                                                placeholder="Auftragsnummer"
+                                                aria-label="auftragsnummer"><br>
+                                            <input
+                                                id="nr_kunde"
+                                                type="text"
+                                                class="form-control"
+                                                placeholder="Kundennummer"
+                                                aria-label="kundennummer"><br>
+                                            <input
+                                                id="work_toDo"
+                                                type="text"
+                                                class="form-control"
+                                                placeholder="Auszuführende Arbeiten"
+                                                aria-label="auszufuehrende_arbeiten"><br>
+                                            <select id="monteur" class="form-select form-control">
+                                                <option selected="selected" disabled="disabled" hidden="hidden">Monteur auswählen...</option>
+                                                <option>Monteur 1</option>
+                                                <option>Monteur 2</option>
+                                                <option>Monteur 3</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="step d-none">
+                                    <h4>Geben Sie den Termin, die Uhrzeit und den Arbeitsbericht des Monteurs an</h4>
+                                    <div class="row">
+                                        <div>
+                                            <div
+                                                class="input-group"
+                                                id="datetimepicker1"
+                                                data-td-target-input="nearest"
+                                                data-td-target-toggle="nearest">
+                                                <input
+                                                    id="datetimepicker1Input"
+                                                    type="text"
+                                                    class="form-control"
+                                                    data-td-target="#datetimepicker1"
+                                                    placeholder="Termin/Uhrzeit"/>
+                                                <div
+                                                    class="input-group-text"
+                                                    data-td-target="#datetimepicker1"
+                                                    data-td-toggle="datetimepicker">
+                                                    <i class="fa fa-calendar"></i>
+                                                </div>
+                                            </div><br>
+                                            <div>
+                                                <textarea
+                                                    class="form-control"
+                                                    id="form_control_txt1"
+                                                    rows="4"
+                                                    placeholder="Arbeitsbericht des ausführenden Monteurs"></textarea>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="step d-none">
+                                    <h4>Geben Sie hier an wann welcher Monteur wie lange am Auftrag gearbeitet hat</h4>
+                                    <div class="col-12" id="btn_work_hours">
+                                        <button type="button" class="add_work btn btn-success btn-lg">
+                                            <span class="bi-plus"></span></button>
+
+                                        <button type="button" class="remove_work btn btn-danger btn-lg">
+                                            <span class="bi-trash"></span></button>
+                                    </div>
+                                    <br>
+                                    <div class="row">
+                                        <div id="new_work">
+                                            <input
+                                                type='text'
+                                                id="`new_work_"
+                                                +="+"
+                                                ${new_work_no}="${new_work_no}"
+                                                `="`"
+                                                class='form-control'
+                                                placeholder='Datum , Name, Arbeitsstunden'><br>
+                                        </div>
+                                        <input type="hidden" value="1" id="total_work">
+                                    </div>
+                                </div>
+                                <div class="step d-none">
+                                    <h4>Geben Sie an welchen Materialverbrauch Sie hatten:</h4>
+
+                                    <div class="col-12" id="btn_work_material">
+                                        <button type="button" class="add_material btn btn-success btn-lg">
+                                            <span class="bi-plus"></span></button>
+
+                                        <button type="button" class="remove_material btn btn-danger btn-lg">
+                                            <span class="bi-trash"></span></button>
+                                    </div>
+                                    <br>
+                                    <div class="row">
+                                        <div id="new_material">
+                                            <input
+                                                type='text'
+                                                id="`new_material_"
+                                                +="+"
+                                                ${new_material_no}="${new_material_no}"
+                                                `="`"
+                                                class='form-control'
+                                                placeholder='Anzahl, Bezeichnung, Preis'><br>
+                                        </div>
+                                        <input type="hidden" value="1" id="total_material">
+                                    </div>
+                                </div>
+                                <div class="step d-none">
+                                    <h4>Bitte wählen Sie die zutreffenden Optionen an:</h4>
+                                    <div class="row">
+                                        <div class="col-xs-12 col-sm-12 col-md-12 col-lg-6">
+                                            <div class="form-check form-switch">
+                                                <input
+                                                    class="form-check-input"
+                                                    type="checkbox"
+                                                    role="switch"
+                                                    id="notdienstpauschale">
+                                                <label class="form-check-label" for="flexSwitchCheckDefault">Notdienstpauschale</label>
+                                            </div>
+                                            <div class="form-check form-switch">
+                                                <input
+                                                    class="form-check-input"
+                                                    type="checkbox"
+                                                    role="switch"
+                                                    id="bereitschaftspauschale">
+                                                <label class="form-check-label" for="flexSwitchCheckDefault">Bereitschaftspauschale</label>
+                                            </div>
+                                            <div class="form-check form-switch">
+                                                <input
+                                                    class="form-check-input"
+                                                    type="checkbox"
+                                                    role="switch"
+                                                    id="samstagszuschlag">
+                                                <label class="form-check-label" for="flexSwitchCheckDefault">Samstagszuschlag</label>
+                                            </div>
+                                            <div class="form-check form-switch">
+                                                <input
+                                                    class="form-check-input"
+                                                    type="checkbox"
+                                                    role="switch"
+                                                    id="nachtzuschlag">
+                                                <label class="form-check-label" for="flexSwitchCheckDefault">Nachtzuschlag</label>
+                                            </div>
+                                            <div class="form-check form-switch">
+                                                <input
+                                                    class="form-check-input"
+                                                    type="checkbox"
+                                                    role="switch"
+                                                    id="schmutzzulage">
+                                                <label class="form-check-label" for="flexSwitchCheckDefault">Schmutzzulage</label>
+                                            </div>
+                                        </div>
+                                        <div class="col-xs-12 col-sm-12 col-md-12 col-lg-6">
+                                            <div class="form-check form-switch">
+                                                <input
+                                                    class="form-check-input"
+                                                    type="checkbox"
+                                                    role="switch"
+                                                    id="erschwerniszulage">
+                                                <label class="form-check-label" for="flexSwitchCheckDefault">Erschwerniszulage</label>
+                                            </div>
+                                            <div class="form-check form-switch">
+                                                <input
+                                                    class="form-check-input"
+                                                    type="checkbox"
+                                                    role="switch"
+                                                    id="kleinteilpauschale">
+                                                <label class="form-check-label" for="flexSwitchCheckDefault">Kleinteilpauschale</label>
+                                            </div>
+                                            <div class="form-check form-switch">
+                                                <input
+                                                    class="form-check-input"
+                                                    type="checkbox"
+                                                    role="switch"
+                                                    id="sonn-und_feiertagszuschlag">
+                                                <label class="form-check-label" for="flexSwitchCheckDefault">Sonn-/Feiertagszuschlag</label>
+                                            </div>
+                                            <div class="form-check form-switch">
+                                                <input
+                                                    class="form-check-input"
+                                                    type="checkbox"
+                                                    role="switch"
+                                                    id="kfz_bereitstellungspauschale">
+                                                <label class="form-check-label" for="flexSwitchCheckDefault">Kfz-Bereitstellung</label>
+                                            </div>
+                                            <div class="form-check form-switch">
+                                                <input
+                                                    class="form-check-input"
+                                                    type="checkbox"
+                                                    role="switch"
+                                                    id="arbeit_abgeschlossen">
+                                                <label class="form-check-label" for="flexSwitchCheckDefault">Arbeit abgeschlossen</label>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="row">
+                                        <div class="col-12">
+                                            <div class="form-check form-switch">
+                                                <input
+                                                    class="form-check-input"
+                                                    type="checkbox"
+                                                    role="switch"
+                                                    id="maschineneinsatz_check">
+                                                <label class="form-check-label" for="flexSwitchCheckDefault">Maschineneinsatz</label>
+                                                <input
+                                                    id="maschineneinsatz_textfield"
+                                                    type="text"
+                                                    class="form-control"
+                                                    placeholder="..."
+                                                    aria-label="maschineneinsatz"
+                                                    disabled="disabled">
+                                            </div>
+                                            <div class="form-check form-switch">
+                                                <input
+                                                    class="form-check-input"
+                                                    type="checkbox"
+                                                    role="switch"
+                                                    id="entsorgung_check">
+                                                <label class="form-check-label" for="flexSwitchCheckDefault">Entsorgung</label>
+                                                <input
+                                                    id="entsorgung_textfield"
+                                                    type="text"
+                                                    class="form-control"
+                                                    placeholder="..."
+                                                    aria-label="entsorgung"
+                                                    disabled="disabled">
+                                            </div>
+                                            <div class="form-check form-switch">
+                                                <input class="form-check-input" type="checkbox" role="switch" id="work_check">
+                                                <label class="form-check-label" for="flexSwitchCheckDefault">Weitere Arbeiten</label>
+                                                <textarea
+                                                    id="work_textfield"
+                                                    type="text"
+                                                    class="form-control"
+                                                    placeholder="..."
+                                                    aria-label="weitere_arbeiten"
+                                                    rows="1"
+                                                    disabled="disabled"></textarea>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="step d-none">
+                                    <div class="mt-1">
+                                        <div class="closing-text">
+                                            <h4>Fast fertig</h4>
+                                            <p>Bitte unterschreiben Sie noch im dafür vorgesehenen Feld</p>
+                                            <div class="row">
+                                                <div id="signature-pad" class="m-signature-pad">
+                                                    <div class="m-signature-pad--body">
+                                                        <canvas></canvas>
+                                                        <input type="hidden" name="signature" id="signature">
+                                                    </div>
+                                                </div>
+                                                <div id="q-box__buttons">
+                                                    <button type="button" class="btn btn-success" onclick="submitImage();">Absenden</button>
+                                                    <button type="button" class="btn btn-danger" onclick="signaturePad.clear();">Löschen</button>
+                                                    <button type="button" class="btn btn-primary" onclick="download('sig.png');">Speichern</button>
+                                                </div>
+                                            </div>
+                                            <p>Die ordnungsgemäße Ausführung der Arbeiten, die Einsatzzeit und der
+                                                Materialverbrauch werden hiermit anerkannt:
+                                            </p>
+                                            <p>Zahlbar sofort nach Rechnungserhalt, ohne Abzug.</p>
+
+                                        </div>
+                                    </div>
+                                </div>
+                                <div id="success">
+                                    <div class="mt-5">
+                                        <h4>Formular erfolgreich übermittelt</h4>
+                                        <p></p>
+                                        <a class="back-link" href="">Neues Dokument erstellen ➜</a>
+                                    </div>
+                                </div>
+                            </div>
+                            <div id="q-box__buttons">
+                                <button id="prev-btn" type="button" class="d-none">Zurück</button>
+                                <button id="next-btn" type="button" class="d-inline-block">Weiter</button>
+                                <button id="submit-btn" type="submit" class="d-none">Absenden</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- PRELOADER -->
+        <div id="preloader-wrapper">
+            <div id="preloader"></div>
+            <div class="preloader-section section-left"></div>
+            <div class="preloader-section section-right"></div>
+        </div>
+        <script src="script.js"></script>
+        <!-- Static App Form Collection Script -->
+        <script src="static-forms.js" type="text/javascript"></script>
+        <!--TempusDomus-->
+        <script
+            src="https://cdn.jsdelivr.net/npm/@eonasdan/tempus-dominus@6.9.4/dist/js/tempus-dominus.min.js"
+            crossorigin="anonymous"></script>
+        <!--JQuery-->
+        <script
+            src="https://code.jquery.com/jquery-3.7.1.min.js"
+            integrity="sha256-/JqT3SQfawRcv/BIHPThkBvs0OEvtFFmqPF/lYI/Cxo="
+            crossorigin="anonymous"></script>
+        <!--Popper-->
+        <script
+            src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.11.8/dist/umd/popper.min.js"
+            crossorigin="anonymous"></script>
+        <!--TimePicker Script-->
+        <script type="text/javascript">
+            window.datetimepicker = new tempusDominus.TempusDominus(document.getElementById('datetimepicker1'), {
+                localization: {
+                    today: 'Heute',
+                    selectMonth: 'Monat auswählen',
+                    previousMonth: 'letzter Monat',
+                    nextMonth: 'nächster Monat',
+                    selectYear: 'Jahr auswählen',
+                    previousYear: 'letztes Jahr',
+                    nextYear: 'nächstes Jahr',
+                    selectTime: 'Zeit auswählen',
+                    selectDate: 'Datum auswählen',
+                    dayViewHeaderFormat: {
+                        month: 'long',
+                        year: '2-digit'
+                    },
+                    locale: 'default',
+                    startOfTheWeek: 0,
+                    hourCycle: 'h23',
+                    dateFormats: {
+                        LLLL: 'd.MM.yyyy HH:mm'
+                    },
+                    ordinal: (n) => n,
+                    format: 'LLLL'
+                }
+            });
+        </script>
+        <!--Arbeitsstunden-->
+        <script type="text/javascript">
+            $(document).ready(function () {
+                $('.add_work').on('click', add_work);
+                $('.remove_work').on('click', remove_work);
+                function add_work() {
+                    var new_work_no = parseInt($('#total_work').val()) + 1;
+                    var new_input = "<input type='text' id='new_work_" + new_work_no + "' class='fo" +
+                            "rm-control' placeholder='Datum , Name, Arbeitsstunden'><br>";
+                    $('#new_work').append(new_input);
+                    $('#total_work').val(new_work_no);
+                }
+                function remove_work() {
+                    var last_work_no = $('#total_work').val();
+                    if (last_work_no > 1) {
+                        $('#new_work_' + last_work_no).remove();
+                        $('#total_work').val(last_work_no - 1);
+                    }
+                }
+            });
+        </script>
+        <!--Material-->
+        <script type="text/javascript">
+            $(document).ready(function () {
+                $('.add_material').on('click', add_material);
+                $('.remove_material').on('click', remove_material);
+                function add_material() {
+                    var new_material_no = parseInt($('#total_material').val()) + 1;
+                    var new_input = "<input type='text' id='new_material_" +
+                            new_material_no + "' class='form-control' placeholder='Anzahl, Bezeichnung, Pre" +
+                            "is'><br>";
+
+                    $('#new_material').append(new_input);
+
+                    $('#total_material').val(new_material_no);
+                }
+                function remove_material() {
+                    var last_material_no = $('#total_material').val();
+
+                    if (last_material_no > 1) {
+                        $('#new_material_' + last_material_no).remove();
+                        $('#total_material').val(last_material_no - 1);
+                    }
+                }
+            });
+        </script>
+        <!--CheckState-->
+        <script>
+            var maschineneinsatz_check_element = document.getElementById('maschineneinsatz_check');
+            var maschineneinsatz_textfield_element = document.getElementById(
+                'maschineneinsatz_textfield'
+            );
+            var entsorgung_check_element = document.getElementById('entsorgung_check');
+            var entsorgung_textfield_element = document.getElementById(
+                'entsorgung_textfield'
+            );
+            var work_check_element = document.getElementById('work_check');
+            var work_textfield_element = document.getElementById('work_textfield');
+            maschineneinsatz_check_element.addEventListener('change', function () {
+                maschineneinsatz_textfield_element.disabled = !maschineneinsatz_check_element.checked;
+            });
+            entsorgung_check_element.addEventListener('change', function () {
+                entsorgung_textfield_element.disabled = !entsorgung_check_element.checked;
+            });
+            work_check_element.addEventListener('change', function () {
+                work_textfield_element.disabled = !work_check_element.checked;
+            });
+        </script>
+        <!--Unterschriftenfeld-->
+        <script src="signature_pad.js"></script>
+        <script type="text/javascript">
+            var wrapper = document.getElementById("signature-pad"),
+                canvas = wrapper.querySelector("canvas"),
+                signaturePad;
+
+            /**
+            *  Behandlung der Größenänderung der Unterschriftenfelds
+            */
+            function resizeCanvas() {
+                var oldContent = signaturePad.toData();
+                var ratio = Math.max(window.devicePixelRatio || 1, 1);
+                canvas.width = canvas.offsetWidth * ratio;
+                canvas.height = canvas.offsetHeight * ratio;
+                canvas
+                    .getContext("2d")
+                    .scale(ratio, ratio);
+                signaturePad.clear();
+                signaturePad.fromData(oldContent);
+            }
+
+            /**
+            *  Speichern des Inhaltes als Bild
+            */
+            function download(filename) {
+                var blob = dataURLToBlob(signaturePad.toDataURL());
+                var url = window
+                    .URL
+                    .createObjectURL(blob);
+                var a = document.createElement("a");
+
+                a.style = "display: none";
+                a.href = url;
+                a.download = filename;
+                document
+                    .body
+                    .appendChild(a);
+                a.click();
+                window
+                    .URL
+                    .revokeObjectURL(url);
+            }
+
+            /**
+            * DataURL in Binär umwandeln
+            */
+            function dataURLToBlob(dataURL) {
+                // Code von https://github.com/ebidel/filer.js
+                var parts = dataURL.split(';base64,');
+                var contentType = parts[0].split(":")[1];
+                var raw = window.atob(parts[1]);
+                var rawLength = raw.length;
+                var uInt8Array = new Uint8Array(rawLength);
+                for (var i = 0; i < rawLength; ++i) {
+                    uInt8Array[i] = raw.charCodeAt(i);
+                }
+                return new Blob([uInt8Array], {type: contentType});
+            }
+            var signaturePad = new SignaturePad(canvas);
+            signaturePad.minWidth = 1; //minimale Breite des Stiftes
+            signaturePad.maxWidth = 5; //maximale Breite des Stiftes
+            signaturePad.penColor = "#000000"; //Stiftfarbe
+            signaturePad.backgroundColor = "#FFFFFF"; //Hintergrundfarbe
+
+            window.onclick = resizeCanvas;
+            resizeCanvas();
+        </script>
+
+        <!--Übermittlung der Unterschrift-->
+        <script type="text/javascript">
+            function submitImage() {
+                var imageUrl = document
+                    .getElementById("signature")
+                    .value;
+                var dataURL = signaturePad.toDataURL();
+                imageUrl = dataURL;
+                //Konsolenausgabe zur Sendungsüberprüfung des Bildes
+                if (dataURL.trim() !== "") {
+                    console.log("Bild erfolgreich übertragen")
+                    console.log(imageUrl = dataURL);
+                } else {
+                    console.log("Keine Bildübertragung erfolgt");
+                }
+            }
+        </script>
+
+    </body>
+
+</html>
