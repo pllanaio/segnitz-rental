@@ -2,87 +2,16 @@
     <head>
         <meta charset="utf-8">
         <meta content="width=device-width, initial-scale=1" name="viewport">
-        <meta
-            content="A multi-step form is a long-form broken down into multiple pieces/steps to make an otherwise long form less intimidating for visitors to complete."
-            name="description">
-        <meta content="Sam Norton" name="author">
         <title>Nather Heizung und Sanitär</title>
-        <!-- FAVICONS -->
-        <link href="favicons/apple-icon-57x57.png" rel="apple-touch-icon" sizes="57x57">
-        <link href="favicons/apple-icon-60x60.png" rel="apple-touch-icon" sizes="60x60">
-        <link href="favicons/apple-icon-72x72.png" rel="apple-touch-icon" sizes="72x72">
-        <link href="favicons/apple-icon-76x76.png" rel="apple-touch-icon" sizes="76x76">
-        <link
-            href="favicons/apple-icon-114x114.png"
-            rel="apple-touch-icon"
-            sizes="114x114">
-        <link
-            href="favicons/apple-icon-120x120.png"
-            rel="apple-touch-icon"
-            sizes="120x120">
-        <link
-            href="favicons/apple-icon-144x144.png"
-            rel="apple-touch-icon"
-            sizes="144x144">
-        <link
-            href="favicons/apple-icon-152x152.png"
-            rel="apple-touch-icon"
-            sizes="152x152">
-        <link
-            href="favicons/apple-icon-180x180.png"
-            rel="apple-touch-icon"
-            sizes="180x180">
-        <link
-            href="favicons/android-icon-192x192.png"
-            rel="icon"
-            sizes="192x192"
-            type="image/png">
-        <link
-            href="favicons/favicon-32x32.png"
-            rel="icon"
-            sizes="32x32"
-            type="image/png">
-        <link
-            href="favicons/favicon-96x96.png"
-            rel="icon"
-            sizes="96x96"
-            type="image/png">
-        <link
-            href="favicons/favicon-16x16.png"
-            rel="icon"
-            sizes="16x16"
-            type="image/png">
-        <meta content="#ffffff" name="msapplication-TileColor">
-        <meta content="favicons/ms-icon-144x144.png" name="msapplication-TileImage">
-        <meta content="#ffffff" name="theme-color">
         <!-- CSS -->
-        <link
-            rel="stylesheet"
-            href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"
-            integrity="sha512-DTOQO9RWCH3ppGqcWaEA1BIZOC6xxalwEsw9c2QQeAIftl+Vegovlnee1c9QX4TctnWMn13TZye+giMm8e2LwA=="
-            crossorigin="anonymous"
-            referrerpolicy="no-referrer"/>
-        <link
-            href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.9.1/font/bootstrap-icons.css"
-            rel="stylesheet">
-        <link
-            rel="stylesheet"
-            href="https://cdn.jsdelivr.net/npm/@eonasdan/tempus-dominus@6.9.4/dist/css/tempus-dominus.min.css"
-            crossorigin="anonymous">
-        <link
-            href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.9.1/font/bootstrap-icons.css"
-            rel="stylesheet">
-        <link href="bootstrap.min.css" rel="stylesheet">
-        <link href="style.css" rel="stylesheet">
+        <link rel="stylesheet" href="css/font-awesome-all.min.css">
+        <link rel="stylesheet" href="css/bootstrap-icons.css">
+        <link rel="stylesheet" href="css/tempus-dominus.min.css">
+        <link rel="stylesheet" href="css/bootstrap-icons.css">
+        <link rel="stylesheet" href="css/bootstrap.min.css">
+        <link rel="stylesheet" href="css/style.css">
         <!-- FONT -->
-        <link href="https://fonts.gstatic.com" rel="preconnect">
-        <link
-            href="https://fonts.googleapis.com/css2?family=Josefin+Sans:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;1,200;1,300;1,400;1,500;1,600&amp;display=swap"
-            rel="stylesheet">
-        <style type="text/css" id="operaUserStyle"></style>
-        <script
-            src="chrome-extension://ccnckbpmaceehanjmeomladnmlffdjgn/content/fido2/page-script.js"
-            id="bw-fido2-page-script"></script>
+        <link rel="stylesheet" href="css/fonts.css">
     </head>
     <body>
         <!-- CONTAINER -->
@@ -114,7 +43,7 @@
                             role="progressbar"
                             style="width: 0%;"></div>
                     </div>
-                    <div id="qbox-container">
+                    <div id="qbox-container_form">
                         <form
                             class="needs-validation"
                             id="form-wrapper"
@@ -281,7 +210,7 @@
                                                     type="checkbox"
                                                     role="switch"
                                                     id="notdienstpauschale">
-                                                <label class="form-check-label" for="flexSwitchCheckDefault">Notdienstpauschale</label>
+                                                <label class="form-check-label">Notdienstpauschale</label>
                                             </div>
                                             <div class="form-check form-switch">
                                                 <input
@@ -289,7 +218,7 @@
                                                     type="checkbox"
                                                     role="switch"
                                                     id="bereitschaftspauschale">
-                                                <label class="form-check-label" for="flexSwitchCheckDefault">Bereitschaftspauschale</label>
+                                                <label class="form-check-label">Bereitschaftspauschale</label>
                                             </div>
                                             <div class="form-check form-switch">
                                                 <input
@@ -297,7 +226,7 @@
                                                     type="checkbox"
                                                     role="switch"
                                                     id="samstagszuschlag">
-                                                <label class="form-check-label" for="flexSwitchCheckDefault">Samstagszuschlag</label>
+                                                <label class="form-check-label">Samstagszuschlag</label>
                                             </div>
                                             <div class="form-check form-switch">
                                                 <input
@@ -305,7 +234,7 @@
                                                     type="checkbox"
                                                     role="switch"
                                                     id="nachtzuschlag">
-                                                <label class="form-check-label" for="flexSwitchCheckDefault">Nachtzuschlag</label>
+                                                <label class="form-check-label">Nachtzuschlag</label>
                                             </div>
                                             <div class="form-check form-switch">
                                                 <input
@@ -313,7 +242,7 @@
                                                     type="checkbox"
                                                     role="switch"
                                                     id="schmutzzulage">
-                                                <label class="form-check-label" for="flexSwitchCheckDefault">Schmutzzulage</label>
+                                                <label class="form-check-label">Schmutzzulage</label>
                                             </div>
                                         </div>
                                         <div class="col-xs-12 col-sm-12 col-md-12 col-lg-6">
@@ -323,7 +252,7 @@
                                                     type="checkbox"
                                                     role="switch"
                                                     id="erschwerniszulage">
-                                                <label class="form-check-label" for="flexSwitchCheckDefault">Erschwerniszulage</label>
+                                                <label class="form-check-label">Erschwerniszulage</label>
                                             </div>
                                             <div class="form-check form-switch">
                                                 <input
@@ -331,7 +260,7 @@
                                                     type="checkbox"
                                                     role="switch"
                                                     id="kleinteilpauschale">
-                                                <label class="form-check-label" for="flexSwitchCheckDefault">Kleinteilpauschale</label>
+                                                <label class="form-check-label">Kleinteilpauschale</label>
                                             </div>
                                             <div class="form-check form-switch">
                                                 <input
@@ -339,7 +268,7 @@
                                                     type="checkbox"
                                                     role="switch"
                                                     id="sonn-und_feiertagszuschlag">
-                                                <label class="form-check-label" for="flexSwitchCheckDefault">Sonn-/Feiertagszuschlag</label>
+                                                <label class="form-check-label">Sonn-/Feiertagszuschlag</label>
                                             </div>
                                             <div class="form-check form-switch">
                                                 <input
@@ -347,7 +276,7 @@
                                                     type="checkbox"
                                                     role="switch"
                                                     id="kfz_bereitstellungspauschale">
-                                                <label class="form-check-label" for="flexSwitchCheckDefault">Kfz-Bereitstellung</label>
+                                                <label class="form-check-label">Kfz-Bereitstellung</label>
                                             </div>
                                             <div class="form-check form-switch">
                                                 <input
@@ -355,7 +284,7 @@
                                                     type="checkbox"
                                                     role="switch"
                                                     id="arbeit_abgeschlossen">
-                                                <label class="form-check-label" for="flexSwitchCheckDefault">Arbeit abgeschlossen</label>
+                                                <label class="form-check-label">Arbeit abgeschlossen</label>
                                             </div>
                                         </div>
                                     </div>
@@ -367,7 +296,7 @@
                                                     type="checkbox"
                                                     role="switch"
                                                     id="maschineneinsatz_check">
-                                                <label class="form-check-label" for="flexSwitchCheckDefault">Maschineneinsatz</label>
+                                                <label class="form-check-label">Maschineneinsatz</label>
                                                 <input
                                                     id="maschineneinsatz_textfield"
                                                     type="text"
@@ -382,7 +311,7 @@
                                                     type="checkbox"
                                                     role="switch"
                                                     id="entsorgung_check">
-                                                <label class="form-check-label" for="flexSwitchCheckDefault">Entsorgung</label>
+                                                <label class="form-check-label">Entsorgung</label>
                                                 <input
                                                     id="entsorgung_textfield"
                                                     type="text"
@@ -393,7 +322,7 @@
                                             </div>
                                             <div class="form-check form-switch">
                                                 <input class="form-check-input" type="checkbox" role="switch" id="work_check">
-                                                <label class="form-check-label" for="flexSwitchCheckDefault">Weitere Arbeiten</label>
+                                                <label class="form-check-label">Weitere Arbeiten</label>
                                                 <textarea
                                                     id="work_textfield"
                                                     type="text"
@@ -419,7 +348,7 @@
                                                     </div>
                                                 </div>
                                                 <div id="q-box__buttons">
-                                                    <button type="button" class="btn btn-success" onclick="submitImage();">Absenden</button>
+                                                    <button type="button" class="btn btn-success" onclick="submitImage()">Unterschrift Absenden</button>
                                                     <button type="button" class="btn btn-danger" onclick="signaturePad.clear();">Löschen</button>
                                                     <button type="button" class="btn btn-primary" onclick="download('sig.png');">Speichern</button>
                                                 </div>
@@ -457,205 +386,27 @@
             <div class="preloader-section section-left"></div>
             <div class="preloader-section section-right"></div>
         </div>
-        <script src="script.js"></script>
+        <!-- General Functionalities -->
+        <script type="text/javascript" src="js/script.js"></script>
         <!-- Static App Form Collection Script -->
-        <script src="static-forms.js" type="text/javascript"></script>
+        <script type="text/javascript" src="js/static-forms.js"></script>
         <!--TempusDomus-->
-        <script
-            src="https://cdn.jsdelivr.net/npm/@eonasdan/tempus-dominus@6.9.4/dist/js/tempus-dominus.min.js"
-            crossorigin="anonymous"></script>
+        <script type="text/javascript" src="js/tempus-dominus.min.js"></script>
         <!--JQuery-->
-        <script
-            src="https://code.jquery.com/jquery-3.7.1.min.js"
-            integrity="sha256-/JqT3SQfawRcv/BIHPThkBvs0OEvtFFmqPF/lYI/Cxo="
-            crossorigin="anonymous"></script>
+        <script type="text/javascript" src="js/jquery.min.js"></script>
         <!--Popper-->
-        <script
-            src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.11.8/dist/umd/popper.min.js"
-            crossorigin="anonymous"></script>
-        <!--TimePicker Script-->
-        <script type="text/javascript">
-            window.datetimepicker = new tempusDominus.TempusDominus(document.getElementById('datetimepicker1'), {
-                localization: {
-                    today: 'Heute',
-                    selectMonth: 'Monat auswählen',
-                    previousMonth: 'letzter Monat',
-                    nextMonth: 'nächster Monat',
-                    selectYear: 'Jahr auswählen',
-                    previousYear: 'letztes Jahr',
-                    nextYear: 'nächstes Jahr',
-                    selectTime: 'Zeit auswählen',
-                    selectDate: 'Datum auswählen',
-                    dayViewHeaderFormat: {
-                        month: 'long',
-                        year: '2-digit'
-                    },
-                    locale: 'default',
-                    startOfTheWeek: 0,
-                    hourCycle: 'h23',
-                    dateFormats: {
-                        LLLL: 'd.MM.yyyy HH:mm'
-                    },
-                    ordinal: (n) => n,
-                    format: 'LLLL'
-                }
-            });
-        </script>
-        <!--Arbeitsstunden-->
-        <script type="text/javascript">
-            $(document).ready(function () {
-                $('.add_work').on('click', add_work);
-                $('.remove_work').on('click', remove_work);
-                function add_work() {
-                    var new_work_no = parseInt($('#total_work').val()) + 1;
-                    var new_input = "<input type='text' id='new_work_" + new_work_no + "' class='fo" +
-                            "rm-control' placeholder='Datum , Name, Arbeitsstunden'><br>";
-                    $('#new_work').append(new_input);
-                    $('#total_work').val(new_work_no);
-                }
-                function remove_work() {
-                    var last_work_no = $('#total_work').val();
-                    if (last_work_no > 1) {
-                        $('#new_work_' + last_work_no).remove();
-                        $('#total_work').val(last_work_no - 1);
-                    }
-                }
-            });
-        </script>
+        <script type="text/javascript" src="js/popper.min.js"></script>
+        <!--TimePicker-->
+        <script type="text/javascript" src="js/timepicker.js"></script>
+        <!--Work-->
+        <script type="text/javascript" src="js/work.js"></script>
         <!--Material-->
-        <script type="text/javascript">
-            $(document).ready(function () {
-                $('.add_material').on('click', add_material);
-                $('.remove_material').on('click', remove_material);
-                function add_material() {
-                    var new_material_no = parseInt($('#total_material').val()) + 1;
-                    var new_input = "<input type='text' id='new_material_" +
-                            new_material_no + "' class='form-control' placeholder='Anzahl, Bezeichnung, Pre" +
-                            "is'><br>";
-
-                    $('#new_material').append(new_input);
-
-                    $('#total_material').val(new_material_no);
-                }
-                function remove_material() {
-                    var last_material_no = $('#total_material').val();
-
-                    if (last_material_no > 1) {
-                        $('#new_material_' + last_material_no).remove();
-                        $('#total_material').val(last_material_no - 1);
-                    }
-                }
-            });
-        </script>
+        <script type="text/javascript" src="js/material.js"></script>
         <!--CheckState-->
-        <script>
-            var maschineneinsatz_check_element = document.getElementById('maschineneinsatz_check');
-            var maschineneinsatz_textfield_element = document.getElementById(
-                'maschineneinsatz_textfield'
-            );
-            var entsorgung_check_element = document.getElementById('entsorgung_check');
-            var entsorgung_textfield_element = document.getElementById(
-                'entsorgung_textfield'
-            );
-            var work_check_element = document.getElementById('work_check');
-            var work_textfield_element = document.getElementById('work_textfield');
-            maschineneinsatz_check_element.addEventListener('change', function () {
-                maschineneinsatz_textfield_element.disabled = !maschineneinsatz_check_element.checked;
-            });
-            entsorgung_check_element.addEventListener('change', function () {
-                entsorgung_textfield_element.disabled = !entsorgung_check_element.checked;
-            });
-            work_check_element.addEventListener('change', function () {
-                work_textfield_element.disabled = !work_check_element.checked;
-            });
-        </script>
-        <!--Unterschriftenfeld-->
-        <script src="signature_pad.js"></script>
-        <script type="text/javascript">
-            var wrapper = document.getElementById("signature-pad"),
-                canvas = wrapper.querySelector("canvas"),
-                signaturePad;
-
-            /**
-            *  Behandlung der Größenänderung der Unterschriftenfelds
-            */
-            function resizeCanvas() {
-                var oldContent = signaturePad.toData();
-                var ratio = Math.max(window.devicePixelRatio || 1, 1);
-                canvas.width = canvas.offsetWidth * ratio;
-                canvas.height = canvas.offsetHeight * ratio;
-                canvas
-                    .getContext("2d")
-                    .scale(ratio, ratio);
-                signaturePad.clear();
-                signaturePad.fromData(oldContent);
-            }
-
-            /**
-            *  Speichern des Inhaltes als Bild
-            */
-            function download(filename) {
-                var blob = dataURLToBlob(signaturePad.toDataURL());
-                var url = window
-                    .URL
-                    .createObjectURL(blob);
-                var a = document.createElement("a");
-
-                a.style = "display: none";
-                a.href = url;
-                a.download = filename;
-                document
-                    .body
-                    .appendChild(a);
-                a.click();
-                window
-                    .URL
-                    .revokeObjectURL(url);
-            }
-
-            /**
-            * DataURL in Binär umwandeln
-            */
-            function dataURLToBlob(dataURL) {
-                // Code von https://github.com/ebidel/filer.js
-                var parts = dataURL.split(';base64,');
-                var contentType = parts[0].split(":")[1];
-                var raw = window.atob(parts[1]);
-                var rawLength = raw.length;
-                var uInt8Array = new Uint8Array(rawLength);
-                for (var i = 0; i < rawLength; ++i) {
-                    uInt8Array[i] = raw.charCodeAt(i);
-                }
-                return new Blob([uInt8Array], {type: contentType});
-            }
-            var signaturePad = new SignaturePad(canvas);
-            signaturePad.minWidth = 1; //minimale Breite des Stiftes
-            signaturePad.maxWidth = 5; //maximale Breite des Stiftes
-            signaturePad.penColor = "#000000"; //Stiftfarbe
-            signaturePad.backgroundColor = "#FFFFFF"; //Hintergrundfarbe
-
-            window.onclick = resizeCanvas;
-            resizeCanvas();
-        </script>
-
-        <!--Übermittlung der Unterschrift-->
-        <script type="text/javascript">
-            function submitImage() {
-                var imageUrl = document
-                    .getElementById("signature")
-                    .value;
-                var dataURL = signaturePad.toDataURL();
-                imageUrl = dataURL;
-                //Konsolenausgabe zur Sendungsüberprüfung des Bildes
-                if (dataURL.trim() !== "") {
-                    console.log("Bild erfolgreich übertragen")
-                    console.log(imageUrl = dataURL);
-                } else {
-                    console.log("Keine Bildübertragung erfolgt");
-                }
-            }
-        </script>
-
+        <script type="text/javascript" src="js/checkstate.js"></script>
+        <!--Signature-->
+        <script type="text/javascript" src="js/signature_pad.js"></script>
+        <script type="text/javascript" src="js/signature_handler.js"></script>
+        <script type="text/javascript" src="js/signatureToDataURL.js"></script>
     </body>
-
 </html>
