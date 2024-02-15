@@ -25,3 +25,5 @@ Leon Pllana @ ASC-Vision
 ## Project status
 Frontend nearly finished
 Backend to be built up
+
+## Resources

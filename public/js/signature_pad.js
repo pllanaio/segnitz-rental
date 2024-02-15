@@ -341,9 +341,9 @@ SignaturePad.prototype._handleTouchEvents = function () {
   this._canvas.style.msTouchAction = 'none';
   this._canvas.style.touchAction = 'none';
 
-  this._canvas.addEventListener('touchstart', this._handleTouchStart);
-  this._canvas.addEventListener('touchmove', this._handleTouchMove);
-  this._canvas.addEventListener('touchend', this._handleTouchEnd);
+  this._canvas.addEventListener('touchstart', this._handleTouchStart, { passive: true });
+  this._canvas.addEventListener('touchmove', this._handleTouchMove, { passive: true });
+  this._canvas.addEventListener('touchend', this._handleTouchEnd, { passive: true });
 };
 
 SignaturePad.prototype._reset = function () {

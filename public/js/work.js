@@ -3,7 +3,7 @@ $(document).ready(function () {
     $('.remove_work').on('click', remove_work);
     function add_work() {
         var new_work_no = parseInt($('#total_work').val()) + 1;
-        var new_input = "<input type='text' id='new_work_" + new_work_no + "' class='fo" +
+        var new_input = "<input type='text' name= 'new_work_" + new_work_no + "' id='new_work_" + new_work_no + "' class='fo" +
                 "rm-control' placeholder='Datum , Name, Arbeitsstunden'><br>";
         $('#new_work').append(new_input);
         $('#total_work').val(new_work_no);

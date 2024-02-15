@@ -3,7 +3,8 @@ $(document).ready(function () {
     $('.remove_material').on('click', remove_material);
     function add_material() {
         var new_material_no = parseInt($('#total_material').val()) + 1;
-        var new_input = "<input type='text' id='new_material_" +
+        var new_input = "<input type='text' name='new_material_" +
+        new_material_no + "' id='new_material_" +
                 new_material_no + "' class='form-control' placeholder='Anzahl, Bezeichnung, Pre" +
                 "is'><br>";
 

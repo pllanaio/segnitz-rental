@@ -12,9 +12,7 @@ const progress = (value) => {
     let bodyElement = document.querySelector('body');
     let succcessDiv = document.getElementById('success');
   
-    form.onsubmit = () => {
-      
-    }
+    form.onsubmit = () => {return false}
  
     let current_step = 0;
     let stepCount = 7;
