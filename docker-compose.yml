@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   nather:
-    image: ascvisiondocker/nather:latest
+    image: ascvisiondocker/apollo_order_manager:latest
     container_name: nather
     hostname: nather
     ports:
