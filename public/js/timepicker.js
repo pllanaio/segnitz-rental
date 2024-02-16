@@ -1,4 +1,16 @@
-window.datetimepicker = new tempusDominus.TempusDominus(document.getElementById('datetimepicker1'), {
+new tempusDominus.TempusDominus(document.getElementById('datetimepicker1'),
+{
+    display:{
+        icons:{
+            type: 'icons',
+            time: 'bi bi-clock',
+            date: 'bi bi-calendar-week',
+            up: 'bi bi-arrow-up',
+            down: 'bi bi-arrow-down',
+            previous: 'bi bi-chevron-left',
+            next: 'bi bi-chevron-right'
+        }
+    },
     localization: {
         today: 'Heute',
         selectMonth: 'Monat auswählen',

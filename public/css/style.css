@@ -321,6 +321,7 @@ body {
     }
   }
   #preloader-wrapper .preloader-section {
+    
     width: 51%;
     height: 100%;
     position: fixed;

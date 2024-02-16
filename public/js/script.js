@@ -82,7 +82,7 @@ const progress = (value) => {
  
      const timer = ms => new Promise(res => setTimeout(res, ms));
  
-     timer(3000)
+     timer(0)
        .then(() => {
             bodyElement.classList.add('loaded');
        }).then(() =>{

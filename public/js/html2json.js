@@ -10,6 +10,7 @@ document.getElementById('form-wrapper').addEventListener('submit', function(even
 
     // Konvertieren des JSON-Objekts in einen String
     var jsonStr = JSON.stringify(jsonObject, null, 2);
+    console.log("JSON-Datei erfolgreich generiert");
     
     // Erstellen und Herunterladen der JSON-Datei
     var blob = new Blob([jsonStr], {type: "application/json"});
