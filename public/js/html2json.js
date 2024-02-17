@@ -11,14 +11,15 @@ document.getElementById('form-wrapper').addEventListener('submit', function(even
     // Konvertieren des JSON-Objekts in einen String
     var jsonStr = JSON.stringify(jsonObject, null, 2);
     console.log("JSON-Datei erfolgreich generiert");
-    
-    // Erstellen und Herunterladen der JSON-Datei
-    var blob = new Blob([jsonStr], {type: "application/json"});
-    var url = URL.createObjectURL(blob);
-    var a = document.createElement('a');
-    a.href = url;
-    a.download = "formData.json";
-    document.body.appendChild(a); // notwendig für Firefox
-    a.click();
-    document.body.removeChild(a);
+
+    fetch('/data', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: jsonStr, // Der zuvor erstellte JSON-String Ihrer Formulardaten
+      })
+      .then(response => response.json())
+      .then(data => console.log(data.message))
+      .catch((error) => console.error('Fehler:', error));
 });
