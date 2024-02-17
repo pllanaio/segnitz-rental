@@ -161,8 +161,6 @@ function SignaturePad(canvas, options) {
   };
 
   this._handleTouchStart = function (event) {
-    // Prevent scrolling.
-    event.preventDefault();
 
     if (event.targetTouches.length === 1) {
       var touch = event.changedTouches[0];
@@ -171,8 +169,6 @@ function SignaturePad(canvas, options) {
   };
 
   this._handleTouchMove = function (event) {
-    // Prevent scrolling.
-    event.preventDefault();
 
     var touch = event.targetTouches[0];
     self._strokeMoveUpdate(touch);
@@ -181,7 +177,6 @@ function SignaturePad(canvas, options) {
   this._handleTouchEnd = function (event) {
     var wasCanvasTouched = event.target === self._canvas;
     if (wasCanvasTouched) {
-      event.preventDefault();
       self._strokeEnd(event);
     }
   };

@@ -1,11 +1,11 @@
 {
-  "name": "nather-heizung-sanitaer",
-  "description": "Auftragsformular für Nather Heizung-Sanitär",
+  "name": "apollo_order_manager",
+  "description": "Apollo Order Manager",
   "version": "1.0.0",
-  "main": "nather.js",
+  "main": "apollo_order_manager.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node nather.js"
+    "start": "node apollo_order_manager.js"
   },
   "repository": {
     "type": "git",
