@@ -1,6 +1,10 @@
 document.addEventListener('DOMContentLoaded', function () {
-    document.querySelector('.add_material').addEventListener('click', add_material);
-    document.querySelector('.remove_material').addEventListener('click', remove_material);
+    document
+        .querySelector('.add_material')
+        .addEventListener('click', add_material);
+    document
+        .querySelector('.remove_material')
+        .addEventListener('click', remove_material);
 
     function add_material() {
         var total_material = document.getElementById('total_material');
@@ -35,13 +39,23 @@ document.addEventListener('DOMContentLoaded', function () {
         var last_material_no = total_material.value;
 
         if (last_material_no > 1) {
-            var elementToRemove = document.getElementById('new_material_' + last_material_no);
-            var brToRemove = document.getElementById('br_new_material_' + last_material_no); // Get the <br> element using its ID
+            var elementToRemove = document.getElementById(
+                'new_material_' + last_material_no
+            );
+            var brToRemove = document.getElementById(
+                'br_new_material_' + last_material_no
+            ); // Get the <br> element using its ID
 
             // Remove the input field and its immediately following <br> element
-            if (elementToRemove) elementToRemove.parentNode.removeChild(elementToRemove);
-            if (brToRemove) brToRemove.parentNode.removeChild(brToRemove);
-
+            if (elementToRemove) 
+                elementToRemove
+                    .parentNode
+                    .removeChild(elementToRemove);
+            if (brToRemove) 
+                brToRemove
+                    .parentNode
+                    .removeChild(brToRemove);
+            
             total_material.value = last_material_no - 1;
         }
     }
