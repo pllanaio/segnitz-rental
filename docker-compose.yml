@@ -3,8 +3,8 @@ version: '3.8'
 services:
   nather:
     image: ascvisiondocker/apollo_order_manager:latest
-    container_name: nather
-    hostname: nather
+    container_name: apollo_order_manager
+    hostname: apollo_order_manager
     ports:
       - "3000:3000"
     restart: always

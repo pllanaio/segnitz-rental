@@ -1,11 +1,15 @@
 document.addEventListener('DOMContentLoaded', function () {
-    document.querySelector('.add_work').addEventListener('click', add_work);
-    document.querySelector('.remove_work').addEventListener('click', remove_work);
+    document
+        .querySelector('.add_work')
+        .addEventListener('click', add_work);
+    document
+        .querySelector('.remove_work')
+        .addEventListener('click', remove_work);
 
     function add_work() {
         var total_work = document.getElementById('total_work');
         var current_work_no = parseInt(total_work.value);
-        
+
         // Check if the maximum limit of 9 work input fields has been reached
         if (current_work_no >= 10) {
             alert('Maximum of 10 work input fields reached.');
@@ -35,12 +39,22 @@ document.addEventListener('DOMContentLoaded', function () {
         var last_work_no = total_work.value;
 
         if (last_work_no > 1) {
-            var elementToRemove = document.getElementById('new_work_' + last_work_no);
-            var brToRemove = document.getElementById('br_new_work_' + last_work_no); // Get the <br> element using its ID
+            var elementToRemove = document.getElementById(
+                'new_work_' + last_work_no
+            );
+            var brToRemove = document.getElementById(
+                'br_new_work_' + last_work_no
+            ); // Get the <br> element using its ID
 
-            if (elementToRemove) elementToRemove.parentNode.removeChild(elementToRemove);
-            if (brToRemove) brToRemove.parentNode.removeChild(brToRemove); // Remove the <br> element
-
+            if (elementToRemove) 
+                elementToRemove
+                    .parentNode
+                    .removeChild(elementToRemove);
+            if (brToRemove) 
+                brToRemove
+                    .parentNode
+                    .removeChild(brToRemove); // Remove the <br> element
+            
             total_work.value = last_work_no - 1;
         }
     }
