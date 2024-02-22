@@ -55,25 +55,23 @@
                                     <div class="row">
                                         <div class="col-xs-12 col-sm-12 col-md-12 col-lg-12">
                                             <input
-                                                name="empfaenger_rg"
+                                                name="Recipient"
                                                 type="text"
                                                 class="form-control"
-                                                placeholder="Rechnungsempfänger"
-                                                aria-label="rechnungsempfaenger"><br>
+                                                placeholder="Rechnungsempfänger"><br>
                                             <input
-                                                name="auftraggeber"
+                                                name="Client"
                                                 type="text"
                                                 class="form-control"
-                                                placeholder="Auftraggeber"
-                                                aria-label="auftraggeber">
+                                                placeholder="Auftraggeber/Baustelle">
                                         </div>
                                     </div>
                                 </div>
-                                <div class="step d-none">
+                                <div class="step d-none" id="page1">
                                     <h4>Wählen Sie die vorliegende Auftragsart aus</h4>
                                     <div class="row">
                                         <div class="col-xs-12 col-sm-12 col-md-12 col-lg-12">
-                                            <select name="art_auftrag" class="form-select">
+                                            <select name="OrderType" class="form-select">
                                                 <option selected="selected" disabled="disabled" hidden="hidden">Auftragsart auswählen...</option>
                                                 <option>Arbeits- und Materialnachweis</option>
                                                 <option>Wartung mit Vertrag</option>
@@ -85,30 +83,27 @@
                                         </div>
                                     </div>
                                 </div>
-                                <div class="step d-none">
+                                <div class="step d-none" id="page2">
                                     <h4>Geben Sie bitte noch nachfolgende Daten ein:
                                     </h4>
                                     <div class="row">
                                         <div class="col-xs-12 col-sm-12 col-md-12 col-lg-12">
                                             <input
-                                                name="nr_auftrag"
+                                                name="OrderNo"
                                                 type="text"
                                                 class="form-control"
-                                                placeholder="Auftragsnummer"
-                                                aria-label="auftragsnummer"><br>
+                                                placeholder="Auftragsnummer"><br>
                                             <input
-                                                name="nr_kunde"
+                                                name="ClientNo"
                                                 type="text"
                                                 class="form-control"
-                                                placeholder="Kundennummer"
-                                                aria-label="kundennummer"><br>
+                                                placeholder="Kundennummer"><br>
                                             <input
-                                                name="work_toDo"
+                                                name="WorkToDo"
                                                 type="text"
                                                 class="form-control"
-                                                placeholder="Auszuführende Arbeiten"
-                                                aria-label="auszufuehrende_arbeiten"><br>
-                                            <select name="monteur" class="form-select form-control">
+                                                placeholder="Auszuführende Arbeiten"><br>
+                                            <select name="Worker" class="form-select form-control">
                                                 <option selected="selected" disabled="disabled" hidden="hidden">Monteur auswählen...</option>
                                                 <option>Monteur 1</option>
                                                 <option>Monteur 2</option>
@@ -117,24 +112,24 @@
                                         </div>
                                     </div>
                                 </div>
-                                <div class="step d-none">
+                                <div class="step d-none" id="page3">
                                     <h4>Geben Sie den Termin, die Uhrzeit und den Arbeitsbericht des Monteurs an</h4>
                                     <div class="row">
                                         <div>
                                             <div
                                                 class="input-group"
-                                                id="datetimepicker1"
+                                                id="DateTimePicker"
                                                 data-td-target-input="nearest"
                                                 data-td-target-toggle="nearest">
                                                 <input
-                                                    name="datetimepicker1Input"
+                                                    name="DateTimePickerInput"
                                                     type="text"
                                                     class="form-control"
-                                                    data-td-target="#datetimepicker1"
+                                                    data-td-target="#DateTimePicker"
                                                     placeholder="Termin/Uhrzeit"/>
                                                 <div
                                                     class="input-group-text"
-                                                    data-td-target="#datetimepicker1"
+                                                    data-td-target="#DateTimePicker"
                                                     data-td-toggle="datetimepicker">
                                                     <i class="bi bi-calendar-check"></i>
                                                 </div>
@@ -142,14 +137,14 @@
                                             <div>
                                                 <textarea
                                                     class="form-control"
-                                                    name="form_control_txt1"
+                                                    name="WorkReport"
                                                     rows="4"
                                                     placeholder="Arbeitsbericht des ausführenden Monteurs"></textarea>
                                             </div>
                                         </div>
                                     </div>
                                 </div>
-                                <div class="step d-none">
+                                <div class="step d-none" id="page4">
                                     <h4>Geben Sie hier an wann welcher Monteur wie lange am Auftrag gearbeitet hat</h4>
                                     <div class="col-12" id="btn_work_hours">
                                         <button type="button" class="add_work btn btn-success btn-lg">
@@ -170,10 +165,10 @@
                                                 class='form-control'
                                                 placeholder='Datum , Name, Arbeitsstunden'><br>
                                         </div>
-                                        <input type="hidden" value="1" id="total_work">
+                                        <input type="hidden" value="1" id="total_work" name="total_work">
                                     </div>
                                 </div>
-                                <div class="step d-none">
+                                <div class="step d-none" id="page5">
                                     <h4>Geben Sie an welchen Materialverbrauch Sie hatten:</h4>
 
                                     <div class="col-12" id="btn_work_material">
@@ -195,10 +190,10 @@
                                                 class='form-control'
                                                 placeholder='Anzahl, Bezeichnung, Preis'><br>
                                         </div>
-                                        <input type="hidden" value="1" id="total_material">
+                                        <input type="hidden" value="1" id="total_material" name="total_material">
                                     </div>
                                 </div>
-                                <div class="step d-none">
+                                <div class="step d-none" id="page6">
                                     <h4>Bitte wählen Sie die zutreffenden Optionen an:</h4>
                                     <div class="row">
                                         <div class="col-xs-12 col-sm-12 col-md-12 col-lg-6">
@@ -207,7 +202,7 @@
                                                     class="form-check-input"
                                                     type="checkbox"
                                                     role="switch"
-                                                    name="notdienstpauschale">
+                                                    name="EmergencyFee">
                                                 <label class="form-check-label">Notdienstpauschale</label>
                                             </div>
                                             <div class="form-check form-switch">
@@ -215,7 +210,7 @@
                                                     class="form-check-input"
                                                     type="checkbox"
                                                     role="switch"
-                                                    name="bereitschaftspauschale">
+                                                    name="ReadinessFee">
                                                 <label class="form-check-label">Bereitschaftspauschale</label>
                                             </div>
                                             <div class="form-check form-switch">
@@ -223,7 +218,7 @@
                                                     class="form-check-input"
                                                     type="checkbox"
                                                     role="switch"
-                                                    name="samstagszuschlag">
+                                                    name="SaturdaySurcharge">
                                                 <label class="form-check-label">Samstagszuschlag</label>
                                             </div>
                                             <div class="form-check form-switch">
@@ -231,7 +226,7 @@
                                                     class="form-check-input"
                                                     type="checkbox"
                                                     role="switch"
-                                                    name="nachtzuschlag">
+                                                    name="NightSurcharge">
                                                 <label class="form-check-label">Nachtzuschlag</label>
                                             </div>
                                             <div class="form-check form-switch">
@@ -239,7 +234,7 @@
                                                     class="form-check-input"
                                                     type="checkbox"
                                                     role="switch"
-                                                    name="schmutzzulage">
+                                                    name="DirtSurcharge">
                                                 <label class="form-check-label">Schmutzzulage</label>
                                             </div>
                                         </div>
@@ -249,7 +244,7 @@
                                                     class="form-check-input"
                                                     type="checkbox"
                                                     role="switch"
-                                                    name="erschwerniszulage">
+                                                    name="HardshipAllowance">
                                                 <label class="form-check-label">Erschwerniszulage</label>
                                             </div>
                                             <div class="form-check form-switch">
@@ -257,7 +252,7 @@
                                                     class="form-check-input"
                                                     type="checkbox"
                                                     role="switch"
-                                                    name="kleinteilpauschale">
+                                                    name="SmallPartFee">
                                                 <label class="form-check-label">Kleinteilpauschale</label>
                                             </div>
                                             <div class="form-check form-switch">
@@ -265,7 +260,7 @@
                                                     class="form-check-input"
                                                     type="checkbox"
                                                     role="switch"
-                                                    name="sonn-und_feiertagszuschlag">
+                                                    name="SundayHolidaySurcharge">
                                                 <label class="form-check-label">Sonn-/Feiertagszuschlag</label>
                                             </div>
                                             <div class="form-check form-switch">
@@ -273,7 +268,7 @@
                                                     class="form-check-input"
                                                     type="checkbox"
                                                     role="switch"
-                                                    name="kfz_bereitstellungspauschale">
+                                                    name="CarProvisionFee">
                                                 <label class="form-check-label">Kfz-Bereitstellung</label>
                                             </div>
                                             <div class="form-check form-switch">
@@ -281,7 +276,7 @@
                                                     class="form-check-input"
                                                     type="checkbox"
                                                     role="switch"
-                                                    name="arbeit_abgeschlossen">
+                                                    name="WorkDone">
                                                 <label class="form-check-label">Arbeit abgeschlossen</label>
                                             </div>
                                         </div>
@@ -293,16 +288,15 @@
                                                     class="form-check-input"
                                                     type="checkbox"
                                                     role="switch"
-                                                    id="maschineneinsatz_check"
-                                                    name="maschineneinsatz_check">
+                                                    id="MachineUsageCheck"
+                                                    name="MachineUsageCheck">
                                                 <label class="form-check-label">Maschineneinsatz</label>
                                                 <input
-                                                    name="maschineneinsatz_textfield"
-                                                    id="maschineneinsatz_textfield"
+                                                    name="MachineUsageTextfield"
+                                                    id="MachineUsageTextfield"
                                                     type="text"
                                                     class="form-control"
                                                     placeholder="..."
-                                                    aria-label="maschineneinsatz"
                                                     disabled="disabled">
                                             </div>
                                             <div class="form-check form-switch">
@@ -310,35 +304,33 @@
                                                     class="form-check-input"
                                                     type="checkbox"
                                                     role="switch"
-                                                    id="entsorgung_check"
-                                                    name="entsorgung_check">
+                                                    id="DisposeCheck"
+                                                    name="DisposeCheck">
                                                 <label class="form-check-label">Entsorgung</label>
                                                 <input
-                                                    name="entsorgung_textfield"
-                                                    id="entsorgung_textfield"
+                                                    name="DisposeTextfield"
+                                                    id="DisposeTextfield"
                                                     type="text"
                                                     class="form-control"
                                                     placeholder="..."
-                                                    aria-label="entsorgung"
                                                     disabled="disabled">
                                             </div>
                                             <div class="form-check form-switch">
-                                                <input class="form-check-input" type="checkbox" role="switch" id="work_check">
+                                                <input class="form-check-input" type="checkbox" role="switch" id="WorkCheck" name="WorkCheck">
                                                 <label class="form-check-label">Weitere Arbeiten</label>
                                                 <textarea
-                                                    name="work_textfield"
-                                                    id="work_textfield"
+                                                    name="WorkTextfield"
+                                                    id="WorkTextfield"
                                                     type="text"
                                                     class="form-control"
                                                     placeholder="..."
-                                                    aria-label="weitere_arbeiten"
                                                     rows="1"
                                                     disabled="disabled"></textarea>
                                             </div>
                                         </div>
                                     </div>
                                 </div>
-                                <div class="step d-none">
+                                <div class="step d-none" id="page7">
                                     <div class="mt-1">
                                         <div class="closing-text">
                                             <h4>Fast fertig</h4>
@@ -348,7 +340,7 @@
                                                 <div id="signature-pad" class="m-signature-pad">
                                                     <div class="m-signature-pad--body">
                                                         <canvas></canvas>
-                                                        <input type="hidden" name="signature" id="signature" value="">
+                                                        <input type="hidden" name="Signature" id="Signature" value="">
                                                     </div>
                                                 </div>
                                             </div>
@@ -357,7 +349,7 @@
                                         </div>
                                     </div>
                                 </div>
-                                <div id="success">
+                                <div id="success" >
                                     <div class="mt-5">
                                         <h4>Formular erfolgreich übermittelt</h4>
                                         <p></p>

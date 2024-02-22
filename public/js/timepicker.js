@@ -1,4 +1,4 @@
-new tempusDominus.TempusDominus(document.getElementById('datetimepicker1'),
+new tempusDominus.TempusDominus(document.getElementById('DateTimePicker'),
 {
     display:{
         icons:{

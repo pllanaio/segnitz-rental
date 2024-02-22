@@ -10,10 +10,10 @@ document.addEventListener('DOMContentLoaded', function () {
         var total_work = document.getElementById('total_work');
         var current_work_no = parseInt(total_work.value);
 
-        // Check if the maximum limit of 9 work input fields has been reached
+        // Check if the maximum limit of 10 work input fields has been reached
         if (current_work_no >= 10) {
             alert('Maximum of 10 work input fields reached.');
-            return; // Prevent adding more than 9 input fields
+            return; // Prevent adding more than 10 input fields
         }
 
         var new_work_no = current_work_no + 1;
