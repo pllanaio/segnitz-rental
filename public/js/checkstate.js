@@ -1,20 +1,20 @@
 document.addEventListener('DOMContentLoaded', function () {
-    var maschineneinsatz_check_element = document.getElementById('maschineneinsatz_check');
-    var maschineneinsatz_textfield_element = document.getElementById('maschineneinsatz_textfield');
-    var entsorgung_check_element = document.getElementById('entsorgung_check');
-    var entsorgung_textfield_element = document.getElementById('entsorgung_textfield');
-    var work_check_element = document.getElementById('work_check');
-    var work_textfield_element = document.getElementById('work_textfield');
+    var MachineUsageCheckElement = document.getElementById('MachineUsageCheck');
+    var MachineUsageTextfieldElement = document.getElementById('MachineUsageTextfield');
+    var DisposeCheckElement = document.getElementById('DisposeCheck');
+    var DisposeTextfieldElement = document.getElementById('DisposeTextfield');
+    var WorkCheckElement = document.getElementById('WorkCheck');
+    var WorkTextfield = document.getElementById('WorkTextfield');
 
-    maschineneinsatz_check_element.addEventListener('change', function () {
-        maschineneinsatz_textfield_element.disabled = !maschineneinsatz_check_element.checked;
+    MachineUsageCheckElement.addEventListener('change', function () {
+        MachineUsageTextfieldElement.disabled = !MachineUsageCheckElement.checked;
     });
 
-    entsorgung_check_element.addEventListener('change', function () {
-        entsorgung_textfield_element.disabled = !entsorgung_check_element.checked;
+    DisposeCheckElement.addEventListener('change', function () {
+        DisposeTextfieldElement.disabled = !DisposeCheckElement.checked;
     });
 
-    work_check_element.addEventListener('change', function () {
-        work_textfield_element.disabled = !work_check_element.checked;
+    WorkCheckElement.addEventListener('change', function () {
+        WorkTextfield.disabled = !WorkCheckElement.checked;
     });
 });

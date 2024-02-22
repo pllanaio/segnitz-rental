@@ -25,7 +25,7 @@ db.connect(err => {
 
 // Daten in der MySQL-Datenbank speichern
 function saveDataToDatabase(data, callback) {
-  db.query('INSERT INTO formdata (data) VALUES (?)', [data], (err, result) => {
+  db.query('INSERT INTO OrderData (form_inputs) VALUES (?)', [data], (err, result) => {
     callback(err, result);
   });
 }
