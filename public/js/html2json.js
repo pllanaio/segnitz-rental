@@ -17,7 +17,10 @@ document.getElementById('form-wrapper').addEventListener('submit', function(even
       elements.forEach(element => {
           const elementData = { name: element.name, value: element.value };
           if (element.type === 'checkbox' || element.type === 'radio') {
-              elementData.checked = element.checked;
+            elementData.value = element.checked ? 'on' : 'off';
+            if (element.checked) {
+                elementData.checked = element.checked;
+            }
           }
           stepData.elements.push(elementData);
       });
@@ -28,8 +31,9 @@ document.getElementById('form-wrapper').addEventListener('submit', function(even
   // Konvertieren des JSON-Objekts in einen String und Ausgabe
   var jsonStr = JSON.stringify(jsonObject, null, 2);
   console.log("Erweiterte JSON-Datei erfolgreich generiert:");
+  console.log(jsonStr);
 
-  // Senden der Daten
+  // Senden der Daten aus dem html-body
   fetch('/data', {
       method: 'POST',
       headers: {
