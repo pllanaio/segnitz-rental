@@ -31,7 +31,6 @@ document.getElementById('form-wrapper').addEventListener('submit', function(even
   // Konvertieren des JSON-Objekts in einen String und Ausgabe
   var jsonStr = JSON.stringify(jsonObject, null, 2);
   console.log("Erweiterte JSON-Datei erfolgreich generiert:");
-  console.log(jsonStr);
 
   // Senden der Daten aus dem html-body
   fetch('/data', {
@@ -42,6 +41,27 @@ document.getElementById('form-wrapper').addEventListener('submit', function(even
       body: jsonStr,
   })
   .then(response => response.json())
-  .then(data => console.log(data.message))
+  .then(data => {
+    //window.open(data.pdfUrl, '_blank');
+    // Prüfen, ob der Button bereits existiert
+    let downloadButton = document.getElementById('downloadPdfButton');
+    if (!downloadButton) {
+        // Button existiert noch nicht, also wird er erstellt
+        downloadButton = document.createElement('button');
+        downloadButton.id = 'downloadPdfButton'; // Eindeutige ID für den Button
+        downloadButton.textContent = 'PDF herunterladen';
+        downloadButton.className = 'btn btn-primary';
+        downloadButton.onclick = function() {
+          fetch(data.pdfUrl)
+          .then(response => response.blob())
+          .then(blob => {
+            saveAs(blob, 'Auftragsschein.pdf');
+          });
+        };
+    
+        const container = document.getElementById('final');
+        container.appendChild(downloadButton);
+      }
+})
   .catch((error) => console.error('Fehler:', error));
 });
