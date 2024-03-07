@@ -45,15 +45,17 @@ async function generatePDF(formData, signaturePath) {
 
 app.post('/data', async (req, res) => {
     try {
-        const pdfdata = req.body;
+       // const pdfdata = req.body;
         const timestamp = new Date().getTime();
         const formData = req.body.form;
-        // Speichern der Formulardaten als JSON
-        const jsonFilename = `data_${timestamp}.json`;
-        const jsonFilePath = path.join(__dirname, 'public', 'json', jsonFilename);
-        await fsp.writeFile(jsonFilePath, JSON.stringify(pdfdata, null, 2));
-        console.log('Formulardaten als JSON gespeichert.');
 
+        // Speichern der Formulardaten als JSON
+       // const jsonFilename = `data_${timestamp}.json`;
+       // const jsonFilePath = path.join(__dirname, 'public', 'json', jsonFilename);
+       // await fsp.writeFile(jsonFilePath, JSON.stringify(pdfdata, null, 2));
+       // console.log('Formulardaten als JSON gespeichert.');
+
+        //Speichern der Signatur als Bild
         const signature = formData.find(step => step.step === 8).elements.find(element => element.name === "Signature").value;
         const base64Data = signature.split(';base64,').pop();
         const signaturePath = path.join(__dirname, 'public', 'signatures', `signature_${timestamp}.png`);
@@ -63,6 +65,7 @@ app.post('/data', async (req, res) => {
         const pdfUrl = `/pdf/${path.basename(pdfPath)}`;
         console.log('PDF-Datei erfolgreich generiert');
         res.json({ pdfUrl });
+
     } catch (err) {
         console.error('Fehler:', err);
         res.status(500).send('Fehler beim Verarbeiten der Anfrage');

@@ -42,26 +42,26 @@ document.getElementById('form-wrapper').addEventListener('submit', function(even
   })
   .then(response => response.json())
   .then(data => {
-    //window.open(data.pdfUrl, '_blank');
+    // window.open(data.pdfUrl, '_blank');
     // Prüfen, ob der Button bereits existiert
-    let downloadButton = document.getElementById('downloadPdfButton');
-    if (!downloadButton) {
+    //let downloadButton = document.getElementById('downloadPdfButton');
+    //if (!downloadButton) {
         // Button existiert noch nicht, also wird er erstellt
-        downloadButton = document.createElement('button');
-        downloadButton.id = 'downloadPdfButton'; // Eindeutige ID für den Button
-        downloadButton.textContent = 'PDF herunterladen';
-        downloadButton.className = 'btn btn-primary';
-        downloadButton.onclick = function() {
+      //  downloadButton = document.createElement('button');
+      //  downloadButton.id = 'downloadPdfButton'; // Eindeutige ID für den Button
+      //  downloadButton.textContent = 'PDF herunterladen';
+      //  downloadButton.className = 'btn btn-primary';
+      //  downloadButton.onclick = function() {
           fetch(data.pdfUrl)
           .then(response => response.blob())
           .then(blob => {
             saveAs(blob, 'Auftragsschein.pdf');
           });
-        };
+      //  };
     
-        const container = document.getElementById('final');
-        container.appendChild(downloadButton);
-      }
+        //const container = document.getElementById('final');
+        //container.appendChild(downloadButton);
+     // }
 })
   .catch((error) => console.error('Fehler:', error));
 });
