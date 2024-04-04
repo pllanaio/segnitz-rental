@@ -52,12 +52,13 @@ document.getElementById('form-wrapper').addEventListener('submit', function(even
       //  downloadButton.textContent = 'PDF herunterladen';
       //  downloadButton.className = 'btn btn-primary';
       //  downloadButton.onclick = function() {
-          fetch(data.pdfUrl)
-          .then(response => response.blob())
-          .then(blob => {
-            saveAs(blob, 'Auftragsschein.pdf');
-          });
+      //    fetch(data.pdfUrl)
+      //    .then(response => response.blob())
+      //    .then(blob => {
+      //      saveAs(blob, 'Auftragsschein.pdf');
+      //    });
       //  };
+          window.location.href = data.pdfUrl;
     
         //const container = document.getElementById('final');
         //container.appendChild(downloadButton);

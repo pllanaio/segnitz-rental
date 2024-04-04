@@ -7,8 +7,7 @@ require('dotenv').config();
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ limit: '1mb', extended: true }));
 app.use(express.static("public"));
-const PDFDocument = require('pdfkit');
-
+const { PDFDocument, PDFTextField, PDFCheckBox } = require('pdf-lib');
 
 app.use((req, res, next) => {
     const payloadSize = Buffer.byteLength(JSON.stringify(req.body));
@@ -16,63 +15,121 @@ app.use((req, res, next) => {
     next();
 });
 
-async function generatePDF(formData, signatureData) {
-    const doc = new PDFDocument({ size: 'A4' });
-    const pdfPath = path.join(__dirname, 'public', 'pdf', `output_${Date.now()}.pdf`);
-    if (!fs.existsSync(path.dirname(pdfPath))) {
-        fs.mkdirSync(path.dirname(pdfPath), { recursive: true });
-    }
-    const stream = fs.createWriteStream(pdfPath);
-    doc.pipe(stream);
+async function generatePDF(formDataObj, templatePath, outputPath) {
 
-    formData.forEach(step => {
-        doc.fontSize(16).fillColor('black').text(`Step ${step.step}`, { underline: true }).moveDown(0.5);
+    let signatureBase64;
+    const formData = formDataObj;
+    const templateBytes = fs.readFileSync(templatePath);
+    const pdfDoc = await PDFDocument.load(templateBytes);
+    const form = pdfDoc.getForm();
+
+
+    // Suche nach der Signatur im formDataObj
+    formDataObj.form.forEach(step => {
+        if (step.step === 8) {
+            const signatureElement = step.elements.find(element => element.name === "Signature");
+            if (signatureElement) {
+                signatureBase64 = signatureElement.value.split(';base64,').pop();
+            }
+        }
+    });
+
+    formData.form.forEach(step => {
         step.elements.forEach(element => {
-            if (element.name === 'Signature' && step.step === 8) {
-                // Hier verwenden Sie die Base64-codierte Signatur direkt
-                const base64Signature = signatureData.startsWith('data:image/png;base64,') ? signatureData.split(';base64,').pop() : signatureData;
-                doc.image(Buffer.from(base64Signature, 'base64'), { fit: [100, 100], align: 'center' }).moveDown(0.5);
+            // Ignoriere die Felder total_work und total_material
+            if (element.name === "total_work" || element.name === "total_material" || element.name === "Signature") {
+                return;
+            }
+
+            // Behandlung des OrderType
+            if (element.name === "OrderType" && element.value !== "Auftragsart auswählen...") {
+                // Setze das entsprechende Checkfeld basierend auf dem Wert von OrderType
+                const orderTypeToCheckboxName = {
+                    "Materiallieferung": "MaterialDelivery",
+                    "Inbetriebnahme": "Commissioning",
+                    "Gewährleistung": "Warranty",
+                    "Wartung ohne Vertrag": "MaintenanceNoContract",
+                    "Wartung mit Vertrag": "MaintenanceContract",
+                    "Arbeits- und Materialnachweis": "WorkAndMaterialProof"
+                };
+                const checkboxName = orderTypeToCheckboxName[element.value];
+                if (checkboxName) {
+                    try {
+                        const checkBox = form.getCheckBox(checkboxName);
+                        checkBox.check();
+                    } catch (error) {
+                        console.error(`Fehler beim Setzen des Checkfelds "${checkboxName}": ${error}`);
+                    }
+                }
             } else {
-                doc.fontSize(12).fillColor('blue').text(`${element.name}: ${element.value}`, { indent: 20, align: 'left' }).moveDown(0.5);
+                try {
+                    // Behandlung anderer Felder (Textfelder und Checkfelder)
+                    const field = form.getField(element.name);
+                    if (field instanceof PDFTextField) {
+                        field.setText(element.value);
+                    } else if (field instanceof PDFCheckBox && element.value === "on") {
+                        field.check();
+                    }
+                } catch (error) {
+                    console.error(`Fehler beim Verarbeiten des Feldes "${element.name}": ${error}`);
+                }
             }
         });
-        doc.moveDown(1);
     });
 
-    doc.end();
-    return new Promise((resolve, reject) => {
-        stream.on('finish', () => resolve(pdfPath));
-        stream.on('error', reject);
+    if (signatureBase64) {
+    const signatureImage = await pdfDoc.embedPng(Buffer.from(signatureBase64, 'base64'));
+    // Annahme: Die Signatur soll auf der ersten Seite erscheinen.
+    const page = pdfDoc.getPages()[0];
+
+    // Feste Position und Größe für die Signatur.
+    // Diese Werte solltest du anpassen, basierend auf der Position, wo die Signatur erscheinen soll.
+    const x = 298.38; // Horizontale Position
+    const y = 762.24; // Vertikale Position
+    const width = 142.02; // Breite der Signatur
+    const height = 37.54; // Höhe der Signatur
+
+    page.drawImage(signatureImage, {
+        x: x,
+        y: page.getHeight() - y - height, // Anpassung, um y von unten zu positionieren
+        width: width,
+        height: height,
     });
+}
+
+    // Optional: Formularfelder flatten, wenn nötig
+    //form.flatten();
+    const pdfBytes = await pdfDoc.save();
+    fs.writeFileSync(outputPath, pdfBytes);
 }
 
 app.post('/data', async (req, res) => {
     try {
-        //const pdfdata = req.body;
         const timestamp = new Date().getTime();
-        const formData = req.body.form;
+        const pdfFilename = `pdf_${timestamp}.pdf`;
+        const pdfFilepath = path.join(__dirname, 'public', 'pdf', pdfFilename);
+        const templatePdfPath = path.join(__dirname, 'public', 'pdf', 'template.pdf');
 
         // Speichern der Formulardaten als JSON
         const jsonFilename = `data_${timestamp}.json`;
         const jsonFilePath = path.join(__dirname, 'public', 'json', jsonFilename);
-        await fsp.writeFile(jsonFilePath, JSON.stringify(formData, null, 2));
+        await fsp.writeFile(jsonFilePath, JSON.stringify(req.body, null, 2));
         console.log('Formulardaten als JSON gespeichert.');
-
-        //Speichern der Signatur als Bild
-        const signature = formData.find(step => step.step === 8).elements.find(element => element.name === "Signature").value;
-        //const base64Data = signature.split(';base64,').pop();
-        //const signaturePath = path.join(__dirname, 'public', 'signatures', `signature_${timestamp}.png`);
-        //await fsp.writeFile(signaturePath, base64Data, { encoding: 'base64' });
-
-        const pdfPath = await generatePDF(formData, signature);
-        const pdfUrl = `/pdf/${path.basename(pdfPath)}`;
+        
+        // Übergebe formData direkt als Objekt
+        await generatePDF(req.body, templatePdfPath, pdfFilepath);
         console.log('PDF-Datei erfolgreich generiert');
-        res.json({ pdfUrl });
-
+        res.json({ pdfUrl: `/pdf-download/${pdfFilename}` });
     } catch (err) {
         console.error('Fehler:', err);
         res.status(500).send('Fehler beim Verarbeiten der Anfrage');
     }
+});
+
+app.get('/pdf-download/:filename', (req, res) => {
+    const filename = req.params.filename;
+    const filepath = path.join(__dirname, 'public', 'pdf', filename);
+    res.download(filepath); // Setzt Content-Disposition zum Download
 });
 
 app.get('/', (req, res) => {
@@ -81,4 +138,4 @@ app.get('/', (req, res) => {
 
 app.listen(3000, () => {
     console.log("Server läuft auf Port 3000");
-});
+})
