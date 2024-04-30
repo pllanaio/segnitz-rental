@@ -137,5 +137,6 @@ app.get('/', (req, res) => {
 });
 
 app.listen(3000, () => {
+    console.log("Apollo Order Manager - Nather Heizung und Sanitär");
     console.log("Server läuft auf Port 3000");
 })
