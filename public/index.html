@@ -142,11 +142,9 @@
                                                 type="text"
                                                 class="form-control"
                                                 placeholder="Auszuführende Arbeiten"><br>
-                                            <select name="Worker" class="form-select form-control">
+                                            <select name="Worker" class="form-select form-control" id="work_dropdown">
                                                 <option selected="selected" disabled="disabled" hidden="hidden">Monteur auswählen...</option>
-                                                <option>Monteur 1</option>
-                                                <option>Monteur 2</option>
-                                                <option>Monteur 3</option>
+
                                             </select>
                                         </div>
                                     </div>
@@ -194,15 +192,15 @@
                                     </div>
                                     <br>
                                     <div class="row">
-                                        <div id="new_work">
-                                            <input
-                                                type='text'
-                                                name="new_work_"
-                                                +="+"
-                                                ${new_work_no}="${new_work_no}"
-                                                `="`"
-                                                class='form-control'
-                                                placeholder='Datum , Name, Arbeitsstunden'><br>
+                                        <div id="work_count">
+                                            <div class="input-group flex-nowrap">
+                                                <input type="text" class="form-control" placeholder="Stunden" aria-label="Stunden" aria-describedby="addon-wrapping" name="new_work_0">
+                                                <select class="form-select" aria-label="Dropdown-Menü" id="work_dropdown_0">
+                                                    <option selected="selected" disabled="disabled" hidden="hidden">Monteur auswählen...</option>
+                                                    <!-- JavaScript generiert Optionen hier -->
+                                                </select>
+                                            </div>
+                                            <br>
                                         </div>
                                         <input type="hidden" value="1" id="total_work" name="total_work">
                                     </div>
@@ -219,15 +217,15 @@
                                     </div>
                                     <br>
                                     <div class="row">
-                                        <div id="new_material">
-                                            <input
-                                                type='text'
-                                                name="new_material_"
-                                                +="+"
-                                                ${new_material_no}="${new_material_no}"
-                                                `="`"
-                                                class='form-control'
-                                                placeholder='Anzahl, Bezeichnung, Preis'><br>
+                                        <div id="material_count">
+                                            <div class="input-group flex-nowrap">
+                                                <input type="text" class="form-control" placeholder="Anzahl" aria-label="Anzahl" aria-describedby="addon-wrapping" name="new_material_0">
+                                                <select class="form-select" aria-label="Dropdown-Menü" id="material_dropdown_0">
+                                                    <option selected="selected" disabled="disabled" hidden="hidden">Artikel auswählen...</option>
+                                                    <!-- JavaScript generiert Optionen hier -->
+                                                </select>
+                                            </div>
+                                            <br>
                                         </div>
                                         <input type="hidden" value="1" id="total_material" name="total_material">
                                     </div>
@@ -418,7 +416,7 @@
                             <div id="q-box__buttons">
                                 <button id="prev-btn" type="button" class="d-none">Zurück</button>
                                 <button id="next-btn" type="button" class="d-inline-block">Weiter</button>
-                                <button id="submit-btn" type="submit" class="d-inline-block" onclick="submitImage();">Absenden</button>
+                                <button id="submit-btn" type="submit" class="d-inline-block" onclick="submitImage()">Absenden</button>
                             </div>
                         </form>
                     </div>
