@@ -6,6 +6,17 @@ document.addEventListener('DOMContentLoaded', function () {
         .querySelector('.remove_work')
         .addEventListener('click', remove_work);
 
+    // Array mit Auswahlmöglichkeiten
+    var options = ['Reiner Nather', 'Andreas Rölz', 'Horst Rölz', 'Thomas Hörenz', 'Jeff Hörenz']; // Füge hier deine eigenen Auswahlmöglichkeiten hinzu
+
+    // Setze die Optionen für das erste select-Feld
+    var first_select = document.getElementById("work_dropdown_0")
+    options.forEach(function(optionText) {
+        var option = document.createElement('option');
+        option.text = optionText;
+        first_select.appendChild(option);
+    });
+
     function add_work() {
         var total_work = document.getElementById('total_work');
         var current_work_no = parseInt(total_work.value);
@@ -16,46 +27,78 @@ document.addEventListener('DOMContentLoaded', function () {
             return; // Prevent adding more than 10 input fields
         }
 
-        var new_work_no = current_work_no + 1;
+        // Find the container div
+        var work_count_div = document.getElementById('work_count');
+
+        // Create the input group div
+        var input_group_div = document.createElement('div');
+        input_group_div.className = 'input-group';
+
+        // Create the text input element
         var new_input = document.createElement('input');
         new_input.type = 'text';
-        new_input.name = 'new_work_' + new_work_no;
-        new_input.id = 'new_work_' + new_work_no;
         new_input.className = 'form-control';
-        new_input.placeholder = 'Datum, Name, Arbeitsstunden';
+        new_input.placeholder = 'Stunden'; // Placeholder text
+        new_input.setAttribute('aria-label', 'Stunden'); // ARIA label
+        new_input.name = 'new_work_' + current_work_no; // Name attribute
+        new_input.id = 'new_work_' + current_work_no; // ID attribute
 
+        // Create the select element
+        var new_select = document.createElement('select');
+        new_select.className = 'form-select';
+        new_select.setAttribute('aria-label', 'Dropdown-Menü'); // ARIA label
+
+        // Create and append the default option (disabled placeholder)
+        var default_option = document.createElement('option');
+        default_option.text = 'Monteur auswählen...';
+        default_option.setAttribute('disabled', true);
+        default_option.setAttribute('selected', true);
+        default_option.setAttribute('hidden', true);
+        new_select.appendChild(default_option);
+
+        // Iteriere über das options-Array und erstelle Optionen für das select-Element
+        options.forEach(function(optionText) {
+            var option = document.createElement('option');
+            option.text = optionText;
+            new_select.appendChild(option);
+        });
+
+        // Append the input and select to the input group div
+        input_group_div.appendChild(new_input);
+        input_group_div.appendChild(new_select);
+
+        // Create a line break element
         var br = document.createElement('br');
-        br.id = 'br_new_work_' + new_work_no; // Assign an ID to the <br> for easier removal
 
-        var new_work_div = document.getElementById('new_work');
-        new_work_div.appendChild(new_input);
-        new_work_div.appendChild(br);
+        // Append the input group and line break to the container
+        work_count_div.appendChild(input_group_div);
+        work_count_div.appendChild(br);
 
-        total_work.value = new_work_no;
+        // Update the total number of Work inputs
+        total_work.value = current_work_no + 1;
     }
 
+    // Funktion zum Entfernen eines Workfelds
     function remove_work() {
         var total_work = document.getElementById('total_work');
-        var last_work_no = total_work.value;
+        var last_work_no = parseInt(total_work.value);
 
         if (last_work_no > 1) {
-            var elementToRemove = document.getElementById(
-                'new_work_' + last_work_no
-            );
-            var brToRemove = document.getElementById(
-                'br_new_work_' + last_work_no
-            ); // Get the <br> element using its ID
+            var containerToRemove = document.getElementById('new_work_' + (last_work_no - 1)).parentNode;
 
-            if (elementToRemove) 
-                elementToRemove
-                    .parentNode
-                    .removeChild(elementToRemove);
-            if (brToRemove) 
-                brToRemove
-                    .parentNode
-                    .removeChild(brToRemove); // Remove the <br> element
-            
-            total_work.value = last_work_no - 1;
+            if (containerToRemove) {
+                // Remove the preceding <br> element
+                var brToRemove = containerToRemove.previousElementSibling;
+                if (brToRemove && brToRemove.tagName.toLowerCase() === 'br') {
+                    brToRemove.parentNode.removeChild(brToRemove);
+                }
+
+                containerToRemove.parentNode.removeChild(containerToRemove);
+
+                total_work.value = last_work_no - 1;
+            }
+        } else {
+            alert('Das erste Eingabefeld kann nicht entfernt werden.');
         }
     }
 });
