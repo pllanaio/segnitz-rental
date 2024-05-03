@@ -26,7 +26,7 @@ A Apollo Module to entry an order digitally, offering customer to directly sign 
 Leon Pllana @ ASC-Vision
 
 ## Resources
-Node-Modules: 
+Node-Modules: <br>
 "pdf-lib": "^1.17.1" - https://pdf-lib.js.org <br>
 "node-fetch": "^2.7.0" - https://github.com/node-fetch/node-fetch <br>
 "file-saver": "^2.0.5" - https://github.com/eligrey/FileSaver.js#readme <br>
