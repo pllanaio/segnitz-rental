@@ -62,12 +62,14 @@
                                                 name="Recipient"
                                                 type="text"
                                                 class="form-control"
-                                                placeholder="Rechnungsempfänger"><br>
+                                                placeholder="Rechnungsempfänger"
+                                                maxlength="30"><br>
                                             <input
                                                 name="Client"
                                                 type="text"
                                                 class="form-control"
-                                                placeholder="Auftraggeber/Baustelle">
+                                                placeholder="Auftraggeber/Baustelle"
+                                                maxlength="30">
                                         </div>
                                     </div>
                                     <br>
@@ -129,12 +131,12 @@
                                         <div class="col-xs-12 col-sm-12 col-md-12 col-lg-12">
                                             <input
                                                 name="OrderNo"
-                                                type="text"
+                                                type="number"
                                                 class="form-control"
                                                 placeholder="Auftragsnummer"><br>
                                             <input
                                                 name="ClientNo"
-                                                type="text"
+                                                type="number"
                                                 class="form-control"
                                                 placeholder="Kundennummer"><br>
                                             <input
@@ -163,6 +165,7 @@
                                                     type="text"
                                                     class="form-control"
                                                     data-td-target="#DateTimePicker"
+                                                    readonly
                                                     placeholder="Termin/Uhrzeit"/>
                                                 <div
                                                     class="input-group-text"
@@ -182,7 +185,7 @@
                                     </div>
                                 </div>
                                 <div class="step d-none" id="page4">
-                                    <h4>Geben Sie hier an wann welcher Monteur wie lange am Auftrag gearbeitet hat</h4>
+                                    <h4>Fügen Sie mit "+" die Monteure welche am Auftrag beteiligt sind hinzu :</h4>
                                     <div class="col-12" id="btn_work_hours">
                                         <button type="button" class="add_work btn btn-success btn-lg">
                                             <i class="bi bi-plus"></i></button>
@@ -205,11 +208,11 @@
                                             <br>
                                             -->
                                         </div>
-                                        <input type="hidden" value="1" id="total_work" name="total_work">
+                                        <input type="hidden" value="0" id="total_work" name="total_work">
                                     </div>
                                 </div>
                                 <div class="step d-none" id="page5">
-                                    <h4>Geben Sie an welchen Materialverbrauch Sie hatten:</h4>
+                                    <h4>Fügen Sie mit "+" die verbrauchten Materialien hinzu: </h4>
 
                                     <div class="col-12" id="btn_work_material">
                                         <button type="button" class="add_material btn btn-success btn-lg">
@@ -232,7 +235,7 @@
                                             <br>
                                             -->
                                         </div>
-                                        <input type="hidden" value="1" id="total_material" name="total_material">
+                                        <input type="hidden" value="0" id="total_material" name="total_material">
                                     </div>
                                 </div>
                                 <div class="step d-none" id="page6">

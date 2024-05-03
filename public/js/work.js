@@ -17,6 +17,16 @@ document.addEventListener('DOMContentLoaded', function () {
         first_select.appendChild(option);
      });*/
 
+    //Das work_dropdown mit den Auswahlmöglichkeiten des Arrays befüllen
+    var dropdown = document.getElementById("work_dropdown");
+    
+    // Optionen aus dem Array hinzufügen
+    for(var i = 0; i < options.length; i++) {
+        var option = document.createElement("option");
+        option.text = options[i];
+        dropdown.add(option);
+    }
+
     function add_work() {
         var total_work = document.getElementById('total_work');
         var current_work_no = parseInt(total_work.value);
@@ -99,7 +109,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     new_select
                 .options[new_select.selectedIndex]
                 .text;
-            console.log(combined_input.value); // Output the updated value to the console
+            //console.log(combined_input.value); // Output the updated value to the console
         }
     }
 
@@ -130,8 +140,19 @@ document.addEventListener('DOMContentLoaded', function () {
 
                 total_work.value = last_work_no - 1;
             }
-        } else {
-            alert('Das erste Eingabefeld kann nicht entfernt werden.');
+        }
+        // Wenn es nur noch ein Workfeld gibt, das erste Feld entfernen
+        if (last_work_no === 1) {
+            var firstWorkField = document.getElementById('work_0').parentNode;
+            if (firstWorkField) {
+                var brToRemove = firstWorkField.previousElementSibling;
+                if (brToRemove && brToRemove.tagName.toLowerCase() === 'br') {
+                    brToRemove
+                        .parentNode
+                        .removeChild(brToRemove);
+                }
+                firstWorkField.parentNode.removeChild(firstWorkField);
+            }
         }
     }
 });

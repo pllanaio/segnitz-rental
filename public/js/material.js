@@ -118,7 +118,7 @@ document.addEventListener('DOMContentLoaded', function () {
         // Function to update combined input field
         function update_combined() {
             combined_input.value = new_input.value + ' Stück - ' + new_select.options[new_select.selectedIndex].text;
-            console.log(combined_input.value); // Output the updated value to the console
+            //console.log(combined_input.value); // Output the updated value to the console
         }
     }
 
@@ -149,8 +149,19 @@ document.addEventListener('DOMContentLoaded', function () {
 
                 total_material.value = last_material_no - 1;
             }
-        } else {
-            alert('Das erste Eingabefeld kann nicht entfernt werden.');
+        }
+        // Wenn es nur noch ein Materialfeld gibt, das erste Feld entfernen
+        if (last_material_no === 1) {
+            var firstMaterialField = document.getElementById('material_0').parentNode;
+            if (firstMaterialField) {
+                var brToRemove = firstMaterialField.previousElementSibling;
+                if (brToRemove && brToRemove.tagName.toLowerCase() === 'br') {
+                    brToRemove
+                        .parentNode
+                        .removeChild(brToRemove);
+                }
+                firstMaterialField.parentNode.removeChild(firstMaterialField);
+            }
         }
     }
 });
