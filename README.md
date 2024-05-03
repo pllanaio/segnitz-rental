@@ -27,17 +27,17 @@ Leon Pllana @ ASC-Vision
 
 ## Resources
 Node-Modules: 
-"pdf-lib": "^1.17.1" - https://pdf-lib.js.org
-"node-fetch": "^2.7.0" - https://github.com/node-fetch/node-fetch
-"file-saver": "^2.0.5" - https://github.com/eligrey/FileSaver.js#readme
-"express": "^4.18.2" - https://expressjs.com
-"dotenv": "^16.4.4" - https://github.com/motdotla/dotenv#readme
-"cors": "^2.8.5" - https://github.com/expressjs/cors#readme
-"bootstrap-icons": "^1.11.3" - https://icons.getbootstrap.com
-
-Javascript Modules: 
-@popperjs/core v2.11.8 - https://github.com/floating-ui/floating-ui#readme
-Signature Pad v2.3.2 - https://github.com/szimek/signature_pad
-Tempus Dominus v6.9.4 - https://getdatepicker.com/
+"pdf-lib": "^1.17.1" - https://pdf-lib.js.org <br>
+"node-fetch": "^2.7.0" - https://github.com/node-fetch/node-fetch <br>
+"file-saver": "^2.0.5" - https://github.com/eligrey/FileSaver.js#readme <br>
+"express": "^4.18.2" - https://expressjs.com <br>
+"dotenv": "^16.4.4" - https://github.com/motdotla/dotenv#readme <br>
+"cors": "^2.8.5" - https://github.com/expressjs/cors#readme <br>
+"bootstrap-icons": "^1.11.3" - https://icons.getbootstrap.com <br>
+<br>
+Javascript Modules: <br>
+@popperjs/core v2.11.8 - https://github.com/floating-ui/floating-ui#readme <br>
+Signature Pad v2.3.2 - https://github.com/szimek/signature_pad <br>
+Tempus Dominus v6.9.4 - https://getdatepicker.com/<br>
 
 
