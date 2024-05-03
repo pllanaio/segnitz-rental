@@ -1,11 +1,11 @@
-    var wrapper = document.getElementById("signature-pad"),
+var wrapper = document.getElementById("signature-pad"),
     canvas = wrapper.querySelector("canvas"),
     signaturePad;
 
-    /**
+/**
     *  Behandlung der Größenänderung der Unterschriftenfelds
     */
-    function resizeCanvas() {
+function resizeCanvas() {
     var oldContent = signaturePad.toData();
     var ratio = Math.max(window.devicePixelRatio || 1, 1);
     canvas.width = canvas.offsetWidth * ratio;
@@ -15,12 +15,12 @@
         .scale(ratio, ratio);
     signaturePad.clear();
     signaturePad.fromData(oldContent);
-    }
+}
 
-    /**
+/**
     *  Speichern des Inhaltes als Bild
     */
-    function download(filename) {
+function download(filename) {
     var blob = dataURLToBlob(signaturePad.toDataURL());
     var url = window
         .URL
@@ -37,12 +37,12 @@
     window
         .URL
         .revokeObjectURL(url);
-    }
+}
 
-    /**
+/**
     * DataURL in Binär umwandeln
     */
-    function dataURLToBlob(dataURL) {
+function dataURLToBlob(dataURL) {
     // Code von https://github.com/ebidel/filer.js
     var parts = dataURL.split(';base64,');
     var contentType = parts[0].split(":")[1];
@@ -53,12 +53,12 @@
         uInt8Array[i] = raw.charCodeAt(i);
     }
     return new Blob([uInt8Array], {type: contentType});
-    }
-    var signaturePad = new SignaturePad(canvas);
-    signaturePad.minWidth = 1; //minimale Breite des Stiftes
-    signaturePad.maxWidth = 5; //maximale Breite des Stiftes
-    signaturePad.penColor = "#000000"; //Stiftfarbe
-    signaturePad.backgroundColor = "#FFFFFF"; //Hintergrundfarbe
+}
+var signaturePad = new SignaturePad(canvas);
+signaturePad.minWidth = 1; //minimale Breite des Stiftes
+signaturePad.maxWidth = 5; //maximale Breite des Stiftes
+signaturePad.penColor = "#000000"; //Stiftfarbe
+signaturePad.backgroundColor = "#FFFFFF"; //Hintergrundfarbe
 
-    window.onclick = resizeCanvas;
-    resizeCanvas();
+window.onclick = resizeCanvas;
+resizeCanvas();

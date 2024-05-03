@@ -1,6 +1,8 @@
 document.addEventListener('DOMContentLoaded', function () {
     var MachineUsageCheckElement = document.getElementById('MachineUsageCheck');
-    var MachineUsageTextfieldElement = document.getElementById('MachineUsageTextfield');
+    var MachineUsageTextfieldElement = document.getElementById(
+        'MachineUsageTextfield'
+    );
     var DisposeCheckElement = document.getElementById('DisposeCheck');
     var DisposeTextfieldElement = document.getElementById('DisposeTextfield');
     var WorkCheckElement = document.getElementById('WorkCheck');
@@ -21,7 +23,6 @@ document.addEventListener('DOMContentLoaded', function () {
         WorkTextfield.disabled = !WorkCheckElement.checked;
     });
 
-
     // Event listener for Renter checkbox
     RenterCheck.addEventListener('change', function () {
         if (RenterCheck.checked) {
@@ -30,7 +31,7 @@ document.addEventListener('DOMContentLoaded', function () {
             other_relatedCheck.checked = false;
         }
     });
-    
+
     // Event listener for Owner checkbox
     OwnerCheck.addEventListener('change', function () {
         if (OwnerCheck.checked) {
@@ -39,10 +40,10 @@ document.addEventListener('DOMContentLoaded', function () {
             other_relatedCheck.checked = false;
         }
     });
-    
+
     // Event listener for other_related checkbox
     other_relatedCheck.addEventListener('change', function () {
-         if (other_relatedCheck.checked) {
+        if (other_relatedCheck.checked) {
             // Disable other checkboxes
             RenterCheck.checked = false;
             OwnerCheck.checked = false;

@@ -1,7 +1,6 @@
-new tempusDominus.TempusDominus(document.getElementById('DateTimePicker'),
-{
-    display:{
-        icons:{
+new tempusDominus.TempusDominus(document.getElementById('DateTimePicker'), {
+    display: {
+        icons: {
             type: 'icons',
             time: 'bi bi-clock',
             date: 'bi bi-calendar-week',
