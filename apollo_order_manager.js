@@ -3,6 +3,7 @@ const fsp = require("fs").promises;
 const fs = require('fs');
 const path = require("path");
 const app = express();
+const mysql = require('mysql2/promise');
 require('dotenv').config();
 app.use(express.json({limit: '1mb'}));
 app.use(express.urlencoded({limit: '1mb', extended: true}));
@@ -13,6 +14,48 @@ app.use((req, res, next) => {
     const payloadSize = Buffer.byteLength(JSON.stringify(req.body));
     console.log(`Payload-Größe: ${payloadSize} Bytes`);
     next();
+});
+
+app.get('/materials', async (req, res) => {
+    try {
+        const connection = await mysql.createConnection({
+            host: process.env.DB_HOST,
+            user: process.env.DB_USER,
+            password: process.env.DB_PW,
+            database: process.env.DB_NAME
+        });
+
+        const [rows, fields] = await connection.execute('SELECT material_name FROM materials');
+
+        await connection.end();
+
+        const materialOptions = rows.map(row => row.material_name);
+        res.json(materialOptions);
+    } catch (error) {
+        console.error('Fehler beim Laden der Materialoptionen aus der Datenbank:', error);
+        res.status(500).json({ error: 'Fehler beim Laden der Materialoptionen aus der Datenbank' });
+    }
+});
+
+app.get('/workers', async (req, res) => {
+    try {
+        const connection = await mysql.createConnection({
+            host: process.env.DB_HOST,
+            user: process.env.DB_USER,
+            password: process.env.DB_PW,
+            database: process.env.DB_NAME
+        });
+
+        const [rows, fields] = await connection.execute('SELECT worker_name FROM workers');
+
+        await connection.end();
+
+        const workerOptions = rows.map(row => row.worker_name);
+        res.json(workerOptions);
+    } catch (error) {
+        console.error('Fehler beim Laden der Monteuroptionen aus der Datenbank:', error);
+        res.status(500).json({ error: 'Fehler beim Laden der Materialoptionen aus der Datenbank' });
+    }
 });
 
 async function generatePDF(formDataObj, templatePath, outputPath) {

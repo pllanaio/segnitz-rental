@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nather - Backend</title>
+    <!-- CSS -->
+    <link rel="stylesheet" href="css/tempus-dominus.min.css">
+    <link rel="stylesheet" href="css/bootstrap.min.css">
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/bootstrap-icons-1.11.3/font/bootstrap-icons.min.css">
+    <!-- FONT -->
+    <link rel="stylesheet" href="css/fonts.css">
+</head>
+<body>
+    Nather Heizung Sanitär Backend
+    <!-- CONTAINER -->
+    <div class="container d-flex align-items-center min-vh-100">
+        <div class="row g-0 justify-content-center">
+            <!-- TITLE -->
+            <div class="col-xs-5 col-lg-5">
+                <div id="title-container">
+                    <h2>NATHER</h2>
+                    <h2>Heizung - Sanitär</h2>
+                    <br>
+                    <h3>Konfiguration</h3>
+                    <br>
+                    <p>Fachbetrieb der Innung Sanitär- und Heizungstechnik</p>
+                    <p>Zwergerstraße 2b<br>
+                        85579 Neubiberg<br>
+                        <a href="tel:+498960190411">Tel.:089 601 904 11</a><br>
+                        <a href="mailto:info@nather-hs.de">E-Mail:info@nather-hs.de</a>
+                    </p>
+                    <br>
+                    Logout
+                </div>
+            </div>
+            <!-- FORMS -->
+            <div class="col-xs-7 col-lg-7">
+                <div id="qbox-container_form">
+                    <form class="needs-validation" id="form-wrapper" method="post" name="form-wrapper" novalidate="">
+                        <div id="steps-container">
+                            <div class="step d-block">
+                                <h4>Auswählen welche Datenbank bearbeitet werden soll: </h4>
+                                <div class="row">
+                                    <select name="DBType" id="DBType" class="form-select">
+                                        <option selected disabled hidden>Datenbank auswählen...</option>
+                                        <option value="material">Material</option>
+                                        <option value="monteure">Monteure</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                    </form>
+                    <div>
+                        <h4>Verfügbare Optionen:</h4>
+                        <textarea id="selectedOptions" rows="4" cols="50" readonly></textarea>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div id="preloader-wrapper">
+        <div id="preloader"></div>
+        <div class="preloader-section section-left"></div>
+        <div class="preloader-section section-right"></div>
+    </div>
+    <!-- Static App Form Collection Script -->
+    <script type="text/javascript" src="js/static-forms.js"></script>
+    <!--Popper-->
+    <script type="text/javascript" src="js/popper.min.js"></script>
+    <!-- JavaScript to populate dropdown options -->
+    <script>
+// JavaScript zum Populieren des Textfelds basierend auf der Auswahl
+document.addEventListener('DOMContentLoaded', function() {
+    var select = document.getElementById("DBType");
+    var selectedOptionsTextarea = document.getElementById("selectedOptions");
+
+    // Function to update selected options in textarea
+    function updateSelectedOptions(selectedValue) {
+        if (selectedValue === "material") {
+            // AJAX-Anfrage, um Materialdaten abzurufen
+            fetch('/materials')
+            .then(response => response.json())
+            .then(materialData => {
+                // Konvertiere Materialdaten in einen lesbaren String und aktualisiere das Textfeld
+                selectedOptionsTextarea.value = JSON.stringify(materialData, null, 2);
+            })
+            .catch(error => {
+                console.error('Fehler beim Abrufen der Materialdaten:', error);
+                selectedOptionsTextarea.value = 'Fehler beim Abrufen der Materialdaten';
+            });
+        } else if (selectedValue === "monteure") {
+            // AJAX-Anfrage, um Materialdaten abzurufen
+            fetch('/workers')
+            .then(response => response.json())
+            .then(workData => {
+                // Konvertiere Materialdaten in einen lesbaren String und aktualisiere das Textfeld
+                selectedOptionsTextarea.value = JSON.stringify(workData, null, 2);
+            })
+            .catch(error => {
+                console.error('Fehler beim Abrufen der Monteurdaten:', error);
+                selectedOptionsTextarea.value = 'Fehler beim Abrufen der Monteurdatendaten';
+            });
+        }
+    }
+
+    // Initial update
+    updateSelectedOptions(select.value);
+
+    // Add event listener to react to changes in selection
+    select.addEventListener('change', function() {
+        updateSelectedOptions(this.value);
+    });
+});
+    </script>
+</body>
+</html>
