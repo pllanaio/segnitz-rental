@@ -1,30 +1,31 @@
 document.addEventListener('DOMContentLoaded', function () {
-    document
-        .querySelector('.add_work')
-        .addEventListener('click', add_work);
-    document
-        .querySelector('.remove_work')
-        .addEventListener('click', remove_work);
+    // Array mit Auswahlmöglichkeiten für Monteure
+    var availableOptionsWork = []; // Hier werden die Monteuroptionen aus der Datenbank gespeichert
 
-    // Array mit Auswahlmöglichkeiten
-    var options = ['Reiner Nather', 'Andreas Rölz', 'Horst Rölz', 'Thomas Hörenz', 'Jeff Hörenz']; // Füge hier deine eigenen Auswahlmöglichkeiten hinzu
+    // Laden der Monteuroptionen aus der Datenbank
+    fetch('/workers') // Annahme: Dies ist der Endpunkt zum Abrufen der Monteuroptionen
+    .then(response => response.json())
+    .then(workerOptions => {
+        // Hier kannst du die Monteuroptionen verwenden
+        console.log('Monteuroptionen aus der Datenbank:', workerOptions);
+        // Füge die Monteuroptionen in das Array availableOptionsWork ein
+        availableOptionsWork.push(...workerOptions);
 
-    // Setze die Optionen für das erste select-Feld
-   /* var first_select = document.getElementById("work_dropdown_0")
-    options.forEach(function (optionText) {
-        var option = document.createElement('option');
-        option.text = optionText;
-        first_select.appendChild(option);
-     });*/
+        // Rufe die Funktion zum Hinzufügen der Dropdown-Menüs auf
+        addDropdownMenus();
+    });
 
-    //Das work_dropdown mit den Auswahlmöglichkeiten des Arrays befüllen
-    var dropdown = document.getElementById("work_dropdown");
+    // Funktion zum Hinzufügen der Dropdown-Menüs
+    function addDropdownMenus() {
+        // Event Listener für Klicken auf den Button zum Hinzufügen eines Work-Eintrags
+        document
+            .querySelector('.add_work')
+            .addEventListener('click', add_work);
     
-    // Optionen aus dem Array hinzufügen
-    for(var i = 0; i < options.length; i++) {
-        var option = document.createElement("option");
-        option.text = options[i];
-        dropdown.add(option);
+        // Event Listener für Klicken auf den Button zum Entfernen eines Work-Eintrags
+        document
+            .querySelector('.remove_work')
+            .addEventListener('click', remove_work);
     }
 
     function add_work() {
@@ -69,7 +70,7 @@ document.addEventListener('DOMContentLoaded', function () {
         new_select.appendChild(default_option);
 
         // Iterate over the options array and create options for the select element
-        options.forEach(function (optionText) {
+        availableOptionsWork.forEach(function (optionText) {
             var option = document.createElement('option');
             option.text = optionText;
             new_select.appendChild(option);
@@ -105,10 +106,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
         // Function to update combined input field
         function update_combined() {
-            combined_input.value = new_input.value + ' Arbeitsstunden - ' +
-                    new_select
-                .options[new_select.selectedIndex]
-                .text;
+            combined_input.value = new_input.value + ' Arbeitsstunden - ' + new_select.options[new_select.selectedIndex].text;
             //console.log(combined_input.value); // Output the updated value to the console
         }
     }

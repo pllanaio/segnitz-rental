@@ -1,41 +1,33 @@
 document.addEventListener('DOMContentLoaded', function () {
-    // Event Listener für Klicken auf den Button zum Hinzufügen eines Materials
-    document
-        .querySelector('.add_material')
-        .addEventListener('click', add_material);
 
-    // Event Listener für Klicken auf den Button zum Entfernen eines Materials
-    document
-        .querySelector('.remove_material')
-        .addEventListener('click', remove_material);
+    // Definiere das Array der verfügbaren Materialien
+    var availableOptionsMaterial = [];
 
-    // Array der verfügbaren Materialien
-    var availableOptions = [
-        'Öldüse',
-        'Ölfilter',
-        'Röhrensyphon lang',
-        'Eckventil',
-        'Doppelspindelventil',
-        'Schwimmerventil',
-        'Spülventil',
-        'Spezialsägeblatt',
-        'Füllwasser nach VDI2035',
-        'Innenoberteil ½"',
-        'Innenoberteil ¾“',
-        'Schrägsitzventiloberteil ½"',
-        'Schrägsitzventiloberteil ¾"',
-        'Schrägsitzventiloberteil 1"',
-        'Auslaufhahn ½"'
-    ];
+    // Laden der Materialoptionen aus der Datenbank
+    fetch('/materials')
+    .then(response => response.json())
+    .then(materialOptions => {
+        // Hier kannst du die Materialoptionen verwenden
+        console.log('Materialoptionen aus der Datenbank:', materialOptions);
+        // Füge die Materialoptionen in das Array availableOptionsMaterial ein
+        availableOptionsMaterial.push(...materialOptions);
 
-    // Setze die Optionen für das erste select-Feld
-    /*  var first_select = document.getElementById("material_dropdown_0")
-    availableOptions.forEach(function (option) {
-        var option_element = document.createElement('option');
-        option_element.value = option; // Value attribute
-        option_element.text = option;
-        first_select.appendChild(option_element);
-    }); */
+        // Rufe die Funktion zum Hinzufügen der Dropdown-Menüs auf
+        addDropdownMenus();
+    });
+
+    // Funktion zum Hinzufügen der Dropdown-Menüs
+    function addDropdownMenus() {
+        // Event Listener für Klicken auf den Button zum Hinzufügen eines Materials
+        document
+            .querySelector('.add_material')
+            .addEventListener('click', add_material);
+    
+        // Event Listener für Klicken auf den Button zum Entfernen eines Materials
+        document
+            .querySelector('.remove_material')
+            .addEventListener('click', remove_material);
+    }
 
     // Funktion zum Hinzufügen eines Materialfelds
     function add_material() {
@@ -80,7 +72,7 @@ document.addEventListener('DOMContentLoaded', function () {
         new_select.appendChild(default_option);
     
         // Create and append the available options
-        availableOptions.forEach(function (option) {
+        availableOptionsMaterial.forEach(function (option) {
             var option_element = document.createElement('option');
             option_element.value = option; // Value attribute
             option_element.text = option;
@@ -97,9 +89,6 @@ document.addEventListener('DOMContentLoaded', function () {
         combined_input.name = 'material_combined_' + current_material_no;
         combined_input.id = 'material_combined_' + current_material_no;
         input_group_div.appendChild(combined_input);
-    
-        // Output the value of the combined field to the console
-        console.log(combined_input.value);
     
         // Create a line break element
         var br = document.createElement('br');
