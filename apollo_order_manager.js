@@ -58,6 +58,64 @@ app.get('/workers', async (req, res) => {
     }
 });
 
+app.delete('/delete-material', async (req, res) => {
+    const materialName = req.body.name;
+    if (!materialName) {
+        return res.status(400).json({ error: 'Materialname nicht angegeben' });
+    }
+
+    try {
+        const connection = await mysql.createConnection({
+            host: process.env.DB_HOST,
+            user: process.env.DB_USER,
+            password: process.env.DB_PW,
+            database: process.env.DB_NAME
+        });
+
+        const [result] = await connection.execute('DELETE FROM materials WHERE material_name = ?', [materialName]);
+        
+        await connection.end();
+
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ error: 'Material nicht gefunden' });
+        }
+
+        res.status(200).json({ message: 'Material erfolgreich gelöscht' });
+    } catch (error) {
+        console.error('Fehler beim Löschen des Materials aus der Datenbank:', error);
+        res.status(500).json({ error: 'Fehler beim Löschen des Materials aus der Datenbank' });
+    }
+});
+
+app.delete('/delete-worker', async (req, res) => {
+    const workerName = req.body.name;
+    if (!workerName) {
+        return res.status(400).json({ error: 'Arbeitername nicht angegeben' });
+    }
+
+    try {
+        const connection = await mysql.createConnection({
+            host: process.env.DB_HOST,
+            user: process.env.DB_USER,
+            password: process.env.DB_PW,
+            database: process.env.DB_NAME
+        });
+
+        const [result] = await connection.execute('DELETE FROM workers WHERE worker_name = ?', [workerName]);
+        
+        await connection.end();
+
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ error: 'Arbeiter nicht gefunden' });
+        }
+
+        res.status(200).json({ message: 'Arbeiter erfolgreich gelöscht' });
+    } catch (error) {
+        console.error('Fehler beim Löschen des Arbeiters aus der Datenbank:', error);
+        res.status(500).json({ error: 'Fehler beim Löschen des Arbeiters aus der Datenbank' });
+    }
+});
+
 async function generatePDF(formDataObj, templatePath, outputPath) {
 
     let signatureBase64;
