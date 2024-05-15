@@ -11,6 +11,12 @@
     <link rel="stylesheet" href="css/bootstrap-icons-1.11.3/font/bootstrap-icons.min.css">
     <!-- FONT -->
     <link rel="stylesheet" href="css/fonts.css">
+    <style>
+        .btn-primary:hover {
+            background-color: #0d6efd; /* Dies ist die Standardfarbe von Bootstrap für btn-primary */
+            border-color: #0d6efd; /* Passen Sie diese Werte entsprechend Ihrer spezifischen Farbeinstellung an */
+        }
+    </style>
 </head>
 <body>
     Nather Heizung Sanitär Backend
@@ -54,7 +60,7 @@
                     </form>
                     <div>
                         <h4>Verfügbare Optionen:</h4>
-                        <textarea id="selectedOptions" rows="4" cols="50" readonly></textarea>
+                        <div id="selectedOptionsContainer"></div>
                     </div>
                 </div>
             </div>
@@ -69,50 +75,104 @@
     <script type="text/javascript" src="js/static-forms.js"></script>
     <!--Popper-->
     <script type="text/javascript" src="js/popper.min.js"></script>
+    <script type="text/javascript" src="js/bootstrap.bundle.min.js"></script>
+ 
     <!-- JavaScript to populate dropdown options -->
     <script>
-// JavaScript zum Populieren des Textfelds basierend auf der Auswahl
-document.addEventListener('DOMContentLoaded', function() {
+        document.addEventListener('DOMContentLoaded', function() {
     var select = document.getElementById("DBType");
-    var selectedOptionsTextarea = document.getElementById("selectedOptions");
+    var selectedOptionsContainer = document.getElementById("selectedOptionsContainer");
 
-    // Function to update selected options in textarea
     function updateSelectedOptions(selectedValue) {
+        selectedOptionsContainer.innerHTML = ''; // Clear previous options
+
         if (selectedValue === "material") {
-            // AJAX-Anfrage, um Materialdaten abzurufen
             fetch('/materials')
             .then(response => response.json())
             .then(materialData => {
-                // Konvertiere Materialdaten in einen lesbaren String und aktualisiere das Textfeld
-                selectedOptionsTextarea.value = JSON.stringify(materialData, null, 2);
+                materialData.forEach(material => {
+                    var buttonGroup = createButtonGroup(material);
+                    selectedOptionsContainer.appendChild(buttonGroup);
+                    selectedOptionsContainer.appendChild(document.createElement('br')); // Fügt einen Zeilenumbruch nach jeder Button-Group hinzu
+                });
             })
             .catch(error => {
                 console.error('Fehler beim Abrufen der Materialdaten:', error);
-                selectedOptionsTextarea.value = 'Fehler beim Abrufen der Materialdaten';
+                selectedOptionsContainer.textContent = 'Fehler beim Abrufen der Materialdaten';
             });
         } else if (selectedValue === "monteure") {
-            // AJAX-Anfrage, um Materialdaten abzurufen
             fetch('/workers')
             .then(response => response.json())
             .then(workData => {
-                // Konvertiere Materialdaten in einen lesbaren String und aktualisiere das Textfeld
-                selectedOptionsTextarea.value = JSON.stringify(workData, null, 2);
+                workData.forEach(worker => {
+                    var buttonGroup = createButtonGroup(worker);
+                    selectedOptionsContainer.appendChild(buttonGroup);
+                    selectedOptionsContainer.appendChild(document.createElement('br')); // Fügt einen Zeilenumbruch nach jeder Button-Group hinzu
+                });
             })
             .catch(error => {
                 console.error('Fehler beim Abrufen der Monteurdaten:', error);
-                selectedOptionsTextarea.value = 'Fehler beim Abrufen der Monteurdatendaten';
+                selectedOptionsContainer.textContent = 'Fehler beim Abrufen der Monteurdaten';
             });
         }
     }
 
-    // Initial update
-    updateSelectedOptions(select.value);
+    function createButtonGroup(item) {
+        var div = document.createElement('div');
+        div.className = 'btn-group d-flex';
+        div.style.width = '100%'; // Setzt die Breite der Button-Group auf 100%
 
-    // Add event listener to react to changes in selection
+        var button = document.createElement('button');
+        button.className = 'btn btn-primary';
+        button.style.width = '75%'; // Setzt die Breite des Hauptbuttons auf 75%
+        button.textContent = item;
+
+        var deleteButton = document.createElement('button');
+        deleteButton.className = 'btn btn-danger';
+        deleteButton.style.width = '25%'; // Setzt die Breite des Löschbuttons auf 25%
+        deleteButton.textContent = 'Löschen';
+        deleteButton.addEventListener('click', function(event) {
+            event.preventDefault();
+            deleteItem(item);
+        });
+
+        div.appendChild(button);
+        div.appendChild(deleteButton);
+
+        return div;
+    }
+
+    function deleteItem(item) {
+        var selectedValue = select.value;
+        var endpoint = selectedValue === 'material' ? '/delete-material' : '/delete-worker';
+        fetch(endpoint, {
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ name: item })
+        })
+        .then(response => {
+            if (response.ok) {
+                alert('Eintrag erfolgreich gelöscht');
+                updateSelectedOptions(selectedValue); // Refresh the options
+            } else {
+                alert('Fehler beim Löschen des Eintrags');
+            }
+        })
+        .catch(error => {
+            console.error('Fehler beim Löschen des Eintrags:', error);
+            alert('Fehler beim Löschen des Eintrags');
+        });
+    }
+
+    updateSelectedOptions(select.value);
     select.addEventListener('change', function() {
         updateSelectedOptions(this.value);
     });
 });
+
     </script>
 </body>
 </html>
+
