@@ -244,6 +244,56 @@ app.post('/data', async (req, res) => {
     }
 });
 
+app.post('/add-material', async (req, res) => {
+    const materialName = req.body.name;
+    if (!materialName) {
+        return res.status(400).json({ error: 'Materialname nicht angegeben' });
+    }
+
+    try {
+        const connection = await mysql.createConnection({
+            host: process.env.DB_HOST,
+            user: process.env.DB_USER,
+            password: process.env.DB_PW,
+            database: process.env.DB_NAME
+        });
+
+        const [result] = await connection.execute('INSERT INTO materials (material_name) VALUES (?)', [materialName]);
+        
+        await connection.end();
+
+        res.status(200).json({ message: 'Material erfolgreich hinzugefügt', id: result.insertId });
+    } catch (error) {
+        console.error('Fehler beim Hinzufügen des Materials zur Datenbank:', error);
+        res.status(500).json({ error: 'Fehler beim Hinzufügen des Materials zur Datenbank' });
+    }
+})
+
+app.post('/add-worker', async (req, res) => {
+    const workerName = req.body.name;
+    if (!workerName) {
+        return res.status(400).json({ error: 'Monteursname nicht angegeben' });
+    }
+
+    try {
+        const connection = await mysql.createConnection({
+            host: process.env.DB_HOST,
+            user: process.env.DB_USER,
+            password: process.env.DB_PW,
+            database: process.env.DB_NAME
+        });
+
+        const [result] = await connection.execute('INSERT INTO workers (worker_name) VALUES (?)', [workerName]);
+        
+        await connection.end();
+
+        res.status(200).json({ message: 'Monteur erfolgreich hinzugefügt', id: result.insertId });
+    } catch (error) {
+        console.error('Fehler beim Hinzufügen des Monteurs zur Datenbank:', error);
+        res.status(500).json({ error: 'Fehler beim Hinzufügen des Monteurs zur Datenbank' });
+    }
+})
+
 app.get('/pdf-download/:filename', (req, res) => {
     const filename = req.params.filename;
     const filepath = path.join(__dirname, 'public', 'pdf', filename);

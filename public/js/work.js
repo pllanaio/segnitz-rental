@@ -8,6 +8,7 @@ document.addEventListener('DOMContentLoaded', function () {
     .then(workerOptions => {
         // Hier kannst du die Monteuroptionen verwenden
         console.log('Monteuroptionen aus der Datenbank:', workerOptions);
+
         // Füge die Monteuroptionen in das Array availableOptionsWork ein
         availableOptionsWork.push(...workerOptions);
 
@@ -17,6 +18,16 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // Funktion zum Hinzufügen der Dropdown-Menüs
     function addDropdownMenus() {
+
+        //Anzeige der Inhalte aus der Workers Datenbank im work_dropdown
+        const dropdown = document.getElementById('work_dropdown'); // ID des Haupt-Dropdown-Menüs aus index.html
+        availableOptionsWork.forEach(workerName => {
+            const option = document.createElement('option');
+            option.value = workerName;
+            option.textContent = workerName;
+            dropdown.appendChild(option); // Fügt jede Option dem Dropdown-Menü hinzu
+        });
+
         // Event Listener für Klicken auf den Button zum Hinzufügen eines Work-Eintrags
         document
             .querySelector('.add_work')
