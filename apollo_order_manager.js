@@ -4,7 +4,6 @@ const fs = require('fs');
 const path = require("path");
 const app = express();
 const mysql = require('mysql2/promise');
-const cors = require('cors');
 require('dotenv').config();
 app.use(express.json({limit: '1mb'}));
 app.use(express.urlencoded({limit: '1mb', extended: true}));
@@ -16,8 +15,6 @@ app.use((req, res, next) => {
     console.log(`Payload-Größe: ${payloadSize} Bytes`);
     next();
 });
-
-app.use(cors());
 
 function logDatabaseChange(action, table, value, timestamp = new Date()) {
     console.log(`${timestamp.toISOString()} - Datenbankänderung: Element ${action} in der Tabelle ${table}. Betroffenes Element: ${JSON.stringify(value)}`);

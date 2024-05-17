@@ -358,13 +358,21 @@
                                     <div class="mt-1">
                                         <div class="closing-text">
                                             <h4>Fast fertig</h4>
-                                            <p>Bitte unterschreiben Sie noch im dafür vorgesehenen Feld</p>
+                                            <h6>Bitte unterschreiben Sie noch im Signaturfeld</h6>
                                             <div class="row">
-                                                <p>Die ordnungsgemäße Ausführung der Arbeiten, die Einsatzzeit und der Materialverbrauch werden hiermit anerkannt:</p>
+                                                <h6>Die ordnungsgemäße Ausführung der Arbeiten, die Einsatzzeit und der Materialverbrauch werden hiermit anerkannt:</h6>
                                                 <div id="signature-pad" class="m-signature-pad">
                                                     <div class="m-signature-pad--body">
                                                         <canvas></canvas>
-                                                        <input type="hidden" name="Signature" id="Signature" value="">
+                                                        <input type="visible" name="Signature" id="Signature" value="">
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <br>
+                                            <div class="container text-center">
+                                                <div class="row justify-content-center">
+                                                    <div class="col-md-auto">
+                                                        <button id="clear-signature" class="btn btn-warning" onclick="clearCanvas()" type="button">Signaturfeld leeren</button>
                                                     </div>
                                                 </div>
                                             </div>
@@ -374,7 +382,8 @@
                                                     class="form-check-input"
                                                     type="checkbox"
                                                     role="switch"
-                                                    name="agbs">
+                                                    name="agbs"
+                                                    id="agbs">
                                                 <label class="form-check-label">Hiermit stimme ich den AGBs zu</label>
                                             </div>
                                             <div class="form-check form-switch">
@@ -382,11 +391,13 @@
                                                     class="form-check-input"
                                                     type="checkbox"
                                                     role="switch"
-                                                    name="dsgvo">
+                                                    name="dsgvo"
+                                                    id="dsgvo">
                                                 <label class="form-check-label">Hiermit stimme ich der Datenschutzerklärung zu</label>
                                             </div>
                                             <input type="hidden" id="locationDateField" name="OrtDatum" value="">
-                                            <p>Zahlbar sofort nach Rechnungserhalt, ohne Abzug.</p>
+                                            <br>
+                                            <h6>Zahlbar sofort nach Rechnungserhalt, ohne Abzug.</h6>
                                         </div>
                                     </div>
                                 </div>

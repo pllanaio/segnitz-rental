@@ -54,6 +54,15 @@ function dataURLToBlob(dataURL) {
     }
     return new Blob([uInt8Array], {type: contentType});
 }
+
+/**
+ * Clear the canvas
+ */
+function clearCanvas() {
+    signaturePad.clear();
+}
+
+
 var signaturePad = new SignaturePad(canvas);
 signaturePad.minWidth = 1; //minimale Breite des Stiftes
 signaturePad.maxWidth = 5; //maximale Breite des Stiftes

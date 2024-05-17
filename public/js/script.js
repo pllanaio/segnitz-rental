@@ -36,6 +36,42 @@ if (current_step == 0) {
 }
 
 nextBtn.addEventListener('click', () => {
+
+    // Check if current step is valid before moving to next
+    let isValid = true;
+    switch(current_step) {
+        case 0:
+            isValid = validateStep1();
+            break;
+        case 1:
+            isValid = validateStep2();
+            break;
+        case 2:
+            isValid = validateStep3();
+            break;
+        case 3:
+            isValid = validateStep4();
+            break;
+        case 4:
+            isValid = validateStep5();
+            break;
+        case 5:
+            isValid = validateStep6();
+            break;
+        case 6:
+            isValid = validateStep7();
+            break;
+        case 7:
+            isValid = validateStep8();
+            break;
+
+    }
+    
+    if (!isValid) {
+        return; // Stop the function if the current step is not valid
+    }
+
+
     current_step++;
     let previous_step = current_step - 1;
     if ((current_step > 0) && (current_step <= stepCount)) {
@@ -177,3 +213,142 @@ submitBtn.addEventListener('click', () => {
         })
 
 });
+
+// Validation functions for each step
+function validateStep1() {
+    let isValid = true;
+    const recipient = document.querySelector('input[name="Recipient"]').value;
+    const client = document.querySelector('input[name="Client"]').value;
+    const ownerChecked = document.getElementById('Owner').checked;
+    const renterChecked = document.getElementById('Renter').checked;
+    const otherRelatedChecked = document.getElementById('other_related').checked;
+
+    // Regex, der nur Buchstaben, Leerzeichen und einige Satzzeichen erlaubt
+    const textOnlyRegex = /^[a-zA-ZäöüßÄÖÜéèàùçÉÈÀÙÇ.,' -]+$/;
+
+    // Überprüfung der Texteingaben auf ungültige Zeichen
+    if (!recipient || !client) {
+        alert('Keine Leeren Felder erlaubt');
+        isValid = false;
+    } else if (!textOnlyRegex.test(recipient) || !textOnlyRegex.test(client)) {
+        alert('Bitte geben Sie nur Text ohne Zahlen und Sonderzeichen in die Felder ein.');
+        isValid = false;
+    } else if (!ownerChecked && !renterChecked && !otherRelatedChecked) {
+        alert('Bitte wählen Sie mindestens eine Option (Eigentümer, Mieter, Objektangehöriger).');
+        isValid = false;
+    }
+
+    return isValid;
+}
+
+function validateStep2() {
+    let isValid = true;
+    const orderType = document.querySelector('select[name="OrderType"]').value;
+
+    if (orderType === "" || orderType === "Auftragsart auswählen...") {
+        alert('Bitte eine Auftragsart auswählen');
+        isValid = false;
+    }
+    return isValid;
+}
+
+function validateStep3() {
+    let isValid = true;
+    const orderNo = document.querySelector('input[name="OrderNo"]').value;
+    const clientNo = document.querySelector('input[name="ClientNo"]').value;
+    const workToDo = document.querySelector('input[name="WorkToDo"]').value;
+    const workerSelected = document.querySelector('select[name="Worker"]').value;
+
+    // Überprüfung, ob die Felder für Auftragsnummer und Kundennummer gefüllt sind
+    if (!orderNo || !clientNo) {
+        alert('Auftragsnummer und Kundennummer dürfen nicht leer sein.');
+        isValid = false;
+    } else if (!workToDo) {
+        alert('Bitte geben Sie die auszuführenden Arbeiten an.');
+        isValid = false;
+    } else if (workerSelected === "" || workerSelected === "Monteur auswählen...") {
+        alert('Bitte wählen Sie einen Monteur aus.');
+        isValid = false;
+    }
+
+    return isValid;
+}
+
+function validateStep4() {
+    let isValid = true;
+    const dateTimePickerInput = document.querySelector('input[name="DateTimePickerInput"]').value;
+    const workReport = document.querySelector('textarea[name="WorkReport"]').value;
+
+    // Überprüfung, ob das Datum ausgewählt wurde
+    if (!dateTimePickerInput) {
+        alert('Bitte geben Sie den Termin und die Uhrzeit an.');
+        isValid = false;
+    } else if (!workReport.trim()) {
+        alert('Der Arbeitsbericht darf nicht leer sein.');
+        isValid = false;
+    }
+
+    return isValid;
+}
+
+function validateStep5() {
+    let isValid = true;
+    return isValid;
+}
+
+function validateStep6() {
+    let isValid = true;
+    return isValid;
+}
+
+function validateStep7() {
+    let isValid = true;
+    const machineUsageCheck = document.getElementById('MachineUsageCheck');
+    const disposeCheck = document.getElementById('DisposeCheck');
+    const workCheck = document.getElementById('WorkCheck');
+
+    const machineUsageTextfield = document.getElementById('MachineUsageTextfield');
+    const disposeTextfield = document.getElementById('DisposeTextfield');
+    const workTextfield = document.getElementById('WorkTextfield');
+
+    // Prüfe, ob die zugehörigen Textfelder ausgefüllt sind, wenn die Checkboxen aktiviert sind
+    if (machineUsageCheck.checked && !machineUsageTextfield.value.trim()) {
+        alert('Bitte geben Sie Details zum Maschineneinsatz an.');
+        isValid = false;
+    }
+    if (disposeCheck.checked && !disposeTextfield.value.trim()) {
+        alert('Bitte geben Sie Details zur Entsorgung an.');
+        isValid = false;
+    }
+    if (workCheck.checked && !workTextfield.value.trim()) {
+        alert('Bitte geben Sie Details zu weiteren Arbeiten an.');
+        isValid = false;
+    }
+    return isValid;
+}
+
+function validateStep8() {
+    let isValid = true;
+    const signatureInput = document.getElementById('Signature').value;
+    const agbsChecked = document.getElementById('agbs').checked;
+    const dsgvoChecked = document.getElementById('dsgvo').checked;
+
+    // Überprüfe, ob eine Unterschrift geleistet wurde
+    if (!signatureInput) {
+        alert('Bitte leisten Sie Ihre Unterschrift.');
+        isValid = false;
+    }
+
+    // Überprüfe, ob die AGBs akzeptiert wurden
+    if (!agbsChecked) {
+        alert('Bitte stimmen Sie den Allgemeinen Geschäftsbedingungen zu.');
+        isValid = false;
+    }
+
+    // Überprüfe, ob die Datenschutzerklärung akzeptiert wurde
+    if (!dsgvoChecked) {
+        alert('Bitte stimmen Sie der Datenschutzerklärung zu.');
+        isValid = false;
+    }
+    return isValid;
+}
