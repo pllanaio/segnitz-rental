@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require("path");
 const app = express();
 const mysql = require('mysql2/promise');
+const cors = require('cors');
 require('dotenv').config();
 app.use(express.json({limit: '1mb'}));
 app.use(express.urlencoded({limit: '1mb', extended: true}));
@@ -15,6 +16,12 @@ app.use((req, res, next) => {
     console.log(`Payload-Größe: ${payloadSize} Bytes`);
     next();
 });
+
+app.use(cors());
+
+function logDatabaseChange(action, table, value, timestamp = new Date()) {
+    console.log(`${timestamp.toISOString()} - Datenbankänderung: Element ${action} in der Tabelle ${table}. Betroffenes Element: ${JSON.stringify(value)}`);
+}
 
 app.get('/materials', async (req, res) => {
     try {
@@ -76,6 +83,11 @@ app.delete('/delete-material', async (req, res) => {
         
         await connection.end();
 
+        // Loggen der Datenbankänderung
+        if (result.affectedRows > 0) {
+            logDatabaseChange('gelöscht', 'materials', { name: materialName });
+        }
+
         if (result.affectedRows === 0) {
             return res.status(404).json({ error: 'Material nicht gefunden' });
         }
@@ -104,6 +116,11 @@ app.delete('/delete-worker', async (req, res) => {
         const [result] = await connection.execute('DELETE FROM workers WHERE worker_name = ?', [workerName]);
         
         await connection.end();
+
+        // Loggen der Datenbankänderung
+        if (result.affectedRows > 0) {
+            logDatabaseChange('gelöscht', 'workers', { name: workerName });
+        }
 
         if (result.affectedRows === 0) {
             return res.status(404).json({ error: 'Arbeiter nicht gefunden' });
@@ -262,6 +279,9 @@ app.post('/add-material', async (req, res) => {
         
         await connection.end();
 
+        // Loggen der Datenbankänderung
+        logDatabaseChange('hinzugefügt', 'materials', { name: materialName });
+
         res.status(200).json({ message: 'Material erfolgreich hinzugefügt', id: result.insertId });
     } catch (error) {
         console.error('Fehler beim Hinzufügen des Materials zur Datenbank:', error);
@@ -287,12 +307,15 @@ app.post('/add-worker', async (req, res) => {
         
         await connection.end();
 
+        // Loggen der Datenbankänderung
+        logDatabaseChange('hinzugefügt', 'workers', { name: workerName });
+
         res.status(200).json({ message: 'Monteur erfolgreich hinzugefügt', id: result.insertId });
     } catch (error) {
         console.error('Fehler beim Hinzufügen des Monteurs zur Datenbank:', error);
         res.status(500).json({ error: 'Fehler beim Hinzufügen des Monteurs zur Datenbank' });
     }
-})
+});
 
 app.get('/pdf-download/:filename', (req, res) => {
     const filename = req.params.filename;
@@ -303,6 +326,10 @@ app.get('/pdf-download/:filename', (req, res) => {
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
+
+app.get('/backend',(req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'backend.html'))
+})
 
 app.listen(3000, () => {
     console.log("Apollo Order Manager - Nather Heizung und Sanitär");
