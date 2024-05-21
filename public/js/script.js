@@ -14,10 +14,6 @@ let preloader = document.getElementById('preloader-wrapper');
 let bodyElement = document.querySelector('body');
 let succcessDiv = document.getElementById('success');
 
-form.onsubmit = () => {
-    return false
-}
-
 let current_step = 0;
 let stepCount = 7;
 step[current_step]
@@ -172,12 +168,15 @@ prevBtn.addEventListener('click', () => {
     progress((100 / stepCount) * current_step);
 });
 
-submitBtn.addEventListener('click', () => {
-    preloader
-        .classList
-        .add('d-block');
+submitBtn.addEventListener('click', (event) => {
+    // Stelle sicher, dass alle Validierungen bestanden sind, bevor das Formular abgesendet wird
+    let signatureValid = validateStep8(); // Diese Funktion überprüft die Unterschrift und Zustimmungen
 
-    const timer = ms => new Promise(res => setTimeout(res, ms));
+    if (!signatureValid) {
+        event.preventDefault(); // Verhindere das Absenden des Formulars
+    } else {
+        preloader.classList.add('d-block'); // Zeige den Ladebildschirm an, falls alles gültig ist
+            const timer = ms => new Promise(res => setTimeout(res, ms));
 
     timer(0)
         .then(() => {
@@ -211,10 +210,9 @@ submitBtn.addEventListener('click', () => {
                 .classList
                 .add('d-block');
         })
-
+    }
 });
 
-// Validation functions for each step
 function validateStep1() {
     let isValid = true;
     const recipient = document.querySelector('input[name="Recipient"]').value;
@@ -306,7 +304,6 @@ function validateStep7() {
     const machineUsageCheck = document.getElementById('MachineUsageCheck');
     const disposeCheck = document.getElementById('DisposeCheck');
     const workCheck = document.getElementById('WorkCheck');
-
     const machineUsageTextfield = document.getElementById('MachineUsageTextfield');
     const disposeTextfield = document.getElementById('DisposeTextfield');
     const workTextfield = document.getElementById('WorkTextfield');
@@ -329,26 +326,26 @@ function validateStep7() {
 
 function validateStep8() {
     let isValid = true;
-    const signatureInput = document.getElementById('Signature').value;
+    const signatureCanvas = signaturePad.isEmpty(); // Nutzt die isEmpty() Funktion von SignaturePad, um zu prüfen, ob eine Unterschrift geleistet wurde
     const agbsChecked = document.getElementById('agbs').checked;
     const dsgvoChecked = document.getElementById('dsgvo').checked;
 
     // Überprüfe, ob eine Unterschrift geleistet wurde
-    if (!signatureInput) {
+    if (signatureCanvas) {
         alert('Bitte leisten Sie Ihre Unterschrift.');
         isValid = false;
     }
 
-    // Überprüfe, ob die AGBs akzeptiert wurden
     if (!agbsChecked) {
         alert('Bitte stimmen Sie den Allgemeinen Geschäftsbedingungen zu.');
         isValid = false;
     }
 
-    // Überprüfe, ob die Datenschutzerklärung akzeptiert wurde
     if (!dsgvoChecked) {
         alert('Bitte stimmen Sie der Datenschutzerklärung zu.');
         isValid = false;
     }
+
     return isValid;
 }
+
