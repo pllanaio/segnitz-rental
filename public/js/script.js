@@ -31,6 +31,20 @@ if (current_step == 0) {
         .add('d-inline-block');
 }
 
+function submitSignature() {
+    var dataURL = signaturePad.toDataURL();
+    //Konsolenausgabe zur Sendungsüberprüfung des Bildes
+    if (dataURL.trim() !== "") {
+        document
+            .getElementById("Signature")
+            .value = dataURL;
+        console.log("Unterschrift erfolgreich übertragen");
+        console.log(dataURL);
+    } else {
+        console.log("Keine Bildübertragung erfolgt");
+    }
+}
+
 nextBtn.addEventListener('click', () => {
 
     // Check if current step is valid before moving to next
