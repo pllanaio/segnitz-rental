@@ -3,8 +3,8 @@ document.addEventListener('DOMContentLoaded', function() {
     var selectedOptionsContainer = document.getElementById("selectedOptionsContainer");
     var addButton = document.getElementById("addButton");
     var inputField = inputGroup.querySelector('input');
-
     var form = document.getElementById('form-wrapper');
+
     form.addEventListener('submit', function(event) {
         event.preventDefault(); // Verhindert das Formular-Submit
         var inputValue = document.querySelector('#inputGroup input').value.trim();
@@ -148,5 +148,4 @@ document.addEventListener('DOMContentLoaded', function() {
             alert('Fehler beim Löschen des Eintrags');
         });
     }
-
 });
