@@ -31,6 +31,11 @@ body {
     text-align: center;
   }
 
+  .btn-primary:hover {
+    background-color: #0d6efd; /* Dies ist die Standardfarbe von Bootstrap für btn-primary */
+    border-color: #0d6efd; /* Passen Sie diese Werte entsprechend Ihrer spezifischen Farbeinstellung an */
+}
+
   .form-select:focus, .form-control:focus{
     border: 1px solid #007bff;
     border-radius: 5px;

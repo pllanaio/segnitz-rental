@@ -11,12 +11,7 @@
     <link rel="stylesheet" href="css/bootstrap-icons-1.11.3/font/bootstrap-icons.min.css">
     <!-- FONT -->
     <link rel="stylesheet" href="css/fonts.css">
-    <style>
-        .btn-primary:hover {
-            background-color: #0d6efd; /* Dies ist die Standardfarbe von Bootstrap für btn-primary */
-            border-color: #0d6efd; /* Passen Sie diese Werte entsprechend Ihrer spezifischen Farbeinstellung an */
-        }
-    </style>
+
 </head>
 <body>
     <!-- CONTAINER -->
@@ -28,7 +23,7 @@
                     <h2>NATHER</h2>
                     <h2>Heizung - Sanitär</h2>
                     <br>
-                    <h3>Konfiguration</h3>
+                    <h3>Anmeldung</h3>
                     <br>
                     <p>Fachbetrieb der Innung Sanitär- und Heizungstechnik</p>
                     <p>Zwergerstraße 2b<br>
@@ -37,8 +32,6 @@
                         <a href="mailto:info@nather-hs.de">E-Mail:info@nather-hs.de</a>
                     </p>
                     <br>
-                    <a href="index.html"><button type="button" class="btn btn-secondary"><i class="bi bi-gear"></i> Konfiguration beenden </button></a>
-                    <a href=""><button type="button" class="btn btn-danger" onclick="logout()"><i class="bi bi-x-circle"></i> Abmelden </button></a>
                 </div>
             </div>
             <!-- FORMS -->
@@ -54,25 +47,19 @@
                     </div>
                 </div>
                 <div id="qbox-container_form">
-                    <form class="needs-validation" id="form-wrapper" method="post" name="form-wrapper" novalidate="" onsubmit="event.preventDefault();">
+                    <form class="needs-validation" id="loginForm" method="post" name="loginForm" onsubmit="handleLogin(event)">
                         <div id="steps-container">
                             <div class="step d-block">
                                 <div class="row">
-                                    <h4>Auswählen welche Datenbank bearbeitet werden soll: </h4>
-                                    <select name="DBType" id="DBType" class="form-select col-12">
-                                        <option selected disabled hidden>Datenbank auswählen...</option>
-                                        <option value="material">Material</option>
-                                        <option value="monteure">Monteure</option>
-                                    </select>
-                                </div>
-                                <br>
-                                    <div id="inputGroup" style="display: none;" class="input-group col-12" >
-                                        <input type="text" id="db_edit" class="form-control" placeholder="Neuen Eintrag hinzufügen" aria-label="Neuen Eintrag hinzufügen">
-                                        <button class="btn btn-success" type="button" id="addButton">Hinzufügen</button>
+                                    <div id="login">
+                                        <h4>Benutzernamen und Passwort eingeben </h4>
+                                        <input type="text" class="form-control" id="username" placeholder="Benutzername eingeben">
+                                        <br>
+                                        <input type="password" class="form-control" id="password" placeholder="Passwort eingeben">
+                                        <br>
+                                        <button type="submit" class="btn btn-primary">Einloggen</button>
                                     </div>
-                                <br>
-                                <h4>Verfügbare Optionen: <span id="itemCount">0</span></h4>
-                                <div id="selectedOptionsContainer"></div>
+                                </div>
                             </div>
                         </div>
                     </form>
@@ -91,8 +78,26 @@
     <script type="text/javascript" src="js/static-forms.js"></script>
     <!--Popper-->
     <script type="text/javascript" src="js/popper.min.js"></script>
-    <!-- JavaScript to populate dropdown options -->
-    <script type="text/javascript" src="js/backend_config.js"></script>
+    <!-- Javascript to handle the login -->
+    <script>
+    async function handleLogin(event) {
+        event.preventDefault();
+        const username = document.getElementById('username').value;
+        const password = document.getElementById('password').value;
+
+        const response = await fetch('/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password })
+        });
+
+        if (response.ok) {
+            window.location.href = '/index.html'; // Ändern zu /index.html falls benötigt
+        } else {
+            alert('Fehler bei der Anmeldung');
+        }
+    }
+    </script>
 </body>
 </html>
 

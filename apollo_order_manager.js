@@ -1,13 +1,113 @@
 const express = require("express");
-const fsp = require("fs").promises;
-const fs = require('fs');
-const path = require("path");
 const app = express();
-const mysql = require('mysql2/promise');
+const path = require("path");
+const bcrypt = require('bcrypt');
 require('dotenv').config();
 app.use(express.json({limit: '1mb'}));
 app.use(express.urlencoded({limit: '1mb', extended: true}));
+const session = require('express-session');
+
+// Session Middleware konfigurieren
+app.use(session({
+    secret: 'geheimnis', // Ein Geheimnis, das zum Signieren der Session-ID verwendet wird
+    resave: false, // Sollte die Session nicht neu gespeichert werden, wenn sie nicht geändert wurde
+    saveUninitialized: false, // Sollte keine uninitialisierte Session gespeichert werden
+    cookie: { secure: false } // Auf `true` setzen, wenn du HTTPS verwendest
+}));
+
+// Spezifische Route für die Startseite
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'login.html'));
+});
+
+app.get('/', checkAuthentication, (req, res) => {
+    res.redirect('/index.html');  // Leite auf die Hauptseite um, wenn authentifiziert
+});
+
+app.get('/index.html', checkAuthentication, (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+app.get('/backend.html', checkAuthentication, (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'backend.html'));
+});
+
+// Statische Dateien bereitstellen
 app.use(express.static("public"));
+
+// Login-Route
+app.post('/login', async (req, res) => {
+    const { username, password } = req.body;
+
+    try {
+        const connection = await mysql.createConnection({
+            host: process.env.DB_HOST,
+            user: process.env.DB_USER,
+            password: process.env.DB_PW,
+            database: process.env.DB_NAME
+        });
+
+        // Hole das Passwort des Benutzers aus der Datenbank
+        const [rows] = await connection.execute('SELECT password FROM users WHERE username = ?', [username]);
+
+        if (rows.length > 0) {
+            // Vergleiche das eingegebene Passwort mit dem gehashten Passwort in der Datenbank
+            const passwordValid = await bcrypt.compare(password, rows[0].password);
+
+            if (passwordValid) {
+                // Passwort ist korrekt, Benutzer ist authentifiziert
+                req.session.user = username;  // Speichere den Benutzernamen in der Session
+                res.status(200).send("Login erfolgreich!");
+                console.log(new Date().toISOString(), '- Anmeldung: Benutzer:', username, 'erfolgreich angemeldet');
+            } else {
+                // Passwort ist falsch
+                res.status(401).send("Falsche Zugangsdaten.");
+            }
+        } else {
+            // Kein Benutzer gefunden
+            res.status(401).send("Falsche Zugangsdaten.");
+        }
+
+        await connection.end();
+    } catch (error) {
+        console.error('Fehler beim Login:', error);
+        res.status(500).send("Serverfehler beim Versuch, sich anzumelden.");
+    }
+});
+
+app.post('/logout', (req, res) => {
+    const timestamp = new Date();
+    if (req.session.user) {
+        console.log(timestamp.toISOString(),'- Abmeldung: Benutzer:', req.session.user,'erfolgreich abgemeldet'); // Zugriff auf den gespeicherten Benutzernamen
+        req.session.destroy(err => {
+            if (err) {
+                console.log('Fehler beim Beenden der Sitzung:', err);
+                return res.status(500).send('Fehler beim Abmelden');
+            }
+            res.send('Logout erfolgreich');
+        });
+    } else {
+        res.status(400).send("Kein Benutzer ist angemeldet.");
+    }
+});
+
+function checkAuthentication(req, res, next) {
+    if (req.session.user) {
+        next(); // der Benutzer ist angemeldet, fahre mit der nächsten Middleware/Routenfunktion fort
+    } else {
+        res.redirect('/login.html'); // Leite den Benutzer zur Login-Seite um, wenn er nicht angemeldet ist
+    }
+}
+
+// Geschützte Route, die die checkAuthentication Middleware verwendet
+app.get('/protected', checkAuthentication, (req, res) => {
+    res.send('Willkommen zum geschützten Bereich, ' + req.session.user);
+});
+
+const fsp = require("fs").promises;
+const fs = require('fs');
+const mysql = require('mysql2/promise');
+
 const {PDFDocument, PDFTextField, PDFCheckBox} = require('pdf-lib');
 
 app.use((req, res, next) => {
@@ -130,7 +230,7 @@ app.delete('/delete-worker', async (req, res) => {
     }
 });
 
-async function generatePDF(formDataObj, templatePath, outputPath) {
+async function generatePDF(username, formDataObj, templatePath, outputPath) {
 
     let signatureBase64;
     const formData = formDataObj;
@@ -233,32 +333,28 @@ async function generatePDF(formDataObj, templatePath, outputPath) {
     fs.writeFileSync(outputPath, pdfBytes);
 }
 
-app.post('/data', async (req, res) => {
+app.post('/data', checkAuthentication, async (req, res) => {
     try {
         const timestamp = new Date().getTime();
         const pdfFilename = `pdf_${timestamp}.pdf`;
         const pdfFilepath = path.join(__dirname, 'public', 'pdf', pdfFilename);
         const templatePdfPath = path.join(__dirname, 'public', 'pdf', 'template.pdf');
 
-        // Speichern der Formulardaten als JSON
-        const jsonFilename = `data_${timestamp}.json`;
-        const jsonFilePath = path.join(__dirname, 'public', 'json', jsonFilename);
-        await fsp.writeFile(jsonFilePath, JSON.stringify(req.body, null, 2));
+        await fsp.writeFile(path.join(__dirname, 'public', 'json', `data_${timestamp}.json`), JSON.stringify(req.body, null, 2));
         console.log('Formulardaten als JSON gespeichert.');
 
-        // Übergebe formData direkt als Objekt
-        await generatePDF(req.body, templatePdfPath, pdfFilepath);
+        // Übergebe formData direkt als Objekt und füge Benutzernamen hinzu
+        await generatePDF(req.session.user, req.body, templatePdfPath, pdfFilepath);
         console.log('PDF-Datei erfolgreich generiert');
-        res.json({pdfUrl: `/pdf-download/${pdfFilename}`});
+
+        res.json({ pdfUrl: `/pdf-download/${pdfFilename}` });
     } catch (err) {
         console.error('Fehler:', err);
-        res
-            .status(500)
-            .send('Fehler beim Verarbeiten der Anfrage');
+        res.status(500).send('Fehler beim Verarbeiten der Anfrage');
     }
 });
 
-app.post('/add-material', async (req, res) => {
+app.post('/add-material', checkAuthentication, async (req, res) => {
     const materialName = req.body.name;
     if (!materialName) {
         return res.status(400).json({ error: 'Materialname nicht angegeben' });
@@ -286,7 +382,7 @@ app.post('/add-material', async (req, res) => {
     }
 })
 
-app.post('/add-worker', async (req, res) => {
+app.post('/add-worker', checkAuthentication, async (req, res) => {
     const workerName = req.body.name;
     if (!workerName) {
         return res.status(400).json({ error: 'Monteursname nicht angegeben' });
@@ -314,21 +410,13 @@ app.post('/add-worker', async (req, res) => {
     }
 });
 
-app.get('/pdf-download/:filename', (req, res) => {
+app.get('/pdf-download/:filename', checkAuthentication, (req, res) => {
     const filename = req.params.filename;
     const filepath = path.join(__dirname, 'public', 'pdf', filename);
     res.download(filepath); // Setzt Content-Disposition zum Download
 });
 
-app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
-
-app.get('/backend',(req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'backend.html'))
-})
-
 app.listen(3000, () => {
-    console.log("Apollo Order Manager - Nather Heizung und Sanitär");
+    console.log("Apollo Order Manager - Nather Heizung und Sanitär")
     console.log("Server läuft auf Port 3000");
-})
+});
