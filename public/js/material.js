@@ -36,7 +36,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
         // Limit the number of material inputs to a maximum of 10
         if (current_material_no >= 10) {
-            alert('Maximum of 10 material input fields reached.');
+            alert('Maximum an Materialfeldern erreicht');
             return; // Stop the function if the limit is reached
         }
 

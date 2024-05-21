@@ -45,7 +45,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
         // Check if the maximum limit of 10 work input fields has been reached
         if (current_work_no >= 10) {
-            alert('Maximum of 10 work input fields reached.');
+            alert('Maximum an Arbeitsfeldern erreicht');
             return; // Prevent adding more than 10 input fields
         }
 

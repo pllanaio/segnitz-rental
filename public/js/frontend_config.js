@@ -305,11 +305,53 @@ function validateStep4() {
 
 function validateStep5() {
     let isValid = true;
+    const totalWork = parseInt(document.getElementById('total_work').value);
+
+    for (let i = 0; i < totalWork; i++) {
+        const workInput = document.getElementById('work_' + i);
+        const workSelect = document.getElementById('work_dropdown_' + i);
+
+        // Überprüfung, ob das Eingabefeld leer ist oder keine Zahl enthält
+        if (!workInput.value || isNaN(workInput.value)) {
+            alert('Bitte geben Sie eine gültige Zahl in das Arbeitsfeld ' + (i + 1) + ' ein.');
+            isValid = false;
+            break;
+        }
+
+        // Überprüfung, ob im Dropdown noch "Monteur auswählen" ausgewählt ist
+        if (workSelect.value === 'Monteur auswählen...') {
+            alert('Bitte wählen Sie einen Monteur für das Arbeitsfeld ' + (i + 1) + '.');
+            isValid = false;
+            break;
+        }
+    }
+
     return isValid;
 }
 
 function validateStep6() {
     let isValid = true;
+    const totalMaterial = parseInt(document.getElementById('total_material').value);
+
+    for (let i = 0; i < totalMaterial; i++) {
+        const materialInput = document.getElementById('material_' + i);
+        const materialSelect = document.getElementById('material_dropdown_' + i);
+
+        // Überprüfung, ob das Eingabefeld leer ist oder keine Zahl enthält
+        if (!materialInput.value || isNaN(materialInput.value)) {
+            alert('Bitte geben Sie eine gültige Zahl in das Materialfeld ' + (i + 1) + ' ein.');
+            isValid = false;
+            break;
+        }
+
+        // Überprüfung, ob im Dropdown noch "Material auswählen" ausgewählt ist
+        if (materialSelect.value === 'Material auswählen...') {
+            alert('Bitte wählen Sie ein Material für das Materialfeld ' + (i + 1) + '.');
+            isValid = false;
+            break;
+        }
+    }
+
     return isValid;
 }
 
