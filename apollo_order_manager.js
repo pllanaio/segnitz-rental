@@ -99,11 +99,6 @@ function checkAuthentication(req, res, next) {
     }
 }
 
-// Geschützte Route, die die checkAuthentication Middleware verwendet
-app.get('/protected', checkAuthentication, (req, res) => {
-    res.send('Willkommen zum geschützten Bereich, ' + req.session.user);
-});
-
 const fsp = require("fs").promises;
 const fs = require('fs');
 const mysql = require('mysql2/promise');
@@ -341,11 +336,11 @@ app.post('/data', checkAuthentication, async (req, res) => {
         const templatePdfPath = path.join(__dirname, 'public', 'pdf', 'template.pdf');
 
         await fsp.writeFile(path.join(__dirname, 'public', 'json', `data_${timestamp}.json`), JSON.stringify(req.body, null, 2));
-        console.log('Formulardaten als JSON gespeichert.');
+        console.log(`${new Date().toISOString()} - JSON-Datei erfolgreich generiert und gespeichert`);
 
         // Übergebe formData direkt als Objekt und füge Benutzernamen hinzu
         await generatePDF(req.session.user, req.body, templatePdfPath, pdfFilepath);
-        console.log('PDF-Datei erfolgreich generiert');
+        console.log(`${new Date().toISOString()} - PDF-Datei erfolgreich generiert und gespeichert`);
 
         res.json({ pdfUrl: `/pdf-download/${pdfFilename}` });
     } catch (err) {
@@ -367,6 +362,13 @@ app.post('/add-material', checkAuthentication, async (req, res) => {
             password: process.env.DB_PW,
             database: process.env.DB_NAME
         });
+
+        // Überprüfen, ob das Material bereits existiert
+        const [check] = await connection.execute('SELECT * FROM materials WHERE material_name = ?', [materialName]);
+        if (check.length > 0) {
+            await connection.end();
+            return res.status(409).json({ message: 'Material existiert bereits.' });
+        }
 
         const [result] = await connection.execute('INSERT INTO materials (material_name) VALUES (?)', [materialName]);
         
@@ -395,6 +397,13 @@ app.post('/add-worker', checkAuthentication, async (req, res) => {
             password: process.env.DB_PW,
             database: process.env.DB_NAME
         });
+
+        // Überprüfen, ob der Monteur bereits existiert
+        const [check] = await connection.execute('SELECT * FROM workers WHERE worker_name = ?', [workerName]);
+        if (check.length > 0) {
+            await connection.end();
+            return res.status(409).json({ message: 'Monteur existiert bereits.' });
+        }
 
         const [result] = await connection.execute('INSERT INTO workers (worker_name) VALUES (?)', [workerName]);
         
