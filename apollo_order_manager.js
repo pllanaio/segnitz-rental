@@ -308,8 +308,8 @@ async function generatePDF(formDataObj, templatePath, outputPath) {
             step
                 .elements
                 .forEach(element => {
-                    // Ignoriere die Felder total_work total_material und Signature
-                    if (element.name === "total_work" || element.name === "total_material" || element.name === "Signature" || ((element.name.startsWith("work_") || element.name.startsWith("material_")) && !element.name.includes("_combined_"))) {
+                    // Ignoriere einige Felder sodass keine Fehler auftreten
+                    if (element.name === "total_work" || element.name === "total_material" || element.name === "Signature" || ((element.name.startsWith("work_") || element.name.startsWith("material_")) && !element.name.includes("_combined_"))||element.name === "email") {
                         return;
                     }
 
@@ -405,11 +405,11 @@ async function sendEmailWithPDF(recipients, pdfFilePath, pdfFilename) {
     };
 
     try {
-        let info = await transporter.sendMail(mailOptions);
-        console.log(
-            `${new Date().toISOString()} - E-Mail versendet: %s`,
-            info.messageId
-        );
+       let info = await transporter.sendMail(mailOptions);
+       // console.log(
+       //     `${new Date().toISOString()} - E-Mail versendet: %s`,
+       //     info.messageId
+       // );
         return true;
     } catch (error) {
         console.error('Fehler im Mailversand: ', error);

@@ -43,8 +43,8 @@ document
 
         // Konvertieren des JSON-Objekts in einen String und Ausgabe
         var jsonStr = JSON.stringify(jsonObject, null, 2);
-        console.log("JSON-Datei erfolgreich generiert");
-        console.log(jsonStr);
+        //console.log("JSON-Datei erfolgreich generiert");
+        //console.log(jsonStr);
 
         // Senden der Daten aus dem html-body
         fetch('/data', {

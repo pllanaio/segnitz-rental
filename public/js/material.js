@@ -8,7 +8,7 @@ document.addEventListener('DOMContentLoaded', function () {
         .then(response => response.json())
         .then(materialOptions => {
             // Hier kannst du die Materialoptionen verwenden
-            console.log('Materialoptionen aus der Datenbank:', materialOptions);
+            //console.log('Materialoptionen aus der Datenbank:', materialOptions);
             // Füge die Materialoptionen in das Array availableOptionsMaterial ein
             availableOptionsMaterial.push(...materialOptions);
 

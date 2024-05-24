@@ -7,7 +7,7 @@ document.addEventListener('DOMContentLoaded', function () {
         .then(response => response.json())
         .then(workerOptions => {
             // Hier kannst du die Monteuroptionen verwenden
-            console.log('Monteuroptionen aus der Datenbank:', workerOptions);
+            //console.log('Monteuroptionen aus der Datenbank:', workerOptions);
 
             // Füge die Monteuroptionen in das Array availableOptionsWork ein
             availableOptionsWork.push(...workerOptions);
