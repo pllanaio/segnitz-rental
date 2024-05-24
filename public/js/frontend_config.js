@@ -405,3 +405,20 @@ function validateStep8() {
     return isValid;
 }
 
+function logout() {
+    fetch('/logout', {
+        method: 'POST',
+    })
+    .then(response => {
+        if (response.ok) {
+            // Optional: Weiterleitung zur Login-Seite oder Anzeige einer Bestätigung
+            window.location.href = '/login.html';
+        } else {
+            console.error('Fehler beim Logout');
+            alert('Fehler beim Abmelden');
+        }
+    })
+    .catch(error => {
+        console.error('Netzwerkfehler beim Versuch, sich abzumelden:', error);
+    });
+}
