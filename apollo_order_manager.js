@@ -9,7 +9,7 @@ const session = require('express-session');
 const fsp = require("fs").promises;
 const fs = require('fs');
 const mysql = require('mysql2/promise');
-
+const nodemailer = require('nodemailer');
 const {PDFDocument, PDFTextField, PDFCheckBox} = require('pdf-lib');
 
 // Session Middleware konfigurieren
@@ -17,7 +17,9 @@ app.use(session({
     secret: 'geheimnis', // Ein Geheimnis, das zum Signieren der Session-ID verwendet wird
     resave: false, // Sollte die Session nicht neu gespeichert werden, wenn sie nicht geändert wurde
     saveUninitialized: false, // Sollte keine uninitialisierte Session gespeichert werden
-    cookie: { secure: false } // Auf `true` setzen, wenn du HTTPS verwendest
+    cookie: {
+        secure: false
+    } // Auf `true` setzen, wenn du HTTPS verwendest
 }));
 
 // Spezifische Route für die Startseite
@@ -26,7 +28,7 @@ app.get('/', (req, res) => {
 });
 
 app.get('/', checkAuthentication, (req, res) => {
-    res.redirect('/index.html');  // Leite auf die Hauptseite um, wenn authentifiziert
+    res.redirect('/index.html'); // Leite auf die Hauptseite um, wenn authentifiziert
 });
 
 app.get('/index.html', checkAuthentication, (req, res) => {
@@ -42,57 +44,82 @@ app.use(express.static("public"));
 
 // Login-Route
 app.post('/login', async (req, res) => {
-    const { username, password } = req.body;
+    const {username, password} = req.body;
 
     try {
-        const connection = await mysql.createConnection({
-            host: process.env.DB_HOST,
-            user: process.env.DB_USER,
-            password: process.env.DB_PW,
-            database: process.env.DB_NAME
-        });
+        const connection = await mysql.createConnection(
+            {host: process.env.DB_HOST, user: process.env.DB_USER, password: process.env.DB_PW, database: process.env.DB_NAME}
+        );
 
         // Hole das Passwort des Benutzers aus der Datenbank
-        const [rows] = await connection.execute('SELECT password FROM users WHERE username = ?', [username]);
+        const [rows] = await connection.execute(
+            'SELECT password FROM users WHERE username = ?',
+            [username]
+        );
 
         if (rows.length > 0) {
-            // Vergleiche das eingegebene Passwort mit dem gehashten Passwort in der Datenbank
+            // Vergleiche das eingegebene Passwort mit dem gehashten Passwort in der
+            // Datenbank
             const passwordValid = await bcrypt.compare(password, rows[0].password);
 
             if (passwordValid) {
                 // Passwort ist korrekt, Benutzer ist authentifiziert
-                req.session.user = username;  // Speichere den Benutzernamen in der Session
-                res.status(200).send("Login erfolgreich!");
-                console.log(new Date().toISOString(), '- Anmeldung: Benutzer:', username, 'erfolgreich angemeldet');
+                req.session.user = username; // Speichere den Benutzernamen in der Session
+                res
+                    .status(200)
+                    .send("Login erfolgreich!");
+                console.log(
+                    new Date().toISOString(),
+                    '- Anmeldung: Benutzer:',
+                    username,
+                    'erfolgreich angemeldet'
+                );
             } else {
                 // Passwort ist falsch
-                res.status(401).send("Falsche Zugangsdaten.");
+                res
+                    .status(401)
+                    .send("Falsche Zugangsdaten.");
             }
         } else {
             // Kein Benutzer gefunden
-            res.status(401).send("Falsche Zugangsdaten.");
+            res
+                .status(401)
+                .send("Falsche Zugangsdaten.");
         }
 
         await connection.end();
     } catch (error) {
         console.error('Fehler beim Login:', error);
-        res.status(500).send("Serverfehler beim Versuch, sich anzumelden.");
+        res
+            .status(500)
+            .send("Serverfehler beim Versuch, sich anzumelden.");
     }
 });
 
 app.post('/logout', (req, res) => {
     const timestamp = new Date();
     if (req.session.user) {
-        console.log(timestamp.toISOString(),'- Abmeldung: Benutzer:', req.session.user,'erfolgreich abgemeldet'); // Zugriff auf den gespeicherten Benutzernamen
-        req.session.destroy(err => {
-            if (err) {
-                console.log('Fehler beim Beenden der Sitzung:', err);
-                return res.status(500).send('Fehler beim Abmelden');
-            }
-            res.send('Logout erfolgreich');
-        });
+        console.log(
+            timestamp.toISOString(),
+            '- Abmeldung: Benutzer:',
+            req.session.user,
+            'erfolgreich abgemeldet'
+        ); // Zugriff auf den gespeicherten Benutzernamen
+        req
+            .session
+            .destroy(err => {
+                if (err) {
+                    console.log('Fehler beim Beenden der Sitzung:', err);
+                    return res
+                        .status(500)
+                        .send('Fehler beim Abmelden');
+                }
+                res.send('Logout erfolgreich');
+            });
     } else {
-        res.status(400).send("Kein Benutzer ist angemeldet.");
+        res
+            .status(400)
+            .send("Kein Benutzer ist angemeldet.");
     }
 });
 
@@ -106,125 +133,151 @@ function checkAuthentication(req, res, next) {
 
 app.use((req, res, next) => {
     const payloadSize = Buffer.byteLength(JSON.stringify(req.body));
-    console.log(`Payload-Größe: ${payloadSize} Bytes`);
+    //console.log(`Payload-Größe: ${payloadSize} Bytes`);
     next();
 });
 
 function logDatabaseChange(action, table, value, timestamp = new Date()) {
-    console.log(`${timestamp.toISOString()} - Datenbankänderung: Element ${action} in der Tabelle ${table}. Betroffenes Element: ${JSON.stringify(value)}`);
+    console.log(
+        `${timestamp.toISOString()} - Datenbankänderung: Element ${action} in der Tabelle ${table}. Betroffenes Element: ${JSON.stringify(value)}`
+    );
 }
 
 app.get('/materials', async (req, res) => {
     try {
-        const connection = await mysql.createConnection({
-            host: process.env.DB_HOST,
-            user: process.env.DB_USER,
-            password: process.env.DB_PW,
-            database: process.env.DB_NAME
-        });
+        const connection = await mysql.createConnection(
+            {host: process.env.DB_HOST, user: process.env.DB_USER, password: process.env.DB_PW, database: process.env.DB_NAME}
+        );
 
-        const [rows, fields] = await connection.execute('SELECT material_name FROM materials');
+        const [rows, fields] = await connection.execute(
+            'SELECT material_name FROM materials'
+        );
 
         await connection.end();
 
         const materialOptions = rows.map(row => row.material_name);
         res.json(materialOptions);
     } catch (error) {
-        console.error('Fehler beim Laden der Materialoptionen aus der Datenbank:', error);
-        res.status(500).json({ error: 'Fehler beim Laden der Materialoptionen aus der Datenbank' });
+        console.error(
+            'Fehler beim Laden der Materialoptionen aus der Datenbank:',
+            error
+        );
+        res
+            .status(500)
+            .json({error: 'Fehler beim Laden der Materialoptionen aus der Datenbank'});
     }
 });
 
 app.get('/workers', async (req, res) => {
     try {
-        const connection = await mysql.createConnection({
-            host: process.env.DB_HOST,
-            user: process.env.DB_USER,
-            password: process.env.DB_PW,
-            database: process.env.DB_NAME
-        });
+        const connection = await mysql.createConnection(
+            {host: process.env.DB_HOST, user: process.env.DB_USER, password: process.env.DB_PW, database: process.env.DB_NAME}
+        );
 
-        const [rows, fields] = await connection.execute('SELECT worker_name FROM workers');
+        const [rows, fields] = await connection.execute(
+            'SELECT worker_name FROM workers'
+        );
 
         await connection.end();
 
         const workerOptions = rows.map(row => row.worker_name);
         res.json(workerOptions);
     } catch (error) {
-        console.error('Fehler beim Laden der Monteuroptionen aus der Datenbank:', error);
-        res.status(500).json({ error: 'Fehler beim Laden der Materialoptionen aus der Datenbank' });
+        console.error(
+            'Fehler beim Laden der Monteuroptionen aus der Datenbank:',
+            error
+        );
+        res
+            .status(500)
+            .json({error: 'Fehler beim Laden der Materialoptionen aus der Datenbank'});
     }
 });
 
 app.delete('/delete-material', async (req, res) => {
     const materialName = req.body.name;
     if (!materialName) {
-        return res.status(400).json({ error: 'Materialname nicht angegeben' });
+        return res
+            .status(400)
+            .json({error: 'Materialname nicht angegeben'});
     }
 
     try {
-        const connection = await mysql.createConnection({
-            host: process.env.DB_HOST,
-            user: process.env.DB_USER,
-            password: process.env.DB_PW,
-            database: process.env.DB_NAME
-        });
+        const connection = await mysql.createConnection(
+            {host: process.env.DB_HOST, user: process.env.DB_USER, password: process.env.DB_PW, database: process.env.DB_NAME}
+        );
 
-        const [result] = await connection.execute('DELETE FROM materials WHERE material_name = ?', [materialName]);
-        
+        const [result] = await connection.execute(
+            'DELETE FROM materials WHERE material_name = ?',
+            [materialName]
+        );
+
         await connection.end();
 
         // Loggen der Datenbankänderung
         if (result.affectedRows > 0) {
-            logDatabaseChange('gelöscht', 'materials', { name: materialName });
+            logDatabaseChange('gelöscht', 'materials', {name: materialName});
         }
 
         if (result.affectedRows === 0) {
-            return res.status(404).json({ error: 'Material nicht gefunden' });
+            return res
+                .status(404)
+                .json({error: 'Material nicht gefunden'});
         }
 
-        res.status(200).json({ message: 'Material erfolgreich gelöscht' });
+        res
+            .status(200)
+            .json({message: 'Material erfolgreich gelöscht'});
     } catch (error) {
         console.error('Fehler beim Löschen des Materials aus der Datenbank:', error);
-        res.status(500).json({ error: 'Fehler beim Löschen des Materials aus der Datenbank' });
+        res
+            .status(500)
+            .json({error: 'Fehler beim Löschen des Materials aus der Datenbank'});
     }
 });
 
 app.delete('/delete-worker', async (req, res) => {
     const workerName = req.body.name;
     if (!workerName) {
-        return res.status(400).json({ error: 'Arbeitername nicht angegeben' });
+        return res
+            .status(400)
+            .json({error: 'Arbeitername nicht angegeben'});
     }
 
     try {
-        const connection = await mysql.createConnection({
-            host: process.env.DB_HOST,
-            user: process.env.DB_USER,
-            password: process.env.DB_PW,
-            database: process.env.DB_NAME
-        });
+        const connection = await mysql.createConnection(
+            {host: process.env.DB_HOST, user: process.env.DB_USER, password: process.env.DB_PW, database: process.env.DB_NAME}
+        );
 
-        const [result] = await connection.execute('DELETE FROM workers WHERE worker_name = ?', [workerName]);
-        
+        const [result] = await connection.execute(
+            'DELETE FROM workers WHERE worker_name = ?',
+            [workerName]
+        );
+
         await connection.end();
 
         // Loggen der Datenbankänderung
         if (result.affectedRows > 0) {
-            logDatabaseChange('gelöscht', 'workers', { name: workerName });
+            logDatabaseChange('gelöscht', 'workers', {name: workerName});
         }
 
         if (result.affectedRows === 0) {
-            return res.status(404).json({ error: 'Arbeiter nicht gefunden' });
+            return res
+                .status(404)
+                .json({error: 'Arbeiter nicht gefunden'});
         }
 
-        res.status(200).json({ message: 'Arbeiter erfolgreich gelöscht' });
+        res
+            .status(200)
+            .json({message: 'Arbeiter erfolgreich gelöscht'});
     } catch (error) {
         console.error('Fehler beim Löschen des Arbeiters aus der Datenbank:', error);
-        res.status(500).json({ error: 'Fehler beim Löschen des Arbeiters aus der Datenbank' });
+        res
+            .status(500)
+            .json({error: 'Fehler beim Löschen des Arbeiters aus der Datenbank'});
     }
 });
 
-async function generatePDF(username, formDataObj, templatePath, outputPath) {
+async function generatePDF(formDataObj, templatePath, outputPath) {
 
     let signatureBase64;
     const formData = formDataObj;
@@ -256,11 +309,7 @@ async function generatePDF(username, formDataObj, templatePath, outputPath) {
                 .elements
                 .forEach(element => {
                     // Ignoriere die Felder total_work total_material und Signature
-                    if (element.name === "total_work" || element.name === "total_material" || element.name === "Signature"||
-                    (
-                        (element.name.startsWith("work_") || element.name.startsWith("material_")) &&
-                        !element.name.includes("_combined_")
-                    )) {
+                    if (element.name === "total_work" || element.name === "total_material" || element.name === "Signature" || ((element.name.startsWith("work_") || element.name.startsWith("material_")) && !element.name.includes("_combined_"))) {
                         return;
                     }
 
@@ -281,7 +330,9 @@ async function generatePDF(username, formDataObj, templatePath, outputPath) {
                                 const checkBox = form.getCheckBox(checkboxName);
                                 checkBox.check();
                             } catch (error) {
-                                console.error(`Fehler beim Setzen des Checkfelds "${checkboxName}": ${error}`);
+                                console.error(
+                                    `${new Date().toISOString()} - Fehler beim Setzen des Checkfelds "${checkboxName}": ${error}`
+                                );
                             }
                         }
                     } else {
@@ -294,7 +345,9 @@ async function generatePDF(username, formDataObj, templatePath, outputPath) {
                                 field.check();
                             }
                         } catch (error) {
-                            console.error(`Fehler beim Verarbeiten des Feldes "${element.name}": ${error}`);
+                            console.error(
+                                `${new Date().toISOString()} - Fehler beim Verarbeiten des Feldes "${element.name}": ${error}`
+                            );
                         }
                     }
                 });
@@ -327,94 +380,177 @@ async function generatePDF(username, formDataObj, templatePath, outputPath) {
     fs.writeFileSync(outputPath, pdfBytes);
 }
 
+async function sendEmailWithPDF(recipients, pdfFilePath, pdfFilename) {
+    const transporter = nodemailer.createTransport({
+        host: 'mail.your-server.de',
+        port: 587,
+        secure: false,
+        auth: {
+            user: "leon@pllana.io",
+            pass: "MldeSf8536!"
+        }
+    });
+
+    const mailOptions = {
+        from: '"Apollo Order Manager" <leon@pllana.io>',
+        to: recipients.join(", "), // Array von Empfängern als Komma-getrennter String
+        subject: `Regiebericht vom ${new Date().toISOString()}`,
+        text: `Regiebericht vom ${new Date().toISOString()}`,
+        attachments: [
+            {
+                filename: pdfFilename,
+                path: pdfFilePath
+            }
+        ]
+    };
+
+    try {
+        let info = await transporter.sendMail(mailOptions);
+        console.log(
+            `${new Date().toISOString()} - E-Mail versendet: %s`,
+            info.messageId
+        );
+        return true;
+    } catch (error) {
+        console.error('Fehler im Mailversand: ', error);
+        return false;
+    }
+}
+
 app.post('/data', checkAuthentication, async (req, res) => {
     try {
+        const formData = req.body.form; // Zugriff auf das Array der Formularschritte
+        const emailElement = formData[7]
+            .elements
+            .find(el => el.name === "email"); // Findet das E-Mail-Element im achten Schritt
+        const email = emailElement.value; // Die E-Mail-Adresse aus dem Formular extrahieren
+
         const timestamp = new Date().getTime();
         const pdfFilename = `pdf_${timestamp}.pdf`;
         const pdfFilepath = path.join(__dirname, 'public', 'pdf', pdfFilename);
         const templatePdfPath = path.join(__dirname, 'public', 'pdf', 'template.pdf');
 
-        await fsp.writeFile(path.join(__dirname, 'public', 'json', `data_${timestamp}.json`), JSON.stringify(req.body, null, 2));
-        console.log(`${new Date().toISOString()} - JSON-Datei erfolgreich generiert und gespeichert`);
+        await fsp.writeFile(
+            path.join(__dirname, 'public', 'json', `data_${timestamp}.json`),
+            JSON.stringify(req.body, null, 2)
+        );
+        console.log(
+            `${new Date().toISOString()} - JSON-Datei erfolgreich generiert und gespeichert`
+        );
 
-        // Übergebe formData direkt als Objekt und füge Benutzernamen hinzu
-        await generatePDF(req.session.user, req.body, templatePdfPath, pdfFilepath);
-        console.log(`${new Date().toISOString()} - PDF-Datei erfolgreich generiert und gespeichert`);
+        await generatePDF(req.body, templatePdfPath, pdfFilepath);
+        console.log(
+            `${new Date().toISOString()} - PDF-Datei erfolgreich generiert und gespeichert`
+        );
 
-        res.json({ pdfUrl: `/pdf-download/${pdfFilename}` });
+        const recipients = [process.env.MAIN_EMAIL, email];
+
+        const emailSent = await sendEmailWithPDF(recipients, pdfFilepath, pdfFilename);
+
+        if (emailSent) {
+            console.log(`${new Date().toISOString()} - E-Mail erfolgreich abgesendet`);
+        } else {
+            console.error(`${new Date().toISOString()} - E-Mailversand fehlgeschlagen`);
+        }
+
+        res.json({pdfUrl: `/pdf-download/${pdfFilename}`});
     } catch (err) {
         console.error('Fehler:', err);
-        res.status(500).send('Fehler beim Verarbeiten der Anfrage');
+        res
+            .status(500)
+            .send('Fehler beim Verarbeiten der Anfrage');
     }
 });
 
 app.post('/add-material', checkAuthentication, async (req, res) => {
     const materialName = req.body.name;
     if (!materialName) {
-        return res.status(400).json({ error: 'Materialname nicht angegeben' });
+        return res
+            .status(400)
+            .json({error: 'Materialname nicht angegeben'});
     }
 
     try {
-        const connection = await mysql.createConnection({
-            host: process.env.DB_HOST,
-            user: process.env.DB_USER,
-            password: process.env.DB_PW,
-            database: process.env.DB_NAME
-        });
+        const connection = await mysql.createConnection(
+            {host: process.env.DB_HOST, user: process.env.DB_USER, password: process.env.DB_PW, database: process.env.DB_NAME}
+        );
 
         // Überprüfen, ob das Material bereits existiert
-        const [check] = await connection.execute('SELECT * FROM materials WHERE material_name = ?', [materialName]);
+        const [check] = await connection.execute(
+            'SELECT * FROM materials WHERE material_name = ?',
+            [materialName]
+        );
         if (check.length > 0) {
             await connection.end();
-            return res.status(409).json({ message: 'Material existiert bereits.' });
+            return res
+                .status(409)
+                .json({message: 'Material existiert bereits.'});
         }
 
-        const [result] = await connection.execute('INSERT INTO materials (material_name) VALUES (?)', [materialName]);
-        
+        const [result] = await connection.execute(
+            'INSERT INTO materials (material_name) VALUES (?)',
+            [materialName]
+        );
+
         await connection.end();
 
         // Loggen der Datenbankänderung
-        logDatabaseChange('hinzugefügt', 'materials', { name: materialName });
+        logDatabaseChange('hinzugefügt', 'materials', {name: materialName});
 
-        res.status(200).json({ message: 'Material erfolgreich hinzugefügt', id: result.insertId });
+        res
+            .status(200)
+            .json({message: 'Material erfolgreich hinzugefügt', id: result.insertId});
     } catch (error) {
         console.error('Fehler beim Hinzufügen des Materials zur Datenbank:', error);
-        res.status(500).json({ error: 'Fehler beim Hinzufügen des Materials zur Datenbank' });
+        res
+            .status(500)
+            .json({error: 'Fehler beim Hinzufügen des Materials zur Datenbank'});
     }
 })
 
 app.post('/add-worker', checkAuthentication, async (req, res) => {
     const workerName = req.body.name;
     if (!workerName) {
-        return res.status(400).json({ error: 'Monteursname nicht angegeben' });
+        return res
+            .status(400)
+            .json({error: 'Monteursname nicht angegeben'});
     }
 
     try {
-        const connection = await mysql.createConnection({
-            host: process.env.DB_HOST,
-            user: process.env.DB_USER,
-            password: process.env.DB_PW,
-            database: process.env.DB_NAME
-        });
+        const connection = await mysql.createConnection(
+            {host: process.env.DB_HOST, user: process.env.DB_USER, password: process.env.DB_PW, database: process.env.DB_NAME}
+        );
 
         // Überprüfen, ob der Monteur bereits existiert
-        const [check] = await connection.execute('SELECT * FROM workers WHERE worker_name = ?', [workerName]);
+        const [check] = await connection.execute(
+            'SELECT * FROM workers WHERE worker_name = ?',
+            [workerName]
+        );
         if (check.length > 0) {
             await connection.end();
-            return res.status(409).json({ message: 'Monteur existiert bereits.' });
+            return res
+                .status(409)
+                .json({message: 'Monteur existiert bereits.'});
         }
 
-        const [result] = await connection.execute('INSERT INTO workers (worker_name) VALUES (?)', [workerName]);
-        
+        const [result] = await connection.execute(
+            'INSERT INTO workers (worker_name) VALUES (?)',
+            [workerName]
+        );
+
         await connection.end();
 
         // Loggen der Datenbankänderung
-        logDatabaseChange('hinzugefügt', 'workers', { name: workerName });
+        logDatabaseChange('hinzugefügt', 'workers', {name: workerName});
 
-        res.status(200).json({ message: 'Monteur erfolgreich hinzugefügt', id: result.insertId });
+        res
+            .status(200)
+            .json({message: 'Monteur erfolgreich hinzugefügt', id: result.insertId});
     } catch (error) {
         console.error('Fehler beim Hinzufügen des Monteurs zur Datenbank:', error);
-        res.status(500).json({ error: 'Fehler beim Hinzufügen des Monteurs zur Datenbank' });
+        res
+            .status(500)
+            .json({error: 'Fehler beim Hinzufügen des Monteurs zur Datenbank'});
     }
 });
 
@@ -425,6 +561,8 @@ app.get('/pdf-download/:filename', checkAuthentication, (req, res) => {
 });
 
 app.listen(3000, () => {
-    console.log("Apollo Order Manager - Nather Heizung und Sanitär")
+    console.log(
+        "*********** Apollo Order Manager - Nather Heizung und Sanitär ***********"
+    )
     console.log("Server läuft auf Port 3000");
 });
