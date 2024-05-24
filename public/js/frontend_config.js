@@ -38,7 +38,7 @@ function submitSignature() {
         document
             .getElementById("Signature")
             .value = dataURL;
-        console.log("Unterschrift erfolgreich generiert");
+        //console.log("Unterschrift erfolgreich generiert");
         //console.log(dataURL);
     } else {
         console.log("Keine Bildübertragung erfolgt");
@@ -345,7 +345,7 @@ function validateStep5() {
         const workSelect = document.getElementById('work_dropdown_' + i);
 
         // Überprüfung, ob das Eingabefeld leer ist oder keine Zahl enthält
-        if (!workInput.value || isNaN(workInput.value)) {
+        if (!workInput.value || isNaN(workInput.value || workInput.value == "0")) {
             alert('Bitte geben Sie eine gültige Zahl in das Arbeitsfeld ' + (
                 i + 1
             ) + ' ein.');
@@ -375,7 +375,7 @@ function validateStep6() {
         const materialSelect = document.getElementById('material_dropdown_' + i);
 
         // Überprüfung, ob das Eingabefeld leer ist oder keine Zahl enthält
-        if (!materialInput.value || isNaN(materialInput.value)) {
+        if (!materialInput.value || isNaN(materialInput.value || materialInput.value == "0")) {
             alert('Bitte geben Sie eine gültige Zahl in das Materialfeld ' + (
                 i + 1
             ) + ' ein.');

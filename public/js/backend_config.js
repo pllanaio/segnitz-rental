@@ -76,7 +76,7 @@ document.addEventListener('DOMContentLoaded', function () {
             fetch('/materials')
                 .then(response => response.json())
                 .then(materialData => {
-                    console.log('Materialoptionen aus der Datenbank:', materialData);
+                    //console.log('Materialoptionen aus der Datenbank:', materialData);
                     itemCountSpan.textContent = materialData.length; // Aktualisiert die Anzahl der Einträge
                     materialData.forEach(material => {
                         var buttonGroup = createButtonGroup(material);
@@ -93,7 +93,7 @@ document.addEventListener('DOMContentLoaded', function () {
             fetch('/workers')
                 .then(response => response.json())
                 .then(workData => {
-                    console.log('Monteuroptionen aus der Datenbank:', workData);
+                    //console.log('Monteuroptionen aus der Datenbank:', workData);
                     itemCountSpan.textContent = workData.length; // Aktualisiert die Anzahl der Einträge
                     workData.forEach(worker => {
                         var buttonGroup = createButtonGroup(worker);
