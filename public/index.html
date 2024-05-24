@@ -7,7 +7,9 @@
         <link rel="stylesheet" href="css/tempus-dominus.min.css">
         <link rel="stylesheet" href="css/bootstrap.min.css">
         <link rel="stylesheet" href="css/style.css">
-        <link rel="stylesheet" href="css/bootstrap-icons-1.11.3/font/bootstrap-icons.min.css">
+        <link
+            rel="stylesheet"
+            href="css/bootstrap-icons-1.11.3/font/bootstrap-icons.min.css">
         <!-- FONT -->
         <link rel="stylesheet" href="css/fonts.css">
     </head>
@@ -30,8 +32,18 @@
                             <a href="mailto:info@nather-hs.de">E-Mail:info@nather-hs.de</a>
                         </p>
                         <br>
-                        <a href="backend.html"><button type="button" class="btn btn-secondary"><i class="bi bi-gear"></i> Konfiguration </button></a>
-                        <a href=""><button type="button" class="btn btn-danger" onclick="logout()"><i class="bi bi-x-circle"></i> Abmelden </button></a>
+                        <a href="backend.html">
+                            <button type="button" class="btn btn-secondary">
+                                <i class="bi bi-gear"></i>
+                                Konfiguration
+                            </button>
+                        </a>
+                        <a href="">
+                            <button type="button" class="btn btn-danger" onclick="logout()">
+                                <i class="bi bi-x-circle"></i>
+                                Abmelden
+                            </button>
+                        </a>
                     </div>
                 </div>
                 <!-- FORMS -->
@@ -43,8 +55,7 @@
                             aria-valuenow="50"
                             class="progress-bar progress-bar-striped progress-bar-animated bg-primary"
                             role="progressbar"
-                            style="width: 0%;">
-                        </div>
+                            style="width: 0%;"></div>
                     </div>
                     <div id="qbox-container_form">
                         <form
@@ -81,7 +92,7 @@
                                                     type="checkbox"
                                                     role="switch"
                                                     name="Owner"
-                                                    id = "Owner">
+                                                    id="Owner">
                                                 <label class="form-check-label">Eigentümer</label>
                                             </div>
                                         </div>
@@ -98,11 +109,12 @@
                                         </div>
                                         <div class="col-md-auto">
                                             <div class="form-check form-switch">
-                                                <input class="form-check-input" 
-                                                       type="checkbox" 
-                                                       role="switch" 
-                                                       name="other_related"
-                                                       id="other_related">
+                                                <input
+                                                    class="form-check-input"
+                                                    type="checkbox"
+                                                    role="switch"
+                                                    name="other_related"
+                                                    id="other_related">
                                                 <label class="form-check-label">Objektangehöriger</label>
                                             </div>
                                         </div>
@@ -165,7 +177,7 @@
                                                     type="text"
                                                     class="form-control"
                                                     data-td-target="#DateTimePicker"
-                                                    readonly
+                                                    readonly="readonly"
                                                     placeholder="Termin/Uhrzeit"/>
                                                 <div
                                                     class="input-group-text"
@@ -188,20 +200,22 @@
                                     <h4>Fügen Sie mit "+" die Monteure welche am Auftrag beteiligt sind hinzu :</h4>
                                     <div class="col-12" id="btn_work_hours">
                                         <button type="button" class="add_work btn btn-success btn-lg">
-                                            <i class="bi bi-plus"></i></button>
+                                            <i class="bi bi-plus"></i>
+                                        </button>
 
                                         <button type="button" class="remove_work btn btn-danger btn-lg">
-                                            <i class="bi bi-trash"></i></button>
+                                            <i class="bi bi-trash"></i>
+                                        </button>
                                     </div>
                                     <br>
                                     <div class="row">
-                                        <div id="work_count">
-                                        </div>
+                                        <div id="work_count"></div>
                                         <input type="hidden" value="0" id="total_work" name="total_work">
                                     </div>
                                 </div>
                                 <div class="step d-none" id="page5">
-                                    <h4>Fügen Sie mit "+" die verbrauchten Materialien hinzu: </h4>
+                                    <h4>Fügen Sie mit "+" die verbrauchten Materialien hinzu:
+                                    </h4>
 
                                     <div class="col-12" id="btn_work_material">
                                         <button type="button" class="add_material btn btn-success btn-lg">
@@ -212,8 +226,7 @@
                                     </div>
                                     <br>
                                     <div class="row">
-                                        <div id="material_count">
-                                        </div>
+                                        <div id="material_count"></div>
                                         <input type="hidden" value="0" id="total_material" name="total_material">
                                     </div>
                                 </div>
@@ -296,11 +309,7 @@
                                                 <label class="form-check-label">Kfz-Bereitstellung</label>
                                             </div>
                                             <div class="form-check form-switch">
-                                                <input
-                                                    class="form-check-input"
-                                                    type="checkbox"
-                                                    role="switch"
-                                                    name="WorkDone">
+                                                <input class="form-check-input" type="checkbox" role="switch" name="WorkDone">
                                                 <label class="form-check-label">Arbeit abgeschlossen</label>
                                             </div>
                                         </div>
@@ -340,7 +349,12 @@
                                                     disabled="disabled">
                                             </div>
                                             <div class="form-check form-switch">
-                                                <input class="form-check-input" type="checkbox" role="switch" id="WorkCheck" name="WorkCheck">
+                                                <input
+                                                    class="form-check-input"
+                                                    type="checkbox"
+                                                    role="switch"
+                                                    id="WorkCheck"
+                                                    name="WorkCheck">
                                                 <label class="form-check-label">Weitere Arbeiten</label>
                                                 <textarea
                                                     name="WorkTextfield"
@@ -360,7 +374,8 @@
                                             <h4>Fast fertig</h4>
                                             <h6>Bitte unterschreiben Sie noch im Signaturfeld</h6>
                                             <div class="row">
-                                                <h6>Die ordnungsgemäße Ausführung der Arbeiten, die Einsatzzeit und der Materialverbrauch werden hiermit anerkannt:</h6>
+                                                <h6>Die ordnungsgemäße Ausführung der Arbeiten, die Einsatzzeit und der
+                                                    Materialverbrauch werden hiermit anerkannt:</h6>
                                                 <br>
                                                 <h6>Zahlbar sofort nach Rechnungserhalt, ohne Abzug.</h6>
                                                 <div id="signature-pad" class="m-signature-pad">
@@ -374,7 +389,11 @@
                                             <div class="container text-center">
                                                 <div class="row justify-content-center">
                                                     <div class="col-md-auto">
-                                                        <button id="clear-signature" class="btn btn-warning" onclick="clearCanvas()" type="button">Signaturfeld leeren</button>
+                                                        <button
+                                                            id="clear-signature"
+                                                            class="btn btn-warning"
+                                                            onclick="clearCanvas()"
+                                                            type="button">Signaturfeld leeren</button>
                                                     </div>
                                                 </div>
                                             </div>
@@ -400,26 +419,39 @@
                                             <input type="hidden" id="locationDateField" name="OrtDatum" value="">
                                             <br>
                                             <br>
-                                            <h6>Falls Sie das Dokument per E-Mail erhalten möchten, geben Sie diese bitte hier an: </h6>
-                                            <input type="email" class="form-control" id="email" placeholder="name@beispiel.de">
+                                            <h6>Falls Sie das Dokument per E-Mail erhalten möchten, geben Sie diese bitte
+                                                hier an:
+                                            </h6>
+                                            <input
+                                                type="email"
+                                                class="form-control"
+                                                id="email"
+                                                name="email"
+                                                placeholder="name@beispiel.de">
                                         </div>
                                     </div>
                                 </div>
-                                <div id="success" >
+                                <div id="success">
                                     <div class="mt-5">
                                         <h4>Formular erfolgreich übermittelt</h4>
                                         <h4>PDF erzeugt und heruntergeladen</h4>
                                         <p></p>
                                         <div id="final"></div>
                                         <p></p>
-                                        <a class="back-link" href=""><button type="button" class="btn btn-danger">Zurück zum Anfang</button></a>
+                                        <a class="back-link" href="">
+                                            <button type="button" class="btn btn-danger">Zurück zum Anfang</button>
+                                        </a>
                                     </div>
                                 </div>
                             </div>
                             <div id="q-box__buttons">
                                 <button id="prev-btn" type="button" class="d-none">Zurück</button>
                                 <button id="next-btn" type="button" class="d-inline-block">Weiter</button>
-                                <button id="submit-btn" type="submit" class="d-inline-block" onclick="submitSignature()">Absenden</button>
+                                <button
+                                    id="submit-btn"
+                                    type="submit"
+                                    class="d-inline-block"
+                                    onclick="submitSignature()">Absenden</button>
                             </div>
                         </form>
                     </div>

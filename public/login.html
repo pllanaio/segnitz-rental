@@ -1,103 +1,125 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Nather - Backend</title>
-    <!-- CSS -->
-    <link rel="stylesheet" href="css/tempus-dominus.min.css">
-    <link rel="stylesheet" href="css/bootstrap.min.css">
-    <link rel="stylesheet" href="css/style.css">
-    <link rel="stylesheet" href="css/bootstrap-icons-1.11.3/font/bootstrap-icons.min.css">
-    <!-- FONT -->
-    <link rel="stylesheet" href="css/fonts.css">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Nather - Backend</title>
+        <!-- CSS -->
+        <link rel="stylesheet" href="css/tempus-dominus.min.css">
+        <link rel="stylesheet" href="css/bootstrap.min.css">
+        <link rel="stylesheet" href="css/style.css">
+        <link
+            rel="stylesheet"
+            href="css/bootstrap-icons-1.11.3/font/bootstrap-icons.min.css">
+        <!-- FONT -->
+        <link rel="stylesheet" href="css/fonts.css">
 
-</head>
-<body>
-    <!-- CONTAINER -->
-    <div class="container d-flex align-items-center min-vh-100">
-        <div class="row g-0 justify-content-center">
-            <!-- TITLE -->
-            <div class="col-12 col-lg-5"> <!-- Ändern zu col-12 col-lg-5 für bessere Responsivität -->
-                <div id="title-container">
-                    <h2>NATHER</h2>
-                    <h2>Heizung - Sanitär</h2>
-                    <br>
-                    <h3>Anmeldung</h3>
-                    <br>
-                    <p>Fachbetrieb der Innung Sanitär- und Heizungstechnik</p>
-                    <p>Zwergerstraße 2b<br>
-                        85579 Neubiberg<br>
-                        <a href="tel:+498960190411">Tel.:089 601 904 11</a><br>
-                        <a href="mailto:info@nather-hs.de">E-Mail:info@nather-hs.de</a>
-                    </p>
-                    <br>
-                </div>
-            </div>
-            <!-- FORMS -->
-            <div class="col-12 col-lg-7"> <!-- Ändern zu col-12 col-lg-7 für bessere Responsivität -->
-                <div class="progress">
-                    <div
-                        aria-valuemax="100"
-                        aria-valuemin="0"
-                        aria-valuenow="50"
-                        class="progress-bar progress-bar-striped progress-bar-animated bg-primary"
-                        role="progressbar"
-                        style="width: 0%;">
+    </head>
+    <body>
+        <!-- CONTAINER -->
+        <div class="container d-flex align-items-center min-vh-100">
+            <div class="row g-0 justify-content-center">
+                <!-- TITLE -->
+                <div class="col-12 col-lg-5">
+                    <!-- Ändern zu col-12 col-lg-5 für bessere Responsivität -->
+                    <div id="title-container">
+                        <h2>NATHER</h2>
+                        <h2>Heizung - Sanitär</h2>
+                        <br>
+                        <h3>Anmeldung</h3>
+                        <br>
+                        <p>Fachbetrieb der Innung Sanitär- und Heizungstechnik</p>
+                        <p>Zwergerstraße 2b<br>
+                            85579 Neubiberg<br>
+                            <a href="tel:+498960190411">Tel.:089 601 904 11</a><br>
+                            <a href="mailto:info@nather-hs.de">E-Mail:info@nather-hs.de</a>
+                        </p>
+                        <br>
                     </div>
                 </div>
-                <div id="qbox-container_form">
-                    <form class="needs-validation" id="loginForm" method="post" name="loginForm" onsubmit="handleLogin(event)">
-                        <div id="steps-container">
-                            <div class="step d-block">
-                                <div class="row">
-                                    <div id="login">
-                                        <h4>Benutzernamen und Passwort eingeben </h4>
-                                        <input type="text" class="form-control" id="username" placeholder="Benutzername eingeben">
-                                        <br>
-                                        <input type="password" class="form-control" id="password" placeholder="Passwort eingeben">
-                                        <br>
-                                        <button type="submit" class="btn btn-primary">Einloggen</button>
+                <!-- FORMS -->
+                <div class="col-12 col-lg-7">
+                    <!-- Ändern zu col-12 col-lg-7 für bessere Responsivität -->
+                    <div class="progress">
+                        <div
+                            aria-valuemax="100"
+                            aria-valuemin="0"
+                            aria-valuenow="50"
+                            class="progress-bar progress-bar-striped progress-bar-animated bg-primary"
+                            role="progressbar"
+                            style="width: 0%;"></div>
+                    </div>
+                    <div id="qbox-container_form">
+                        <form
+                            class="needs-validation"
+                            id="loginForm"
+                            method="post"
+                            name="loginForm"
+                            onsubmit="handleLogin(event)">
+                            <div id="steps-container">
+                                <div class="step d-block">
+                                    <div class="row">
+                                        <div id="login">
+                                            <h4>Benutzernamen und Passwort eingeben
+                                            </h4>
+                                            <input
+                                                type="text"
+                                                class="form-control"
+                                                id="username"
+                                                placeholder="Benutzername eingeben">
+                                            <br>
+                                            <input
+                                                type="password"
+                                                class="form-control"
+                                                id="password"
+                                                placeholder="Passwort eingeben">
+                                            <br>
+                                            <button type="submit" class="btn btn-primary">Einloggen</button>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
-                        </div>
-                    </form>
+                        </form>
+                    </div>
                 </div>
             </div>
         </div>
-    </div>
-    <div id="preloader-wrapper">
-        <div id="preloader"></div>
-        <div class="preloader-section section-left"></div>
-        <div class="preloader-section section-right"></div>
-    </div>
-    <!--Bootstrap-->
-    <script type="text/javascript" src="js/bootstrap.bundle.min.js"></script>
-    <!-- Static App Form Collection Script -->
-    <script type="text/javascript" src="js/static-forms.js"></script>
-    <!--Popper-->
-    <script type="text/javascript" src="js/popper.min.js"></script>
-    <!-- Javascript to handle the login -->
-    <script>
-    async function handleLogin(event) {
-        event.preventDefault();
-        const username = document.getElementById('username').value;
-        const password = document.getElementById('password').value;
+        <div id="preloader-wrapper">
+            <div id="preloader"></div>
+            <div class="preloader-section section-left"></div>
+            <div class="preloader-section section-right"></div>
+        </div>
+        <!--Bootstrap-->
+        <script type="text/javascript" src="js/bootstrap.bundle.min.js"></script>
+        <!-- Static App Form Collection Script -->
+        <script type="text/javascript" src="js/static-forms.js"></script>
+        <!--Popper-->
+        <script type="text/javascript" src="js/popper.min.js"></script>
+        <!-- Javascript to handle the login -->
+        <script>
+            async function handleLogin(event) {
+                event.preventDefault();
+                const username = document
+                    .getElementById('username')
+                    .value;
+                const password = document
+                    .getElementById('password')
+                    .value;
 
-        const response = await fetch('/login', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username, password })
-        });
+                const response = await fetch('/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({username, password})
+                });
 
-        if (response.ok) {
-            window.location.href = '/index.html'; // Ändern zu /index.html falls benötigt
-        } else {
-            alert('Fehler bei der Anmeldung');
-        }
-    }
-    </script>
-</body>
+                if (response.ok) {
+                    window.location.href = '/index.html'; // Ändern zu /index.html falls benötigt
+                } else {
+                    alert('Fehler bei der Anmeldung');
+                }
+            }
+        </script>
+    </body>
 </html>
-

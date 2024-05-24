@@ -4,17 +4,17 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // Laden der Monteuroptionen aus der Datenbank
     fetch('/workers') // Annahme: Dies ist der Endpunkt zum Abrufen der Monteuroptionen
-    .then(response => response.json())
-    .then(workerOptions => {
-        // Hier kannst du die Monteuroptionen verwenden
-        console.log('Monteuroptionen aus der Datenbank:', workerOptions);
+        .then(response => response.json())
+        .then(workerOptions => {
+            // Hier kannst du die Monteuroptionen verwenden
+            console.log('Monteuroptionen aus der Datenbank:', workerOptions);
 
-        // Füge die Monteuroptionen in das Array availableOptionsWork ein
-        availableOptionsWork.push(...workerOptions);
+            // Füge die Monteuroptionen in das Array availableOptionsWork ein
+            availableOptionsWork.push(...workerOptions);
 
-        // Rufe die Funktion zum Hinzufügen der Dropdown-Menüs auf
-        addDropdownMenus();
-    });
+            // Rufe die Funktion zum Hinzufügen der Dropdown-Menüs auf
+            addDropdownMenus();
+        });
 
     // Funktion zum Hinzufügen der Dropdown-Menüs
     function addDropdownMenus() {
@@ -32,7 +32,7 @@ document.addEventListener('DOMContentLoaded', function () {
         document
             .querySelector('.add_work')
             .addEventListener('click', add_work);
-    
+
         // Event Listener für Klicken auf den Button zum Entfernen eines Work-Eintrags
         document
             .querySelector('.remove_work')
@@ -117,8 +117,11 @@ document.addEventListener('DOMContentLoaded', function () {
 
         // Function to update combined input field
         function update_combined() {
-            combined_input.value = new_input.value + ' Arbeitsstunden - ' + new_select.options[new_select.selectedIndex].text;
-            //console.log(combined_input.value); // Output the updated value to the console
+            combined_input.value = new_input.value + ' Arbeitsstunden - ' +
+                    new_select
+                .options[new_select.selectedIndex]
+                .text;
+            //console.log(combined_input.value);  Output the updated value to the console
         }
     }
 
@@ -152,7 +155,9 @@ document.addEventListener('DOMContentLoaded', function () {
         }
         // Wenn es nur noch ein Workfeld gibt, das erste Feld entfernen
         if (last_work_no === 1) {
-            var firstWorkField = document.getElementById('work_0').parentNode;
+            var firstWorkField = document
+                .getElementById('work_0')
+                .parentNode;
             if (firstWorkField) {
                 var brToRemove = firstWorkField.previousElementSibling;
                 if (brToRemove && brToRemove.tagName.toLowerCase() === 'br') {
@@ -160,7 +165,9 @@ document.addEventListener('DOMContentLoaded', function () {
                         .parentNode
                         .removeChild(brToRemove);
                 }
-                firstWorkField.parentNode.removeChild(firstWorkField);
+                firstWorkField
+                    .parentNode
+                    .removeChild(firstWorkField);
             }
         }
     }

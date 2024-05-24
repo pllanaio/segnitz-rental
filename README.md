@@ -2,7 +2,7 @@
 Modular tool for being able to give in some project-related data with direct sign support for the user and direct download of the generated .pdf
 
 ## Description
-Development of an Order Acceptance Module with Signature Feature and PDF Export. This interactive form enables users to input detailed job information and confirm their consent with a digital signature. After submission, the data can be automatically converted into a PDF document suitable for archiving or sending to clients and partners. This solution streamlines the order acceptance process, reduces paperwork, and enhances the efficiency and accuracy of data collection.
+Development of an Order Acceptance Module with Signature Feature and PDF Export. This interactive form enables users to input detailed job information and confirm their consent with a digital signature. After submission, the data will be automatically converted into a PDF document suitable for archiving or sending to clients and partners. This solution streamlines the order acceptance process, reduces paperwork, and enhances the efficiency and accuracy of data collection. The .pdf will also get sent to a specified e-mail address so that archiving is not an issue
 
 ## Visuals
 (Will be added in the future)
@@ -19,8 +19,10 @@ A Apollo Module to entry an order digitally, offering customer to directly sign 
 - Form Data to .json Export - DONE
 - .json Data to .pdf Export - DONE
 - Standalone version usable in a docker container - DONE
-- Database Connection - In Progress
+- Database Integration - DONE
+- Being able to send the .pdf to a specified e-mail DONE
 - Integration into Apollo - In Progress
+- PDF Archive for being able to see and download the generated .pdfs - IN PROGRESS
 
 ## Authors and acknowledgment
 Leon Pllana @ ASC-Vision
@@ -34,14 +36,17 @@ Node-Modules: <br>
 "dotenv": "^16.4.4" - https://github.com/motdotla/dotenv#readme <br>
 "cors": "^2.8.5" - https://github.com/expressjs/cors#readme <br>
 "bootstrap-icons": "^1.11.3" - https://icons.getbootstrap.com <br>
+"bcrypt": "^5.1.1" - https://github.com/kelektiv/node.bcrypt.js#readme <br>
+"mysql2": "^3.9.7" - https://sidorares.github.io/node-mysql2/docs <br>
+"express-session": "^1.18.0" - https://github.com/expressjs/session#readme <br>
+"nodemailer": "^6.9.13" - https://nodemailer.com<br>
 <br>
 Javascript Modules: <br>
+Bootstrap v5.3.3 - https://getbootstrap.com <br>
 @popperjs/core v2.11.8 - https://github.com/floating-ui/floating-ui#readme <br>
 Signature Pad v2.3.2 - https://github.com/szimek/signature_pad <br>
 Tempus Dominus v6.9.4 - https://getdatepicker.com/<br>
 
-## Useful Links
-- https://blog.thenets.org/how-to-install-mysql-and-phpmyadmin-with-docker/
 
 
 
