@@ -14,12 +14,13 @@ const {PDFDocument, PDFTextField, PDFCheckBox} = require('pdf-lib');
 
 // Session Middleware konfigurieren
 app.use(session({
-    secret: 'geheimnis', // Ein Geheimnis, das zum Signieren der Session-ID verwendet wird
-    resave: false, // Sollte die Session nicht neu gespeichert werden, wenn sie nicht geändert wurde
-    saveUninitialized: false, // Sollte keine uninitialisierte Session gespeichert werden
+    secret: 'geheimnis',
+    resave: false,
+    saveUninitialized: false,
     cookie: {
-        secure: false
-    } // Auf `true` setzen, wenn du HTTPS verwendest
+        secure: false,
+        maxAge: 10* 60* 1000 // Setzt die maximale Lebensdauer der Cookie auf 10 Minuten
+    }
 }));
 
 // Spezifische Route für die Startseite
@@ -64,6 +65,8 @@ app.post('/login', async (req, res) => {
 
             if (passwordValid) {
                 // Passwort ist korrekt, Benutzer ist authentifiziert
+                req.session.user = username; // Speichere den Benutzernamen in der Session
+                req.session.createdAt = Date.now(); // Speichern des Zeitstempels der Session-Erstellung
                 req.session.user = username; // Speichere den Benutzernamen in der Session
                 res
                     .status(200)
@@ -131,17 +134,42 @@ function checkAuthentication(req, res, next) {
     }
 }
 
-app.use((req, res, next) => {
-    const payloadSize = Buffer.byteLength(JSON.stringify(req.body));
-    //console.log(`Payload-Größe: ${payloadSize} Bytes`);
-    next();
-});
-
 function logDatabaseChange(action, table, value, timestamp = new Date()) {
     console.log(
         `${timestamp.toISOString()} - Datenbankänderung: Element ${action} in der Tabelle ${table}. Betroffenes Element: ${JSON.stringify(value)}`
     );
 }
+
+function sessionAgeLogger(req, res, next) {
+    if (req.session.user) {
+        const currentAge = Date.now() - req.session.createdAt;
+        console.log(`Session Age for ${req.sessionID}: ${currentAge} ms`);
+        if (currentAge > 600000) {
+            // Session hat das Zeitlimit überschritten, also führe logout durch
+            req.session.destroy(err => {
+                if (err) {
+                    console.log('Fehler beim Beenden der Sitzung:', err);
+                    return res.status(500).send('Fehler beim Abmelden');
+                }
+                console.log(`Session ${req.sessionID} abgelaufen und zerstört.`);
+                res.redirect('/login.html');
+            });
+        } else {
+            next();
+        }
+    } else {
+        next();
+    }
+}
+
+// Verwende die neue Middleware in deiner Anwendung
+app.use(sessionAgeLogger);
+
+app.use((req, res, next) => {
+    const payloadSize = Buffer.byteLength(JSON.stringify(req.body));
+    //console.log(`Payload-Größe: ${payloadSize} Bytes`);
+    next();
+});
 
 app.get('/materials', async (req, res) => {
     try {
