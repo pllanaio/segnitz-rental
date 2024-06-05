@@ -14,6 +14,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
             // Rufe die Funktion zum Hinzufügen der Dropdown-Menüs auf
             addDropdownMenus();
+            updateMaterialDropdowns(); // Initial call to set up the dropdowns
         });
 
     // Funktion zum Hinzufügen der Dropdown-Menüs
@@ -105,6 +106,13 @@ document.addEventListener('DOMContentLoaded', function () {
         new_input.addEventListener('input', update_combined);
         new_select.addEventListener('change', update_combined);
 
+        // Attach updateMaterialDropdowns to the click event of new input and select elements
+        new_input.addEventListener('click', updateMaterialDropdowns);
+        new_select.addEventListener('click', updateMaterialDropdowns);
+
+        // Call updateMaterialDropdowns after adding a new material field
+        updateMaterialDropdowns();
+
         // Function to update combined input field
         function update_combined() {
             combined_input.value = new_input.value + ' Stück - ' + new_select
@@ -157,6 +165,49 @@ document.addEventListener('DOMContentLoaded', function () {
                 firstMaterialField
                     .parentNode
                     .removeChild(firstMaterialField);
+            }
+        }
+
+        // Call updateMaterialDropdowns after removing a material field
+        updateMaterialDropdowns();
+    }
+
+    function updateMaterialDropdowns() {
+        const selectedMaterials = [];
+        const totalMaterial = parseInt(document.getElementById('total_material').value);
+    
+        for (let i = 0; i < totalMaterial; i++) {
+            const select = document.getElementById('material_dropdown_' + i);
+            if (select && select.value !== 'Material auswählen...') {
+                selectedMaterials.push(select.value);
+            }
+        }
+    
+        for (let i = 0; i < totalMaterial; i++) {
+            const select = document.getElementById('material_dropdown_' + i);
+            if (select) {
+                const currentValue = select.value;
+                select.innerHTML = ''; // Clear existing options
+    
+                // Create and append the default option
+                const defaultOption = document.createElement('option');
+                defaultOption.text = 'Material auswählen...';
+                defaultOption.disabled = true;
+                defaultOption.selected = true;
+                defaultOption.hidden = true;
+                select.appendChild(defaultOption);
+    
+                // Create and append the available options
+                availableOptionsMaterial.forEach(function (option) {
+                    if (!selectedMaterials.includes(option) || option === currentValue) {
+                        const optionElement = document.createElement('option');
+                        optionElement.value = option;
+                        optionElement.text = option;
+                        select.appendChild(optionElement);
+                    }
+                });
+    
+                select.value = currentValue; // Set the current value back
             }
         }
     }

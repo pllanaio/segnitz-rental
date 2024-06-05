@@ -14,6 +14,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
             // Rufe die Funktion zum Hinzufügen der Dropdown-Menüs auf
             addDropdownMenus();
+            updateWorkDropdowns(); // Initial call to set up the dropdowns
         });
 
     // Funktion zum Hinzufügen der Dropdown-Menüs
@@ -115,6 +116,13 @@ document.addEventListener('DOMContentLoaded', function () {
         new_input.addEventListener('input', update_combined);
         new_select.addEventListener('change', update_combined);
 
+        // Attach updateWorkDropdowns to the click event of new input and select elements
+        new_input.addEventListener('click', updateWorkDropdowns);
+        new_select.addEventListener('click', updateWorkDropdowns);
+
+        // Call updateWorkDropdowns after adding a new work field
+        updateWorkDropdowns();
+
         // Function to update combined input field
         function update_combined() {
             combined_input.value = new_input.value + ' Arbeitsstunden - ' +
@@ -168,6 +176,48 @@ document.addEventListener('DOMContentLoaded', function () {
                 firstWorkField
                     .parentNode
                     .removeChild(firstWorkField);
+            }
+        }
+
+        updateWorkDropdowns(); // Update dropdowns after removing a work field
+    }
+
+    function updateWorkDropdowns() {
+        const selectedWorkers = [];
+        const totalWork = parseInt(document.getElementById('total_work').value);
+    
+        for (let i = 0; i < totalWork; i++) {
+            const select = document.getElementById('work_dropdown_' + i);
+            if (select && select.value !== 'Monteur auswählen...') {
+                selectedWorkers.push(select.value);
+            }
+        }
+    
+        for (let i = 0; i < totalWork; i++) {
+            const select = document.getElementById('work_dropdown_' + i);
+            if (select) {
+                const currentValue = select.value;
+                select.innerHTML = ''; // Clear existing options
+    
+                // Create and append the default option
+                const defaultOption = document.createElement('option');
+                defaultOption.text = 'Monteur auswählen...';
+                defaultOption.disabled = true;
+                defaultOption.selected = true;
+                defaultOption.hidden = true;
+                select.appendChild(defaultOption);
+    
+                // Create and append the available options
+                availableOptionsWork.forEach(function (option) {
+                    if (!selectedWorkers.includes(option) || option === currentValue) {
+                        const optionElement = document.createElement('option');
+                        optionElement.value = option;
+                        optionElement.text = option;
+                        select.appendChild(optionElement);
+                    }
+                });
+    
+                select.value = currentValue; // Set the current value back
             }
         }
     }
