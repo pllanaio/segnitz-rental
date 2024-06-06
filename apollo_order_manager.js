@@ -14,12 +14,11 @@ const {PDFDocument, PDFTextField, PDFCheckBox} = require('pdf-lib');
 
 // Session Middleware konfigurieren
 app.use(session({
-    secret: 'geheimnis',
+    secret: process.env.SESSION_SECRET,
     resave: false,
     saveUninitialized: false,
     cookie: {
-        secure: false,
-        maxAge: 10* 60* 1000 // Setzt die maximale Lebensdauer der Cookie auf 10 Minuten
+        secure: false
     }
 }));
 
@@ -144,24 +143,10 @@ function sessionAgeLogger(req, res, next) {
     if (req.session.user) {
         const currentAge = Date.now() - req.session.createdAt;
         console.log(`Session Age for ${req.sessionID}: ${currentAge} ms`);
-        if (currentAge > 600000) {
-            // Session hat das Zeitlimit überschritten, also führe logout durch
-            req.session.destroy(err => {
-                if (err) {
-                    console.log('Fehler beim Beenden der Sitzung:', err);
-                    return res.status(500).send('Fehler beim Abmelden');
-                }
-                console.log(`Session ${req.sessionID} abgelaufen und zerstört.`);
-                res.redirect('/login.html');
-            });
-        } else {
+            req.session.createdAt = Date.now(); // Reset the session creation time on activity
             next();
-        }
-    } else {
-        next();
     }
 }
-
 // Verwende die neue Middleware in deiner Anwendung
 app.use(sessionAgeLogger);
 
