@@ -466,23 +466,3 @@ function logout() {
             console.error('Netzwerkfehler beim Versuch, sich abzumelden:', error);
         });
 }
-
-let timeout;
-
-function startSessionTimer() {
-    clearTimeout(timeout); // Clear the current timeout
-    timeout = setTimeout(() => {
-        alert('Die Sitzung wird in 60 Sekunden ablaufen. Bitte interagieren Sie mit der Seite um die Sitzung aktiv zu halten.');
-        setTimeout(() => {
-            window.location.href = '/login.html'; // Redirect to login page after session expires
-        }, 60000); // 60 seconds later
-    }, 540000); // Set the timeout for 9 minutes
-}
-
-// Reset the timer on any interaction
-window.onload = startSessionTimer;
-window.onmousemove = startSessionTimer;
-window.onmousedown = startSessionTimer; // catches touchscreen presses
-window.onclick = startSessionTimer;     // catches touchpad clicks
-window.onscroll = startSessionTimer;    // catches scrolling with arrow keys
-window.onkeypress = startSessionTimer;
