@@ -22,4 +22,8 @@ async function createUser(username, password) {
     }
 }
 
-createUser('nather', 'YuWS5RB5o3$H');
+createUser('r.nather', 'DmVtiT3U@^$5');
+createUser('a.roelz', 'ZKU*!V4mf8h7');
+createUser('h.roelz', '@k2dAKqB5JE9');
+createUser('t.hörenz', '4JUL$egSjXou');
+createUser('j.hörenz', '!*DCN%3aqPcq');
