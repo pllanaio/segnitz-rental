@@ -133,28 +133,11 @@ function checkAuthentication(req, res, next) {
     }
 }
 
-function logDatabaseChange(action, table, value, timestamp = new Date()) {
+function logDatabaseChange(user, action, table, value, timestamp = new Date()) {
     console.log(
-        `${timestamp.toISOString()} - Datenbankänderung: Element ${action} in der Tabelle ${table}. Betroffenes Element: ${JSON.stringify(value)}`
+        `${timestamp.toISOString()} - Datenbankänderung durch ${user}: Element ${action} in der Tabelle ${table}. Betroffenes Element: ${JSON.stringify(value)}`
     );
 }
-
-function sessionAgeLogger(req, res, next) {
-    if (req.session.user) {
-        const currentAge = Date.now() - req.session.createdAt;
-        console.log(`Session Age for ${req.sessionID}: ${currentAge} ms`);
-            req.session.createdAt = Date.now(); // Reset the session creation time on activity
-            next();
-    }
-}
-// Verwende die neue Middleware in deiner Anwendung
-app.use(sessionAgeLogger);
-
-app.use((req, res, next) => {
-    const payloadSize = Buffer.byteLength(JSON.stringify(req.body));
-    //console.log(`Payload-Größe: ${payloadSize} Bytes`);
-    next();
-});
 
 app.get('/materials', async (req, res) => {
     try {
@@ -228,7 +211,7 @@ app.delete('/delete-material', async (req, res) => {
 
         // Loggen der Datenbankänderung
         if (result.affectedRows > 0) {
-            logDatabaseChange('gelöscht', 'materials', {name: materialName});
+            logDatabaseChange(req.session.user,'gelöscht', 'materials', {name: materialName});
         }
 
         if (result.affectedRows === 0) {
@@ -270,7 +253,7 @@ app.delete('/delete-worker', async (req, res) => {
 
         // Loggen der Datenbankänderung
         if (result.affectedRows > 0) {
-            logDatabaseChange('gelöscht', 'workers', {name: workerName});
+            logDatabaseChange(req.session.user,'gelöscht', 'workers', {name: workerName});
         }
 
         if (result.affectedRows === 0) {
@@ -395,17 +378,17 @@ async function generatePDF(formDataObj, templatePath, outputPath) {
 
 async function sendEmailWithPDF(recipients, pdfFilePath, pdfFilename) {
     const transporter = nodemailer.createTransport({
-        host: 'mail.your-server.de',
+        host: 'szu@asc.vision',
         port: 587,
         secure: false,
         auth: {
-            user: "leon@pllana.io",
-            pass: "MldeSf8536!"
+            user: "szu@asc.vision",
+            pass: "hT#23rfJJJhse"
         }
     });
 
     const mailOptions = {
-        from: '"Apollo Order Manager" <leon@pllana.io>',
+        from: '"Apollo Order Manager" <szu@asc.vision>',
         to: recipients.join(", "), // Array von Empfängern als Komma-getrennter String
         subject: `Regiebericht vom ${new Date().toISOString()}`,
         text: `Regiebericht vom ${new Date().toISOString()}`,
@@ -508,7 +491,7 @@ app.post('/add-material', checkAuthentication, async (req, res) => {
         await connection.end();
 
         // Loggen der Datenbankänderung
-        logDatabaseChange('hinzugefügt', 'materials', {name: materialName});
+        logDatabaseChange(req.session.user,'hinzugefügt', 'materials', {name: materialName});
 
         res
             .status(200)
@@ -554,7 +537,7 @@ app.post('/add-worker', checkAuthentication, async (req, res) => {
         await connection.end();
 
         // Loggen der Datenbankänderung
-        logDatabaseChange('hinzugefügt', 'workers', {name: workerName});
+        logDatabaseChange(req.session.user,'hinzugefügt', 'workers', {name: workerName});
 
         res
             .status(200)
