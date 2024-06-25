@@ -18,7 +18,8 @@ app.use(session({
     resave: false,
     saveUninitialized: false,
     cookie: {
-        secure: false
+        secure: false,
+        maxAge: 30*60*1000
     }
 }));
 
@@ -72,7 +73,7 @@ app.post('/login', async (req, res) => {
                     .send("Login erfolgreich!");
                 console.log(
                     new Date().toISOString(),
-                    '- Anmeldung: Benutzer:',
+                    '- Anmeldung: Benutzer',
                     username,
                     'erfolgreich angemeldet'
                 );
@@ -103,7 +104,7 @@ app.post('/logout', (req, res) => {
     if (req.session.user) {
         console.log(
             timestamp.toISOString(),
-            '- Abmeldung: Benutzer:',
+            '- Abmeldung: Benutzer',
             req.session.user,
             'erfolgreich abgemeldet'
         ); // Zugriff auf den gespeicherten Benutzernamen
@@ -135,7 +136,7 @@ function checkAuthentication(req, res, next) {
 
 function logDatabaseChange(user, action, table, value, timestamp = new Date()) {
     console.log(
-        `${timestamp.toISOString()} - Datenbankänderung durch ${user}: Element ${action} in der Tabelle ${table}. Betroffenes Element: ${JSON.stringify(value)}`
+        `${timestamp.toISOString()} - Datenbankänderung: Benutzer ${user} hat ein Element in der Tabelle ${table} erfolgreich ${action}. Betroffenes Element: ${JSON.stringify(value)}`
     );
 }
 
@@ -431,12 +432,12 @@ app.post('/data', checkAuthentication, async (req, res) => {
             JSON.stringify(req.body, null, 2)
         );
         console.log(
-            `${new Date().toISOString()} - JSON-Datei erfolgreich generiert und gespeichert`
+            `${new Date().toISOString()} - Dateigenerierung: JSON-Datei vom Benutzer ${req.session.user} erfolgreich generiert und gespeichert`
         );
 
         await generatePDF(req.body, templatePdfPath, pdfFilepath);
         console.log(
-            `${new Date().toISOString()} - PDF-Datei erfolgreich generiert und gespeichert`
+            `${new Date().toISOString()} - Dateigenerierung: PDF-Datei erfolgreich vom Benutzer ${req.session.user} generiert und gespeichert`
         );
 
         const recipients = [process.env.MAIN_EMAIL, email];
@@ -444,9 +445,9 @@ app.post('/data', checkAuthentication, async (req, res) => {
         const emailSent = await sendEmailWithPDF(recipients, pdfFilepath, pdfFilename);
 
         if (emailSent) {
-            console.log(`${new Date().toISOString()} - E-Mail erfolgreich abgesendet`);
+            console.log(`${new Date().toISOString()} - Mailversand: E-Mail erfolgreich vom Benutzer ${req.session.user} abgesendet`);
         } else {
-            console.error(`${new Date().toISOString()} - E-Mailversand fehlgeschlagen`);
+            console.error(`${new Date().toISOString()} - Mailversand: E-Mailversand vom Benutzer ${req.session.user} fehlgeschlagen`);
         }
 
         res.json({pdfUrl: `/pdf-download/${pdfFilename}`});
