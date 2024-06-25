@@ -5,23 +5,41 @@ const bcrypt = require('bcrypt');
 require('dotenv').config();
 app.use(express.json({limit: '1mb'}));
 app.use(express.urlencoded({limit: '1mb', extended: true}));
-const session = require('express-session');
 const fsp = require("fs").promises;
 const fs = require('fs');
 const mysql = require('mysql2/promise');
 const nodemailer = require('nodemailer');
 const {PDFDocument, PDFTextField, PDFCheckBox} = require('pdf-lib');
+const session = require('express-session');  
+const RedisStore = require("connect-redis").default;  // Korrekter Import
+const redis = require("redis");
+
+const redisClient = redis.createClient({
+    socket: {
+        host: 'localhost',
+        port: 3302,
+        reconnectStrategy: (retries) => {
+            if (retries > 10) {
+                return new Error('Retry count exceeded');
+            }
+            return Math.min(retries * 100, 3000); // progressively delay reconnection
+        }
+    }
+});
+
+redisClient.connect().catch(console.error);
 
 // Session Middleware konfigurieren
 app.use(session({
+    store: new RedisStore({ client: redisClient }),
     secret: process.env.SESSION_SECRET,
     resave: false,
     saveUninitialized: false,
     cookie: {
         secure: false,
-        maxAge: 30*60*1000
+        maxAge: 30 * 60 * 1000
     }
-}));
+})).on('error', console.error);
 
 // Spezifische Route für die Startseite
 app.get('/', (req, res) => {
@@ -45,57 +63,59 @@ app.use(express.static("public"));
 
 // Login-Route
 app.post('/login', async (req, res) => {
-    const {username, password} = req.body;
-
+    const { username, password } = req.body;
     try {
-        const connection = await mysql.createConnection(
-            {host: process.env.DB_HOST, user: process.env.DB_USER, password: process.env.DB_PW, database: process.env.DB_NAME}
-        );
+        const connection = await mysql.createConnection({
+            host: process.env.DB_HOST,
+            user: process.env.DB_USER,
+            password: process.env.DB_PW,
+            database: process.env.DB_NAME
+        });
 
-        // Hole das Passwort des Benutzers aus der Datenbank
         const [rows] = await connection.execute(
             'SELECT password FROM users WHERE username = ?',
             [username]
         );
 
         if (rows.length > 0) {
-            // Vergleiche das eingegebene Passwort mit dem gehashten Passwort in der
-            // Datenbank
             const passwordValid = await bcrypt.compare(password, rows[0].password);
-
             if (passwordValid) {
-                // Passwort ist korrekt, Benutzer ist authentifiziert
-                req.session.user = username; // Speichere den Benutzernamen in der Session
-                req.session.createdAt = Date.now(); // Speichern des Zeitstempels der Session-Erstellung
-                req.session.user = username; // Speichere den Benutzernamen in der Session
-                res
-                    .status(200)
-                    .send("Login erfolgreich!");
-                console.log(
-                    new Date().toISOString(),
-                    '- Anmeldung: Benutzer',
-                    username,
-                    'erfolgreich angemeldet'
-                );
+                const existingSessionId = await redisClient.get(`user:${username}:sessionId`);
+                let oldSessionLoggedOut = false;
+                if (existingSessionId) {
+                    // Erzwingen eines Logouts der bestehenden Session
+                    req.sessionStore.destroy(existingSessionId, (err) => {
+                        console.log('Alte Session erfolgreich gelöscht:', existingSessionId);
+                    });
+                    oldSessionLoggedOut = true;
+                }
+
+                // Regeneriere die Session nach dem Löschen der alten
+                req.session.regenerate(err => {
+                    if (err) {
+                        console.error('Session regeneration failed:', err);
+                        return res.status(500).send("Internal server error");
+                    }
+                    req.session.user = username;
+                    redisClient.set(`user:${username}:sessionId`, req.session.id);
+                    console.log(new Date().toISOString(),`- Anmeldung: Benutzer ${username} erfolgreich angemeldet`);
+                    res.status(200).json({ message: "Login erfolgreich!", oldSessionLoggedOut });
+                });
+                
             } else {
-                // Passwort ist falsch
-                res
-                    .status(401)
-                    .send("Falsche Zugangsdaten.");
+                res.status(401).send("Falsche Zugangsdaten.");
             }
         } else {
-            // Kein Benutzer gefunden
-            res
-                .status(401)
-                .send("Falsche Zugangsdaten.");
+            res.status(401).send("Benutzername nicht gefunden.");
         }
+
+
+        
 
         await connection.end();
     } catch (error) {
         console.error('Fehler beim Login:', error);
-        res
-            .status(500)
-            .send("Serverfehler beim Versuch, sich anzumelden.");
+        res.status(500).send("Serverfehler beim Versuch, sich anzumelden.");
     }
 });
 
@@ -107,22 +127,22 @@ app.post('/logout', (req, res) => {
             '- Abmeldung: Benutzer',
             req.session.user,
             'erfolgreich abgemeldet'
-        ); // Zugriff auf den gespeicherten Benutzernamen
-        req
-            .session
-            .destroy(err => {
-                if (err) {
-                    console.log('Fehler beim Beenden der Sitzung:', err);
-                    return res
-                        .status(500)
-                        .send('Fehler beim Abmelden');
-                }
-                res.send('Logout erfolgreich');
-            });
+        );
+
+        // Redis-Einträge löschen
+        deleteUserRedisEntries(req.session.user);
+
+        // Zerstören der aktuellen Sitzung und sofortige Weiterleitung
+        req.session.destroy(err => {
+            if (err) {
+                console.log('Fehler beim Beenden der Sitzung:', err);
+                return res.status(500).send('Fehler beim Abmelden');
+            }
+            // Weiterleitung zur Login-Seite nach erfolgreichem Logout
+            res.send('Logout erfolgreich');
+        });
     } else {
-        res
-            .status(400)
-            .send("Kein Benutzer ist angemeldet.");
+        res.status(400).send("Kein Benutzer ist angemeldet.");
     }
 });
 
@@ -411,6 +431,30 @@ async function sendEmailWithPDF(recipients, pdfFilePath, pdfFilename) {
     } catch (error) {
         console.error('Fehler im Mailversand: ', error);
         return false;
+    }
+}
+
+async function deleteUserRedisEntries(username) {
+    try {
+        const userKeysPattern = `user:${username}:*`;
+        const sessionKeyPattern = `sess:*`;
+
+        // Alle Schlüssel finden, die zum Benutzer und zu Sitzungen gehören
+        const userKeys = await redisClient.keys(userKeysPattern);
+        const sessionKeys = await redisClient.keys(sessionKeyPattern);
+
+        // Filtern der Sitzungsschlüssel des Benutzers
+        const userSessionKeys = sessionKeys.filter(key => key.includes(username));
+
+        // Alle relevanten Schlüssel zusammenführen
+        const keysToDelete = [...userKeys, ...userSessionKeys];
+
+        // Wenn es Schlüssel zu löschen gibt, lösche sie
+        if (keysToDelete.length > 0) {
+            await redisClient.del(keysToDelete);
+        }
+    } catch (error) {
+        console.error('Fehler beim Löschen der Redis-Einträge:', error);
     }
 }
 
