@@ -379,17 +379,17 @@ async function generatePDF(formDataObj, templatePath, outputPath) {
 
 async function sendEmailWithPDF(recipients, pdfFilePath, pdfFilename) {
     const transporter = nodemailer.createTransport({
-        host: 'szu@asc.vision',
-        port: 587,
-        secure: false,
+        host: 'smtp.ionos.de',
+        port: 465,
+        secure: true,
         auth: {
-            user: "szu@asc.vision",
-            pass: "hT#23rfJJJhse"
+            user: "apollo@asc.vision",
+            pass: "jHt#33643%6hd3dDe"
         }
     });
 
     const mailOptions = {
-        from: '"Apollo Order Manager" <szu@asc.vision>',
+        from: '"Apollo Order Manager" <apollo@asc.vision>',
         to: recipients.join(", "), // Array von Empfängern als Komma-getrennter String
         subject: `Regiebericht vom ${new Date().toISOString()}`,
         text: `Regiebericht vom ${new Date().toISOString()}`,
