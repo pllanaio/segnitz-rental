@@ -140,7 +140,7 @@ function logDatabaseChange(user, action, table, value, timestamp = new Date()) {
     );
 }
 
-app.get('/materials', async (req, res) => {
+app.get('/materials', checkAuthentication , async (req, res) => {
     try {
         const connection = await mysql.createConnection(
             {host: process.env.DB_HOST, user: process.env.DB_USER, password: process.env.DB_PW, database: process.env.DB_NAME}
@@ -165,7 +165,7 @@ app.get('/materials', async (req, res) => {
     }
 });
 
-app.get('/workers', async (req, res) => {
+app.get('/workers', checkAuthentication , async (req, res) => {
     try {
         const connection = await mysql.createConnection(
             {host: process.env.DB_HOST, user: process.env.DB_USER, password: process.env.DB_PW, database: process.env.DB_NAME}
