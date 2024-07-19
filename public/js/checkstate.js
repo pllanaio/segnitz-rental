@@ -10,6 +10,8 @@ document.addEventListener('DOMContentLoaded', function () {
     var RenterCheck = document.getElementById('Renter');
     var OwnerCheck = document.getElementById('Owner');
     var other_relatedCheck = document.getElementById('other_related');
+    var CarProvisionFee = document.getElementById('CarProvisionFee');
+    var kfz_pauschale = document.getElementById('kfz_pauschale');
 
     MachineUsageCheckElement.addEventListener('change', function () {
         MachineUsageTextfieldElement.disabled = !MachineUsageCheckElement.checked;
@@ -22,6 +24,11 @@ document.addEventListener('DOMContentLoaded', function () {
     WorkCheckElement.addEventListener('change', function () {
         WorkTextfield.disabled = !WorkCheckElement.checked;
     });
+
+    CarProvisionFee.addEventListener('change', function () {
+        kfz_pauschale.disabled = !CarProvisionFee.checked;
+    });
+
 
     // Event listener for Renter checkbox
     RenterCheck.addEventListener('change', function () {
@@ -49,5 +56,4 @@ document.addEventListener('DOMContentLoaded', function () {
             OwnerCheck.checked = false;
         }
     });
-
 });
