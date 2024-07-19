@@ -232,10 +232,10 @@ submitBtn.addEventListener('click', (event) => {
 function validateStep1() {
     let isValid = true;
     const recipient = document
-        .querySelector('input[name="Recipient"]')
+        .querySelector('textarea[name="Recipient"]')
         .value;
     const client = document
-        .querySelector('input[name="Client"]')
+        .querySelector('textarea[name="Client"]')
         .value;
     const ownerChecked = document
         .getElementById('Owner')
@@ -247,17 +247,10 @@ function validateStep1() {
         .getElementById('other_related')
         .checked;
 
-    // Regex, der nur Buchstaben, Leerzeichen und einige Satzzeichen erlaubt
-    const textOnlyRegex = /^[a-zA-ZäöüßÄÖÜéèàùçÉÈÀÙÇ.,' -]+$/;
 
     // Überprüfung der Texteingaben auf ungültige Zeichen
     if (!recipient || !client) {
         alert('Keine Leeren Felder erlaubt');
-        isValid = false;
-    } else if (!textOnlyRegex.test(recipient) || !textOnlyRegex.test(client)) {
-        alert(
-            'Bitte geben Sie nur Text ohne Zahlen und Sonderzeichen in die Felder ein.'
-        );
         isValid = false;
     } else if (!ownerChecked && !renterChecked && !otherRelatedChecked) {
         alert(
@@ -299,10 +292,7 @@ function validateStep3() {
         .value;
 
     // Überprüfung, ob die Felder für Auftragsnummer und Kundennummer gefüllt sind
-    if (!orderNo || !clientNo) {
-        alert('Auftragsnummer und Kundennummer dürfen nicht leer sein.');
-        isValid = false;
-    } else if (!workToDo) {
+    if (!workToDo) {
         alert('Bitte geben Sie die auszuführenden Arbeiten an.');
         isValid = false;
     } else if (workerSelected === "" || workerSelected === "Monteur auswählen...") {
