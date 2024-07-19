@@ -420,6 +420,8 @@ function validateStep7() {
     const machineUsageTextfield = document.getElementById('MachineUsageTextfield');
     const disposeTextfield = document.getElementById('DisposeTextfield');
     const workTextfield = document.getElementById('WorkTextfield');
+    const CarProvisionFee = document.getElementById ('CarProvisionFee');
+    const kfz_pauschale = document.getElementById ('kfz_pauschale');
 
     // Prüfe, ob die zugehörigen Textfelder ausgefüllt sind, wenn die Checkboxen
     // aktiviert sind
@@ -433,6 +435,10 @@ function validateStep7() {
     }
     if (workCheck.checked && !workTextfield.value.trim()) {
         alert('Bitte geben Sie Details zu weiteren Arbeiten an.');
+        isValid = false;
+    }
+    if (CarProvisionFee.checked && !kfz_pauschale.value.trim()){
+        alert('Bitte geben Sie Details zur Kfz-Bereitstellung an.');
         isValid = false;
     }
     return isValid;
