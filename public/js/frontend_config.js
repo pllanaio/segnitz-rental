@@ -385,21 +385,25 @@ function validateStep6() {
     for (let i = 0; i < totalMaterial; i++) {
         const materialInput = document.getElementById('material_' + i);
         const materialSelect = document.getElementById('material_dropdown_' + i);
+        const materialPrice = document.getElementById('material_price_' + i); // Assuming the IDs are 'material_price_0', 'material_price_1', etc.
 
         // Überprüfung, ob das Eingabefeld leer ist oder keine Zahl enthält
-        if (!materialInput.value || isNaN(materialInput.value || materialInput.value == "0")) {
-            alert('Bitte geben Sie eine gültige Zahl in das Materialfeld ' + (
-                i + 1
-            ) + ' ein.');
+        if (!materialInput.value || isNaN(materialInput.value) || materialInput.value == "0") {
+            alert('Bitte geben Sie eine gültige Zahl in das Materialfeld ' + (i + 1) + ' ein.');
             isValid = false;
             break;
         }
 
         // Überprüfung, ob im Dropdown noch "Material auswählen" ausgewählt ist
         if (materialSelect.value === 'Material auswählen...') {
-            alert('Bitte wählen Sie ein Material für das Materialfeld ' + (
-                i + 1
-            ) + '.');
+            alert('Bitte wählen Sie ein Material für das Materialfeld ' + (i + 1) + '.');
+            isValid = false;
+            break;
+        }
+
+        // Überprüfung, ob das material_price-Feld nur Zahlen enthält oder leer ist
+        if (materialPrice.value && isNaN(parseFloat(materialPrice.value))) {
+            alert('Das Feld "Materialpreis" für Materialfeld ' + (i + 1) + ' darf nur Zahlen enthalten oder leer sein.');
             isValid = false;
             break;
         }

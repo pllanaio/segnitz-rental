@@ -46,9 +46,9 @@ document.addEventListener('DOMContentLoaded', function () {
 
         // Create the input group div
         var input_group_div = document.createElement('div');
-        input_group_div.className = 'input-group';
+        input_group_div.className = 'input-group mb-3';
 
-        // Create the text input element
+        // Create the text input element for quantity
         var new_input = document.createElement('input');
         new_input.type = 'text';
         new_input.className = 'form-control';
@@ -57,7 +57,7 @@ document.addEventListener('DOMContentLoaded', function () {
         new_input.name = 'material_' + current_material_no; // Name attribute
         new_input.id = 'material_' + current_material_no; // ID attribute
 
-        // Create the select element
+        // Create the select element for materials
         var new_select = document.createElement('select');
         new_select.className = 'form-select';
         new_select.setAttribute('aria-label', 'Dropdown-Menü'); // ARIA label
@@ -80,9 +80,19 @@ document.addEventListener('DOMContentLoaded', function () {
             new_select.appendChild(option_element);
         });
 
+        // Create the text input element for price
+        var new_price = document.createElement('input');
+        new_price.type = 'text';
+        new_price.className = 'form-control';
+        new_price.placeholder = 'Preis (€)'; // Placeholder text
+        new_price.setAttribute('aria-label', 'Preis (€)'); // ARIA label
+        new_price.name = 'material_price_' + current_material_no; // Name attribute
+        new_price.id = 'material_price_' + current_material_no; // ID attribute
+
         // Append the input and select to the input group div
         input_group_div.appendChild(new_input);
         input_group_div.appendChild(new_select);
+        input_group_div.appendChild(new_price);
 
         // Create a hidden input for combined data
         var combined_input = document.createElement('input');
@@ -105,10 +115,12 @@ document.addEventListener('DOMContentLoaded', function () {
         // Add event listeners to input and select fields to update combined input
         new_input.addEventListener('input', update_combined);
         new_select.addEventListener('change', update_combined);
+        new_price.addEventListener('input', update_combined);
 
         // Attach updateMaterialDropdowns to the click event of new input and select elements
         new_input.addEventListener('click', updateMaterialDropdowns);
         new_select.addEventListener('click', updateMaterialDropdowns);
+        new_price.addEventListener('click', updateMaterialDropdowns);
 
         // Call updateMaterialDropdowns after adding a new material field
         updateMaterialDropdowns();
@@ -117,7 +129,7 @@ document.addEventListener('DOMContentLoaded', function () {
         function update_combined() {
             combined_input.value = new_input.value + ' Stück - ' + new_select
                 .options[new_select.selectedIndex]
-                .text;
+                .text + ' - ' + new_price.value + ' €';
             //console.log(combined_input.value);  Output the updated value to the console
         }
     }
