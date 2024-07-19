@@ -57,14 +57,14 @@ document.addEventListener('DOMContentLoaded', function () {
         var input_group_div = document.createElement('div');
         input_group_div.className = 'input-group';
 
-        // Create the text input element
-        var new_input = document.createElement('input');
-        new_input.type = 'text';
-        new_input.className = 'form-control';
-        new_input.placeholder = 'Stunden'; // Placeholder text
-        new_input.setAttribute('aria-label', 'Stunden'); // ARIA label
-        new_input.name = 'work_' + current_work_no; // Name attribute
-        new_input.id = 'work_' + current_work_no; // ID attribute
+        // Create the text input element for date
+        var new_date = document.createElement('input');
+        new_date.type = 'text';
+        new_date.className = 'form-control';
+        new_date.placeholder = 'Datum'; // Placeholder text
+        new_date.setAttribute('aria-label', 'Datum'); // ARIA label
+        new_date.name ='work_date_' + current_work_no; // Name attribute
+        new_date.id = 'work_date_' + current_work_no; // ID attribute
 
         // Create the select element
         var new_select = document.createElement('select');
@@ -72,6 +72,15 @@ document.addEventListener('DOMContentLoaded', function () {
         new_select.setAttribute('aria-label', 'Dropdown-Menü'); // ARIA label
         new_select.name = 'work_dropdown_' + current_work_no; // Name attribute
         new_select.id = 'work_dropdown_' + current_work_no; // ID attribute
+
+        // Create the text input element for hours
+        var new_input = document.createElement('input');
+        new_input.type = 'text';
+        new_input.className = 'form-control';
+        new_input.placeholder = 'Stunden'; // Placeholder text
+        new_input.setAttribute('aria-label', 'Stunden'); // ARIA label
+        new_input.name = 'work_' + current_work_no; // Name attribute
+        new_input.id = 'work_' + current_work_no; // ID attribute
 
         // Create and append the default option (disabled placeholder)
         var default_option = document.createElement('option');
@@ -88,9 +97,11 @@ document.addEventListener('DOMContentLoaded', function () {
             new_select.appendChild(option);
         });
 
-        // Append the input and select to the input group div
-        input_group_div.appendChild(new_input);
+        // Append the input, select, and description to the input group div
+        input_group_div.appendChild(new_date);
         input_group_div.appendChild(new_select);
+        input_group_div.appendChild(new_input);
+
 
         // Create a hidden input for combined data
         var combined_input = document.createElement('input');
@@ -112,23 +123,24 @@ document.addEventListener('DOMContentLoaded', function () {
         // Update the total number of Work inputs
         total_work.value = current_work_no + 1;
 
-        // Add event listener to input and select fields to update combined input
+        // Add event listener to input, select fields, and description to update combined input
         new_input.addEventListener('input', update_combined);
         new_select.addEventListener('change', update_combined);
+        new_date.addEventListener('input', update_combined);
 
-        // Attach updateWorkDropdowns to the click event of new input and select elements
+        // Attach updateWorkDropdowns to the click event of new input, select elements, and description
         new_input.addEventListener('click', updateWorkDropdowns);
         new_select.addEventListener('click', updateWorkDropdowns);
+        new_date.addEventListener('click', updateWorkDropdowns);
 
         // Call updateWorkDropdowns after adding a new work field
         updateWorkDropdowns();
 
         // Function to update combined input field
         function update_combined() {
-            combined_input.value = new_input.value + ' Arbeitsstunden - ' +
-                    new_select
-                .options[new_select.selectedIndex]
-                .text;
+            combined_input.value = new_date.value +' - '+
+                    new_select.options[new_select.selectedIndex].text +' - '+
+                    new_input.value +' h';
             //console.log(combined_input.value);  Output the updated value to the console
         }
     }

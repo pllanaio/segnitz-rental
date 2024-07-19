@@ -339,25 +339,37 @@ function validateStep4() {
 function validateStep5() {
     let isValid = true;
     const totalWork = parseInt(document.getElementById('total_work').value);
+    const dateRegex = /^\d{2}\.\d{2}\.\d{4}$/;
 
     for (let i = 0; i < totalWork; i++) {
         const workInput = document.getElementById('work_' + i);
         const workSelect = document.getElementById('work_dropdown_' + i);
+        const workDate = document.getElementById('work_date_' + i);
 
-        // Überprüfung, ob das Eingabefeld leer ist oder keine Zahl enthält
-        if (!workInput.value || isNaN(workInput.value || workInput.value == "0")) {
-            alert('Bitte geben Sie eine gültige Zahl in das Arbeitsfeld ' + (
-                i + 1
-            ) + ' ein.');
+        // Überprüfung des Datumsfeldes
+        if (!workDate.value || !dateRegex.test(workDate.value)) {
+            alert('Bitte geben Sie ein gültiges Datum im Format TT.MM.JJJJ in das Datumsfeld ' + (i + 1) + ' ein.');
             isValid = false;
             break;
+        } else {
+            const [day, month, year] = workDate.value.split('.').map(Number);
+            if (day < 1 || day > 31 || month < 1 || month > 12 || year > 9999) {
+                alert('Bitte geben Sie ein gültiges Datum im Format TT.MM.JJJJ in das Datumsfeld ' + (i + 1) + ' ein.');
+                isValid = false;
+                break;
+            }
         }
 
         // Überprüfung, ob im Dropdown noch "Monteur auswählen" ausgewählt ist
         if (workSelect.value === 'Monteur auswählen...') {
-            alert('Bitte wählen Sie einen Monteur für das Arbeitsfeld ' + (
-                i + 1
-            ) + '.');
+            alert('Bitte wählen Sie einen Monteur für das Monteursfeld ' + (i + 1) + '.');
+            isValid = false;
+            break;
+        }
+        
+        // Überprüfung, ob das Eingabefeld leer ist oder keine Zahl enthält
+        if (!workInput.value || isNaN(workInput.value) || workInput.value == "0") {
+            alert('Bitte geben Sie eine gültige Stundenanzahl in das Monteursfeld ' + (i + 1) + ' ein.');
             isValid = false;
             break;
         }
