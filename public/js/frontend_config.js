@@ -468,7 +468,7 @@ function logout() {
         .then(response => {
             if (response.ok) {
                 // Optional: Weiterleitung zur Login-Seite oder Anzeige einer Bestätigung
-                window.location.href = '/login.html';
+                window.location.href = '/index.html';
             } else {
                 console.error('Fehler beim Logout');
                 alert('Fehler beim Abmelden');
