@@ -40,18 +40,19 @@
                             <a href="mailto:info@segnitzbau.de">E-Mail:info@segnitzbau.de</a>
                         </p>
                         <br>
-                        <a href="backend.html">
-                            <button type="button" class="btn btn-secondary">
-                                <i class="bi bi-gear"></i>
-                                Konfiguration
-                            </button>
-                        </a>
-                        <a href="">
-                            <button type="button" class="btn btn-danger" onclick="logout()">
-                                <i class="bi bi-x-circle"></i>
-                                Abmelden
-                            </button>
-                        </a>
+                        <a id="admin-button" href="/login.html">
+    <button type="button" class="btn btn-secondary">
+        <i class="bi bi-person-lock"></i>
+        Login
+    </button>
+</a>
+
+<a id="logout-button" href="#" style="display: none;">
+    <button type="button" class="btn btn-danger" onclick="logout()">
+        <i class="bi bi-x-circle"></i>
+        Abmelden
+    </button>
+</a>
                     </div>
                 </div>
                 <!-- FORMS -->
@@ -503,5 +504,23 @@
         <script type="text/javascript" src="js/html2json.js"></script>
         <!--DateAndLocation-->
         <script type="text/javascript" src="js/dateandlocation.js"></script>
+
+<script>
+fetch('/auth-status')
+    .then(res => res.json())
+    .then(data => {
+        const btn = document.getElementById('admin-button');
+
+        if (data.loggedIn) {
+            btn.href = '/backend.html';
+            btn.querySelector('button').innerHTML =
+                '<i class="bi bi-gear"></i> Konfiguration';
+        } else {
+            btn.href = '/login.html';
+            btn.querySelector('button').innerHTML =
+                '<i class="bi bi-person-lock"></i> Login';
+        }
+    });
+</script>
     </body>
 </html>

@@ -18,21 +18,24 @@ app.use(session({
     resave: false,
     saveUninitialized: false,
     cookie: {
-        secure: true,
+        secure: false,
         maxAge: 30*60*1000
     }
 }));
 
 // Spezifische Route für die Startseite
 app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'login.html'));
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-app.get('/', checkAuthentication, (req, res) => {
-    res.redirect('/index.html'); // Leite auf die Hauptseite um, wenn authentifiziert
+app.get('/auth-status', (req, res) => {
+    res.json({
+        loggedIn: !!req.session.user,
+        user: req.session.user || null
+    });
 });
 
-app.get('/index.html', checkAuthentication, (req, res) => {
+app.get('/index.html', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
@@ -140,7 +143,7 @@ function logDatabaseChange(user, action, table, value, timestamp = new Date()) {
     );
 }
 
-app.get('/materials', checkAuthentication , async (req, res) => {
+app.get('/materials', async (req, res) => {
     try {
         const connection = await mysql.createConnection(
             {host: process.env.DB_HOST, user: process.env.DB_USER, password: process.env.DB_PW, database: process.env.DB_NAME}
@@ -165,7 +168,7 @@ app.get('/materials', checkAuthentication , async (req, res) => {
     }
 });
 
-app.get('/workers', checkAuthentication , async (req, res) => {
+app.get('/workers', async (req, res) => {
     try {
         const connection = await mysql.createConnection(
             {host: process.env.DB_HOST, user: process.env.DB_USER, password: process.env.DB_PW, database: process.env.DB_NAME}
@@ -190,7 +193,7 @@ app.get('/workers', checkAuthentication , async (req, res) => {
     }
 });
 
-app.delete('/delete-material', async (req, res) => {
+app.delete('/delete-material',checkAuthentication, async (req, res) => {
     const materialName = req.body.name;
     if (!materialName) {
         return res
@@ -232,7 +235,7 @@ app.delete('/delete-material', async (req, res) => {
     }
 });
 
-app.delete('/delete-worker', async (req, res) => {
+app.delete('/delete-worker',checkAuthentication, async (req, res) => {
     const workerName = req.body.name;
     if (!workerName) {
         return res
@@ -414,7 +417,7 @@ async function sendEmailWithPDF(recipients, pdfFilePath, pdfFilename) {
     }
 }
 
-app.post('/data', checkAuthentication, async (req, res) => {
+app.post('/data', async (req, res) => {
     try {
         const formData = req.body.form; // Zugriff auf das Array der Formularschritte
         const emailElement = formData[7]
@@ -426,18 +429,19 @@ app.post('/data', checkAuthentication, async (req, res) => {
         const pdfFilename = `pdf_${timestamp}.pdf`;
         const pdfFilepath = path.join(__dirname, 'public', 'pdf', pdfFilename);
         const templatePdfPath = path.join(__dirname, 'public', 'pdf', 'template.pdf');
+        const activeUser = req.session.user || 'Gast';
 
         await fsp.writeFile(
             path.join(__dirname, 'public', 'json', `data_${timestamp}.json`),
             JSON.stringify(req.body, null, 2)
         );
-        console.log(
-            `${new Date().toISOString()} - Dateigenerierung: JSON-Datei vom Benutzer ${req.session.user} erfolgreich generiert und gespeichert`
-        );
+console.log(
+    `${new Date().toISOString()} - Dateigenerierung: JSON-Datei vom Benutzer ${activeUser} erfolgreich generiert und gespeichert`
+);
 
         await generatePDF(req.body, templatePdfPath, pdfFilepath);
         console.log(
-            `${new Date().toISOString()} - Dateigenerierung: PDF-Datei erfolgreich vom Benutzer ${req.session.user} generiert und gespeichert`
+            `${new Date().toISOString()} - Dateigenerierung: PDF-Datei erfolgreich vom Benutzer ${activeUser} generiert und gespeichert`
         );
 
         const recipients = [process.env.MAIN_EMAIL, email];
@@ -445,9 +449,9 @@ app.post('/data', checkAuthentication, async (req, res) => {
         const emailSent = await sendEmailWithPDF(recipients, pdfFilepath, pdfFilename);
 
         if (emailSent) {
-            console.log(`${new Date().toISOString()} - Mailversand: E-Mail erfolgreich vom Benutzer ${req.session.user} abgesendet`);
+            console.log(`${new Date().toISOString()} - Mailversand: E-Mail erfolgreich vom Benutzer ${activeUser} abgesendet`);
         } else {
-            console.error(`${new Date().toISOString()} - Mailversand: E-Mailversand vom Benutzer ${req.session.user} fehlgeschlagen`);
+            console.error(`${new Date().toISOString()} - Mailversand: E-Mailversand vom Benutzer ${activeUser} fehlgeschlagen`);
         }
 
         res.json({pdfUrl: `/pdf-download/${pdfFilename}`});
@@ -551,7 +555,7 @@ app.post('/add-worker', checkAuthentication, async (req, res) => {
     }
 });
 
-app.get('/pdf-download/:filename', checkAuthentication, (req, res) => {
+app.get('/pdf-download/:filename', (req, res) => {
     const filename = req.params.filename;
     const filepath = path.join(__dirname, 'public', 'pdf', filename);
     res.download(filepath); // Setzt Content-Disposition zum Download
@@ -559,7 +563,7 @@ app.get('/pdf-download/:filename', checkAuthentication, (req, res) => {
 
 app.listen(3000, () => {
     console.log(
-        "*********** Apollo Order Manager - Nather Heizung und Sanitär ***********"
+        "*********** Segnitz Rental System ***********"
     )
     console.log("Server läuft auf Port 3000");
 });

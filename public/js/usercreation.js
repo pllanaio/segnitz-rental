@@ -1,13 +1,21 @@
-require('dotenv').config();
+const path = require('path');
+require('dotenv').config({
+  path: path.resolve(__dirname, '../../.env')
+});
+
 const bcrypt = require('bcrypt');
 const mysql = require('mysql2/promise');
 const saltRounds = 10;
 
 async function createUser(username, password) {
     const connection = await mysql.createConnection(
-        {host: process.env.DB_HOST, user: process.env.DB_USER, password: 'MldeSf8536!', database: process.env.DB_NAME}
+        {host: process.env.DB_HOST, port: Number(process.env.DB_PORT), user: process.env.DB_USER, password: process.env.DB_PW, database: process.env.DB_NAME}
     );
-
+console.log({
+  host: process.env.DB_HOST,
+  port: process.env.DB_PORT,
+  db: process.env.DB_NAME
+});
     try {
         const hashedPassword = await bcrypt.hash(password, saltRounds);
         const [rows] = await connection.execute(
@@ -22,8 +30,4 @@ async function createUser(username, password) {
     }
 }
 
-createUser('r.nather', 'DmVtiT3U@^$5');
-createUser('a.roelz', 'ZKU*!V4mf8h7');
-createUser('h.roelz', '@k2dAKqB5JE9');
-createUser('t.hörenz', '4JUL$egSjXou');
-createUser('j.hörenz', '!*DCN%3aqPcq');
+createUser('admin', 'test1234');
