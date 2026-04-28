@@ -2,51 +2,51 @@ version: '3.8'
 
 services:
   nather:
-    image: ascvisiondocker/apollo_order_manager:latest
-    container_name: apollo_order_manager
-    hostname: apollo_order_manager
+    image: 
+    container_name: segnitz_rental
+    hostname: segnitz_rental
     environment:
-      - DB_HOST=apollo_order_manager_sql  # MySQL Service-Name als Host
+      - DB_HOST=segnitz_rental_sql  # MySQL Service-Name als Host
       - DB_PORT=3306  # Standard MySQL Port
       - DB_USER=root  # Nutzername, ändere dies entsprechend deiner Konfiguration
       - DB_PW=MldeSf8536!  # Passwort
       - DB_NAME=db_nather  # Name der Datenbank
       - SESSION_SECRET=z5@2Q97yRMxbx9Ca6vQEk#com$7dYT9%4k!3!q9F&JMEFg7$Uac$kdmgud2s5jnHBX%Eh!4X2p%4%7wfU*ro3!ePC#ZU8dpkUt*ft9&M!&%977@a#k6qzuHJbWGEMjuL
     networks:
-      - nather_net
+      - segnitz_net
     ports:
       - "3400:3000"
     restart: always
 
   mysql:
     image: mysql:latest
-    container_name: apollo_order_manager_sql
-    hostname: apollo_order_manager_sql
+    container_name: segnitz_rental_sql
+    hostname: segnitz_rental_sql
     environment:
       MYSQL_ROOT_PASSWORD: MldeSf8536!
     networks:
-      - nather_net
+      - segnitz_net
     ports:
       - "3401:3306"
     restart: always
     volumes:
-      - apollo_order_manager_sql_data:/var/lib/apollo_order_manager_sql
+      - segnitz_rental_sql_data:/var/lib/segnitz_rental_sql
 
   phpmyadmin:
     image: phpmyadmin/phpmyadmin
-    container_name: apollo_order_manager_phpmyadmin
-    hostname: apollo_order_manager_phpmyadmin
+    container_name: segnitz_rental_phpmyadmin
+    hostname: segnitz_rental_phpmyadmin
     environment:
-      PMA_HOST: apollo_order_manager_sql
+      PMA_HOST: segnitz_rental_sql
     networks:
-      - nather_net
+      - segnitz_net
     ports:
       - "3402:80"
     restart: always
 
 volumes:
-  apollo_order_manager_sql_data:
+  segnitz_rental_sql_data:
 
 networks:
-  nather_net:
+  segnitz_net:
     driver: bridge

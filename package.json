@@ -1,17 +1,17 @@
 {
-  "name": "apollo_order_manager",
-  "description": "Apollo Order Manager",
+  "name": "segnitz-rental",
+  "description": "Schnell- und Langzeitmietverwaltung",
   "version": "1.0.0",
-  "main": "apollo_order_manager.js",
+  "main": "segnitz_rental.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node apollo_order_manager.js"
+    "start": "node segnitz_rental.js"
   },
   "repository": {
     "type": "git",
     "url": "https://git.asc-vision.de/asc_intern/nather-heizung-sanitaer.git"
   },
-  "author": "Leon Pllana @ ASC Vision",
+  "author": "Leon Pllana",
   "license": "ISC",
   "dependencies": {
     "bcrypt": "^5.1.1",
