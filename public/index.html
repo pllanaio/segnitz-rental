@@ -53,6 +53,9 @@
         Abmelden
     </button>
 </a>
+<p id="login-status" class="mt-3">
+    Kein Benutzer angemeldet
+</p>
                     </div>
                 </div>
                 <!-- FORMS -->
@@ -504,23 +507,5 @@
         <script type="text/javascript" src="js/html2json.js"></script>
         <!--DateAndLocation-->
         <script type="text/javascript" src="js/dateandlocation.js"></script>
-
-<script>
-fetch('/auth-status')
-    .then(res => res.json())
-    .then(data => {
-        const btn = document.getElementById('admin-button');
-
-        if (data.loggedIn) {
-            btn.href = '/backend.html';
-            btn.querySelector('button').innerHTML =
-                '<i class="bi bi-gear"></i> Konfiguration';
-        } else {
-            btn.href = '/login.html';
-            btn.querySelector('button').innerHTML =
-                '<i class="bi bi-person-lock"></i> Login';
-        }
-    });
-</script>
     </body>
 </html>

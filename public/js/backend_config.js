@@ -166,7 +166,7 @@ function logout() {
         .then(response => {
             if (response.ok) {
                 // Optional: Weiterleitung zur Login-Seite oder Anzeige einer Bestätigung
-                window.location.href = '/login.html';
+                window.location.href = 'index.html';
             } else {
                 console.error('Fehler beim Logout');
                 alert('Fehler beim Abmelden');
@@ -176,3 +176,19 @@ function logout() {
             console.error('Netzwerkfehler beim Versuch, sich abzumelden:', error);
         });
 }
+
+document.addEventListener("DOMContentLoaded", () => {
+    const backendLoginStatus = document.getElementById('backend-login-status');
+
+    if (!backendLoginStatus) return;
+
+    fetch('/auth-status')
+        .then(res => res.json())
+        .then(data => {
+            backendLoginStatus.textContent = `Angemeldet als: ${data.user}`;
+        })
+        .catch(err => {
+            console.error('Auth-Status Fehler:', err);
+            backendLoginStatus.textContent = 'Benutzer konnte nicht geladen werden';
+        });
+});

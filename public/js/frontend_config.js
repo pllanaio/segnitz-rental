@@ -478,3 +478,46 @@ function logout() {
             console.error('Netzwerkfehler beim Versuch, sich abzumelden:', error);
         });
 }
+
+// ==========================
+// AUTH STATUS HANDLING
+// ==========================
+document.addEventListener("DOMContentLoaded", () => {
+    const btn = document.getElementById('admin-button');
+    const loginStatus = document.getElementById('login-status');
+    const logoutBtn = document.getElementById('logout-button');
+
+    // Falls Seite kein Login-Bereich hat (z.B. backend.html), einfach abbrechen
+    if (!btn || !loginStatus || !logoutBtn) return;
+
+    fetch('/auth-status')
+        .then(res => res.json())
+        .then(data => {
+            if (data.loggedIn) {
+                // Button → Konfiguration
+                btn.href = '/backend.html';
+                btn.querySelector('button').innerHTML =
+                    '<i class="bi bi-gear"></i> Konfiguration';
+
+                // Logout anzeigen
+                logoutBtn.style.display = 'inline-block';
+
+                // User anzeigen
+                loginStatus.textContent = `Angemeldet als: ${data.user}`;
+            } else {
+                // Button → Login
+                btn.href = '/login.html';
+                btn.querySelector('button').innerHTML =
+                    '<i class="bi bi-person-lock"></i> Login';
+
+                // Logout verstecken
+                logoutBtn.style.display = 'none';
+
+                // Status
+                loginStatus.textContent = 'Kein Benutzer angemeldet';
+            }
+        })
+        .catch(err => {
+            console.error('Auth-Status Fehler:', err);
+        });
+});
