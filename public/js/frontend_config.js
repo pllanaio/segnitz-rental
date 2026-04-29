@@ -45,7 +45,7 @@ function submitSignature() {
     }
 }
 
-nextBtn.addEventListener('click', () => {
+nextBtn.addEventListener('click', async () => {
 
     // Check if current step is valid before moving to next
     let isValid = true;
@@ -57,7 +57,7 @@ nextBtn.addEventListener('click', () => {
             isValid = validateStep2();
             break;
         case 2:
-            isValid = validateStep3();
+            isValid = await validateStep3();
             break;
         case 3:
             isValid = validateStep4();
@@ -241,43 +241,37 @@ function validateStep1() {
 }
 
 function validateStep2() {
-    let isValid = true;
-    const orderType = document
-        .querySelector('select[name="OrderType"]')
-        .value;
+    const startDate = document.getElementById('RentalStartDate').value;
+    const endDate = document.getElementById('RentalEndDate').value;
 
-    if (orderType === "" || orderType === "Auftragsart auswählen...") {
-        alert('Bitte eine Auftragsart auswählen');
-        isValid = false;
+    if (!startDate || !endDate) {
+        alert('Bitte wählen Sie Mietbeginn und Mietende aus.');
+        return false;
     }
-    return isValid;
+
+    if (new Date(endDate) < new Date(startDate)) {
+        alert('Das Mietende darf nicht vor dem Mietbeginn liegen.');
+        return false;
+    }
+
+    return true;
 }
 
 function validateStep3() {
-    let isValid = true;
-    const orderNo = document
-        .querySelector('input[name="OrderNo"]')
-        .value;
-    const clientNo = document
-        .querySelector('input[name="ClientNo"]')
-        .value;
-    const workToDo = document
-        .querySelector('input[name="WorkToDo"]')
-        .value;
-    const workerSelected = document
-        .querySelector('select[name="Worker"]')
-        .value;
+    const createAccount = document.getElementById('CreateCustomerAccount').checked;
+    const registerBtn = document.getElementById('registerBtn');
 
-    // Überprüfung, ob die Felder für Auftragsnummer und Kundennummer gefüllt sind
-    if (!workToDo) {
-        alert('Bitte geben Sie die auszuführenden Arbeiten an.');
-        isValid = false;
-    } else if (workerSelected === "" || workerSelected === "Monteur auswählen...") {
-        alert('Bitte wählen Sie einen Monteur aus.');
-        isValid = false;
+    if (createAccount && !registerBtn.disabled) {
+        alert('Bitte zuerst registrieren.');
+        return false;
     }
 
-    return isValid;
+    if (!customerEmailVerified) {
+    alert('Bitte bestätigen Sie zuerst Ihre E-Mail-Adresse.');
+    return false;
+}
+
+    return true;
 }
 
 function validateStep4() {
@@ -571,3 +565,165 @@ function showProductDetails(card) {
     const modal = new bootstrap.Modal(document.getElementById('productDetailsModal'));
     modal.show();
 }
+
+document.addEventListener('DOMContentLoaded', () => {
+    const startInput = document.getElementById('RentalStartDate');
+    const endInput = document.getElementById('RentalEndDate');
+    const infoBox = document.getElementById('rentalDurationInfo');
+
+    if (!startInput || !endInput || !infoBox) return;
+
+    const today = new Date().toISOString().split('T')[0];
+    startInput.min = today;
+    endInput.min = today;
+
+    function updateRentalDurationInfo() {
+        const startDate = startInput.value;
+        const endDate = endInput.value;
+
+        if (!startDate || !endDate) {
+            infoBox.classList.add('d-none');
+            startInput.addEventListener('change', () => {
+    endInput.min = startInput.value;
+    endInput.value = '';
+
+    infoBox.classList.add('d-none');
+
+    updateRentalDurationInfo();
+});
+            return;
+        }
+
+        const start = new Date(startDate);
+        const end = new Date(endDate);
+
+        if (end < start) {
+infoBox.classList.remove('d-none');
+infoBox.classList.remove('alert-info');
+infoBox.classList.add('alert-danger');
+infoBox.textContent = 'Das Mietende darf nicht vor dem Mietbeginn liegen.';
+            return;
+        }
+
+        const days = Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1;
+infoBox.classList.remove('d-none');
+infoBox.classList.remove('alert-danger');
+infoBox.classList.add('alert-info');
+infoBox.textContent = `Ausgewählter Mietzeitraum: ${days} Tag${days === 1 ? '' : 'e'}`;
+    }
+
+    startInput.addEventListener('change', () => {
+        endInput.min = startInput.value;
+        endInput.value = '';
+        updateRentalDurationInfo();
+    });
+
+    endInput.addEventListener('change', updateRentalDurationInfo);
+});
+
+document.addEventListener('DOMContentLoaded', () => {
+    const createAccountCheckbox = document.getElementById('CreateCustomerAccount');
+    const passwordWrapper = document.getElementById('CustomerPasswordWrapper');
+    const passwordRepeatWrapper = document.getElementById('CustomerPasswordRepeatWrapper');
+
+    if (!createAccountCheckbox || !passwordWrapper || !passwordRepeatWrapper) return;
+
+    createAccountCheckbox.addEventListener('change', () => {
+        const shouldCreateAccount = createAccountCheckbox.checked;
+
+        passwordWrapper.classList.toggle('d-none', !shouldCreateAccount);
+        passwordRepeatWrapper.classList.toggle('d-none', !shouldCreateAccount);
+
+        if (!shouldCreateAccount) {
+            document.getElementById('CustomerPassword').value = '';
+            document.getElementById('CustomerPasswordRepeat').value = '';
+        }
+    });
+});
+
+const createAccountCheckbox = document.getElementById('CreateCustomerAccount');
+const passwordWrapper = document.getElementById('CustomerPasswordWrapper');
+const passwordRepeatWrapper = document.getElementById('CustomerPasswordRepeatWrapper');
+const registerWrapper = document.getElementById('registerButtonWrapper');
+
+createAccountCheckbox.addEventListener('change', () => {
+    const active = createAccountCheckbox.checked;
+
+    passwordWrapper.classList.toggle('d-none', !active);
+    passwordRepeatWrapper.classList.toggle('d-none', !active);
+    registerWrapper.classList.toggle('d-none', !active);
+});
+
+async function registerCustomer() {
+    const firstName = document.getElementById('FirstName').value.trim();
+    const lastName = document.getElementById('LastName').value.trim();
+    const email = document.getElementById('CustomerEmail').value.trim();
+    const phone = document.getElementById('CustomerPhone').value.trim();
+    const address = document.getElementById('CustomerAddress').value.trim();
+    const zip = document.getElementById('CustomerZip').value.trim();
+    const city = document.getElementById('CustomerCity').value.trim();
+    const password = document.getElementById('CustomerPassword').value;
+    const passwordRepeat = document.getElementById('CustomerPasswordRepeat').value;
+
+    if (!firstName || !lastName || !email || !phone || !address || !zip || !city) {
+        alert('Bitte alle Felder ausfüllen');
+        return;
+    }
+
+    if (!password || password !== passwordRepeat) {
+        alert('Passwörter stimmen nicht überein');
+        return;
+    }
+
+    const response = await fetch('/register-customer', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            firstName,
+            lastName,
+            email,
+            phone,
+            address,
+            zip,
+            city,
+            password
+        })
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+        alert(result.error || 'Fehler bei Registrierung');
+        return;
+    }
+
+    // ✅ Erfolg anzeigen
+    const successBox = document.getElementById('registrationSuccess');
+    successBox.classList.remove('d-none');
+
+    // 🔒 Button deaktivieren (kein doppelt registrieren)
+    document.getElementById('registerBtn').disabled = true;
+}
+
+document.getElementById('registerBtn').addEventListener('click', registerCustomer);
+
+let customerEmailVerified = false;
+
+document.getElementById('checkVerificationBtn').addEventListener('click', async () => {
+    const email = document.getElementById('CustomerEmail').value.trim();
+
+    const response = await fetch('/check-email-verification', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email })
+    });
+
+    const result = await response.json();
+
+    if (result.verified) {
+        customerEmailVerified = true;
+        alert('E-Mail wurde erfolgreich verifiziert.');
+    } else {
+        alert('E-Mail wurde noch nicht bestätigt.');
+    }
+});
