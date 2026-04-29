@@ -493,27 +493,31 @@ document.addEventListener("DOMContentLoaded", () => {
     fetch('/auth-status')
         .then(res => res.json())
         .then(data => {
-            if (data.loggedIn) {
+            if (data.loggedIn && data.role === 'global_admin') {
                 // Button → Konfiguration
                 btn.href = '/backend.html';
                 btn.querySelector('button').innerHTML =
                     '<i class="bi bi-gear"></i> Konfiguration';
+                logoutBtn.style.display = 'inline-block';
+                loginStatus.textContent = `Angemeldet als: ${data.user}`;
+            } else if (data.loggedIn) {
+                btn.href = '#';
+                btn.querySelector('button').innerHTML =
+                    '<i class="bi bi-person-check"></i> Eingeloggt';
 
+                logoutBtn.style.display = 'inline-block';
+                loginStatus.textContent = `Angemeldet als: ${data.user}`;
                 // Logout anzeigen
                 logoutBtn.style.display = 'inline-block';
 
                 // User anzeigen
                 loginStatus.textContent = `Angemeldet als: ${data.user}`;
             } else {
-                // Button → Login
                 btn.href = '/login.html';
                 btn.querySelector('button').innerHTML =
                     '<i class="bi bi-person-lock"></i> Login';
 
-                // Logout verstecken
                 logoutBtn.style.display = 'none';
-
-                // Status
                 loginStatus.textContent = 'Kein Benutzer angemeldet';
             }
         })
