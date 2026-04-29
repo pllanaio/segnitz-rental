@@ -518,18 +518,36 @@ document.querySelectorAll('.product-card').forEach(card => {
 
 let selectedProductCard = null;
 
-document.querySelectorAll('.product-card').forEach(card => {
-    card.addEventListener('click', () => {
-        selectProductCard(card);
+document.addEventListener("DOMContentLoaded", () => {
+    const modalElement = document.getElementById('productDetailsModal');
+    const selectProductFromModalBtn = document.getElementById('selectProductFromModal');
+
+    document.querySelectorAll('.product-card').forEach(card => {
+        card.addEventListener('click', () => {
+            selectProductCard(card);
+        });
+
+        const detailsButton = card.querySelector('.product-details-btn');
+
+        if (detailsButton) {
+            detailsButton.addEventListener('click', (event) => {
+                event.stopPropagation();
+                selectedProductCard = card;
+                showProductDetails(card);
+            });
+        }
     });
 
-    const detailsButton = card.querySelector('.product-details-btn');
+    if (selectProductFromModalBtn) {
+        selectProductFromModalBtn.addEventListener('click', () => {
+            if (!selectedProductCard) return;
 
-    if (detailsButton) {
-        detailsButton.addEventListener('click', (event) => {
-            event.stopPropagation();
-            selectedProductCard = card;
-            showProductDetails(card);
+            selectProductCard(selectedProductCard);
+
+            const modal = bootstrap.Modal.getInstance(modalElement);
+            if (modal) {
+                modal.hide();
+            }
         });
     }
 });
@@ -553,16 +571,3 @@ function showProductDetails(card) {
     const modal = new bootstrap.Modal(document.getElementById('productDetailsModal'));
     modal.show();
 }
-
-document.getElementById('selectProductFromModal').addEventListener('click', () => {
-    if (!selectedProductCard) return;
-
-    selectProductCard(selectedProductCard);
-
-    const modalElement = document.getElementById('productDetailsModal');
-    const modal = bootstrap.Modal.getInstance(modalElement);
-
-    if (modal) {
-        modal.hide();
-    }
-});

@@ -419,3 +419,21 @@ body {
     object-fit: cover;
     border-radius: 8px;
 }
+
+#qbox-container_form {
+    background: transparent !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+}
+
+#steps-container {
+    width: 100%;
+}
+
+.step {
+    width: 100%;
+}
+
+.progress {
+    margin-bottom: 0 !important;
+}
