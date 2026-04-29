@@ -230,37 +230,14 @@ submitBtn.addEventListener('click', (event) => {
 });
 
 function validateStep1() {
-    let isValid = true;
-    const recipient = document
-        .querySelector('textarea[name="Recipient"]')
-        .value;
-    const client = document
-        .querySelector('textarea[name="Client"]')
-        .value;
-    const ownerChecked = document
-        .getElementById('Owner')
-        .checked;
-    const renterChecked = document
-        .getElementById('Renter')
-        .checked;
-    const otherRelatedChecked = document
-        .getElementById('other_related')
-        .checked;
+    const selectedProduct = document.getElementById('RentalProduct').value;
 
-
-    // Überprüfung der Texteingaben auf ungültige Zeichen
-    if (!recipient || !client) {
-        alert('Keine Leeren Felder erlaubt');
-        isValid = false;
-    } else if (!ownerChecked && !renterChecked && !otherRelatedChecked) {
-        alert(
-            'Bitte wählen Sie mindestens eine Option (Eigentümer, Mieter, Objektangehöriger' +
-            ').'
-        );
-        isValid = false;
+    if (!selectedProduct) {
+        alert('Bitte wählen Sie ein Produkt aus.');
+        return false;
     }
 
-    return isValid;
+    return true;
 }
 
 function validateStep2() {
@@ -524,4 +501,68 @@ document.addEventListener("DOMContentLoaded", () => {
         .catch(err => {
             console.error('Auth-Status Fehler:', err);
         });
+});
+
+document.querySelectorAll('.product-card').forEach(card => {
+    card.addEventListener('click', () => {
+        document
+            .querySelectorAll('.product-card')
+            .forEach(c => c.classList.remove('selected'));
+
+        card.classList.add('selected');
+
+        document.getElementById('RentalProduct').value =
+            card.dataset.product;
+    });
+});
+
+let selectedProductCard = null;
+
+document.querySelectorAll('.product-card').forEach(card => {
+    card.addEventListener('click', () => {
+        selectProductCard(card);
+    });
+
+    const detailsButton = card.querySelector('.product-details-btn');
+
+    if (detailsButton) {
+        detailsButton.addEventListener('click', (event) => {
+            event.stopPropagation();
+            selectedProductCard = card;
+            showProductDetails(card);
+        });
+    }
+});
+
+function selectProductCard(card) {
+    document
+        .querySelectorAll('.product-card')
+        .forEach(c => c.classList.remove('selected'));
+
+    card.classList.add('selected');
+
+    document.getElementById('RentalProduct').value = card.dataset.product;
+}
+
+function showProductDetails(card) {
+    document.getElementById('modalProductTitle').textContent = card.dataset.title;
+    document.getElementById('modalProductDescription').textContent = card.dataset.description;
+    document.getElementById('modalProductPrice').textContent = card.dataset.price;
+    document.getElementById('modalProductDeposit').textContent = card.dataset.deposit;
+
+    const modal = new bootstrap.Modal(document.getElementById('productDetailsModal'));
+    modal.show();
+}
+
+document.getElementById('selectProductFromModal').addEventListener('click', () => {
+    if (!selectedProductCard) return;
+
+    selectProductCard(selectedProductCard);
+
+    const modalElement = document.getElementById('productDetailsModal');
+    const modal = bootstrap.Modal.getInstance(modalElement);
+
+    if (modal) {
+        modal.hide();
+    }
 });

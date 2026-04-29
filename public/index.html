@@ -77,62 +77,53 @@
                             name="form-wrapper"
                             novalidate="">
                             <div id="steps-container">
-                                <div class="step d-block">
-                                    <h4>Geben Sie den Auftraggeber und den Rechnungsempfänger an</h4>
-                                    <div class="row">
-                                        <div class="col-xs-12 col-sm-12 col-md-12 col-lg-12">
-                                            <textarea
-                                                name="Recipient"
-                                                class="form-control"
-                                                placeholder="Rechnungsempfänger"
-                                                maxlength="150"
-                                                rows="5"></textarea><br>
-                                            <textarea
-                                                name="Client"
-                                                class="form-control"
-                                                placeholder="Auftraggeber/Baustelle"
-                                                maxlength="150"
-                                                rows="5"></textarea>
-                                        </div>
-                                    </div>
-                                    <br>
-                                    <div class="row justify-content-between">
-                                        <div class="col-md-auto">
-                                            <div class="form-check form-switch">
-                                                <input
-                                                    class="form-check-input"
-                                                    type="checkbox"
-                                                    role="switch"
-                                                    name="Owner"
-                                                    id="Owner">
-                                                <label class="form-check-label">Eigentümer</label>
-                                            </div>
-                                        </div>
-                                        <div class="col-md-auto">
-                                            <div class="form-check form-switch">
-                                                <input
-                                                    class="form-check-input"
-                                                    type="checkbox"
-                                                    role="switch"
-                                                    name="Renter"
-                                                    id="Renter">
-                                                <label class="form-check-label">Mieter</label>
-                                            </div>
-                                        </div>
-                                        <div class="col-md-auto">
-                                            <div class="form-check form-switch">
-                                                <input
-                                                    class="form-check-input"
-                                                    type="checkbox"
-                                                    role="switch"
-                                                    name="other_related"
-                                                    id="other_related">
-                                                <label class="form-check-label">Objektangehöriger</label>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="step d-none" id="page1">
+<div class="step d-block">
+    <h4>Wählen Sie ein Produkt zur Vermietung aus</h4>
+
+    <input type="hidden" name="RentalProduct" id="RentalProduct">
+
+    <div class="product-grid">
+    <div
+        class="product-card"
+        data-product="bautrockner"
+        data-title="Bautrockner"
+        data-description="Für die Trocknung von Räumen, Kellern und Baustellen."
+        data-price="25,00 € / Tag"
+        data-deposit="100,00 €">
+        <img src="img/products/bautrockner.jpg" alt="Bautrockner">
+        <h5>Bautrockner</h5>
+        <p>Raumtrocknung und Bautrocknung.</p>
+        <button type="button" class="btn btn-outline-primary btn-sm product-details-btn">
+            Details anzeigen
+        </button>
+    </div>
+
+    <div
+        class="product-card"
+        data-product="ruettelplatte"
+        data-title="Rüttelplatte"
+        data-description="Für Pflasterarbeiten, Untergrundverdichtung und kleinere Baustellen."
+        data-price="35,00 € / Tag"
+        data-deposit="150,00 €">
+        <img src="img/products/ruettelplatte.jpg" alt="Rüttelplatte">
+        <h5>Rüttelplatte</h5>
+        <p>Verdichtung von Untergründen.</p>
+        <button type="button" class="btn btn-outline-primary btn-sm product-details-btn">
+            Details anzeigen
+        </button>
+    </div>
+
+        <div class="product-card" data-product="anhaenger">
+            <img src="img/products/anhaenger.jpg" alt="Anhänger">
+            <h5>Anhänger</h5>
+            <p>Für Transport von Material und Geräten.</p>
+            <button type="button" class="btn btn-outline-primary btn-sm product-details-btn">
+                Details anzeigen
+            </button>
+        </div>
+    </div>
+</div>
+                 <div class="step d-none" id="page1">
                                     <h4>Wählen Sie die vorliegende Auftragsart aus</h4>
                                     <div class="row">
                                         <div class="col-xs-12 col-sm-12 col-md-12 col-lg-12">
@@ -507,5 +498,31 @@
         <script type="text/javascript" src="js/html2json.js"></script>
         <!--DateAndLocation-->
         <script type="text/javascript" src="js/dateandlocation.js"></script>
+
+        <!-- 👉 HIER DAS MODAL EINFÜGEN -->
+<div class="modal fade" id="productDetailsModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Produktdetails</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <h5 id="modalProductTitle"></h5>
+                <p id="modalProductDescription"></p>
+                <p><strong>Preis:</strong> <span id="modalProductPrice"></span></p>
+                <p><strong>Kaution:</strong> <span id="modalProductDeposit"></span></p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                    Schließen
+                </button>
+                <button type="button" class="btn btn-primary" id="selectProductFromModal">
+                    Dieses Produkt auswählen
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
     </body>
 </html>
