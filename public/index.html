@@ -126,49 +126,127 @@
                                 </div>
                             </div>
                         </div>
-                 <div class="step d-none" id="page1">
-                                    <h4>Wählen Sie die vorliegende Auftragsart aus</h4>
-                                    <div class="row">
-                                        <div class="col-xs-12 col-sm-12 col-md-12 col-lg-12">
-                                            <select name="OrderType" class="form-select">
-                                                <option selected="selected" disabled="disabled" hidden="hidden">Auftragsart auswählen...</option>
-                                                <option>Arbeits- und Materialnachweis</option>
-                                                <option>Wartung mit Vertrag</option>
-                                                <option>Wartung ohne Vertrag</option>
-                                                <option>Materiallieferung</option>
-                                                <option>Inbetriebnahme</option>
-                                                <option>Gewährleistung</option>
-                                            </select>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="step d-none" id="page2">
-                                    <h4>Geben Sie bitte noch nachfolgende Daten ein:
-                                    </h4>
-                                    <div class="row">
-                                        <div class="col-xs-12 col-sm-12 col-md-12 col-lg-12">
-                                            <input
-                                                name="OrderNo"
-                                                type="number"
-                                                class="form-control"
-                                                placeholder="Auftragsnummer"><br>
-                                            <input
-                                                name="ClientNo"
-                                                type="number"
-                                                class="form-control"
-                                                placeholder="Kundennummer"><br>
-                                            <input
-                                                name="WorkToDo"
-                                                type="text"
-                                                class="form-control"
-                                                placeholder="Auszuführende Arbeiten"><br>
-                                            <select name="Worker" class="form-select form-control" id="work_dropdown">
-                                                <option selected="selected" disabled="disabled" hidden="hidden">Monteur auswählen...</option>
+<div class="step d-none" id="page1">
+    <h4 class="mb-4">Mietzeitraum auswählen</h4>
 
-                                            </select>
-                                        </div>
-                                    </div>
-                                </div>
+    <div class="row g-3">
+        <div class="col-12 col-lg-6">
+            <label class="form-label" for="RentalStartDate">Mietbeginn</label>
+            <input
+                type="date"
+                class="form-control"
+                id="RentalStartDate"
+                name="RentalStartDate">
+        </div>
+
+        <div class="col-12 col-lg-6">
+            <label class="form-label" for="RentalEndDate">Mietende</label>
+            <input
+                type="date"
+                class="form-control"
+                id="RentalEndDate"
+                name="RentalEndDate">
+        </div>
+
+        <div class="col-12">
+            <div id="rentalDurationInfo" class="alert alert-info d-none mt-3"></div>
+        </div>
+    </div>
+</div>
+<div class="step d-none" id="page2">
+    <h4 class="mb-4">Persönliche Daten</h4>
+
+    <div class="row g-3">
+        <div class="col-12 col-lg-6">
+            <label class="form-label" for="FirstName">Vorname</label>
+            <input type="text" class="form-control" id="FirstName" name="FirstName">
+        </div>
+
+        <div class="col-12 col-lg-6">
+            <label class="form-label" for="LastName">Nachname</label>
+            <input type="text" class="form-control" id="LastName" name="LastName">
+        </div>
+
+        <div class="col-12 col-lg-6">
+            <label class="form-label" for="CustomerEmail">E-Mail</label>
+            <input type="email" class="form-control" id="CustomerEmail" name="CustomerEmail">
+        </div>
+
+        <div class="col-12 col-lg-6">
+            <label class="form-label" for="CustomerPhone">Telefon</label>
+            <input type="tel" class="form-control" id="CustomerPhone" name="CustomerPhone">
+        </div>
+
+        <div class="col-12">
+            <label class="form-label" for="CustomerAddress">Adresse</label>
+            <input type="text" class="form-control" id="CustomerAddress" name="CustomerAddress">
+        </div>
+
+        <div class="col-12 col-lg-4">
+            <label class="form-label" for="CustomerZip">PLZ</label>
+            <input type="text" class="form-control" id="CustomerZip" name="CustomerZip">
+        </div>
+
+        <div class="col-12 col-lg-8">
+            <label class="form-label" for="CustomerCity">Ort</label>
+            <input type="text" class="form-control" id="CustomerCity" name="CustomerCity">
+        </div>
+    </div>
+    <div class="col-12">
+    <div class="form-check form-switch">
+        <input
+            class="form-check-input"
+            type="checkbox"
+            id="CreateCustomerAccount"
+            name="CreateCustomerAccount">
+        <label class="form-check-label" for="CreateCustomerAccount">
+            Kundenkonto erstellen
+        </label>
+    </div>
+    <small class="text-muted">
+        Ohne Kundenkonto können Sie als Gast fortfahren.
+    </small>
+</div>
+
+<div class="col-12 col-lg-6 d-none" id="CustomerPasswordWrapper">
+    <label class="form-label" for="CustomerPassword">Gewünschtes Passwort</label>
+    <input
+        type="password"
+        class="form-control"
+        id="CustomerPassword"
+        name="CustomerPassword"
+        autocomplete="new-password">
+</div>
+
+<div class="col-12 col-lg-6 d-none" id="CustomerPasswordRepeatWrapper">
+    <label class="form-label" for="CustomerPasswordRepeat">Passwort wiederholen</label>
+    <input
+        type="password"
+        class="form-control"
+        id="CustomerPasswordRepeat"
+        name="CustomerPasswordRepeat"
+        autocomplete="new-password">
+</div>
+
+<div class="col-12 mt-3 d-none" id="registerButtonWrapper">
+    <button
+        type="button"
+        class="btn btn-success"
+        id="registerBtn">
+        <i class="bi bi-person-plus"></i>
+        Jetzt registrieren
+    </button>
+    <button type="button" class="btn btn-outline-primary d-none" id="checkVerificationBtn">
+    Verifikation prüfen
+    </button>
+</div>
+<br>
+<div class="col-12">
+    <div id="registrationSuccess" class="alert alert-success d-none">
+        Kundenkonto wurde erfolgreich erstellt.
+    </div>
+</div>
+</div>
                                 <div class="step d-none" id="page3">
                                     <h4>Geben Sie den Termin, die Uhrzeit und den Arbeitsbericht des Monteurs an</h4>
                                     <div class="row">

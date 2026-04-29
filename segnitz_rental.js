@@ -11,6 +11,7 @@ const fs = require('fs');
 const mysql = require('mysql2/promise');
 const nodemailer = require('nodemailer');
 const {PDFDocument, PDFTextField, PDFCheckBox} = require('pdf-lib');
+const crypto = require('crypto');
 
 // Session Middleware konfigurieren
 app.use(session({
@@ -389,7 +390,7 @@ async function generatePDF(formDataObj, templatePath, outputPath) {
     fs.writeFileSync(outputPath, pdfBytes);
 }
 
-async function sendEmailWithPDF(recipients, pdfFilePath, pdfFilename) {
+/*async function sendEmailWithPDF(recipients, pdfFilePath, pdfFilename) {
     const transporter = nodemailer.createTransport({
         host: 'mail.your-server.de',
         port: 465,
@@ -424,7 +425,7 @@ async function sendEmailWithPDF(recipients, pdfFilePath, pdfFilename) {
         console.error('Fehler im Mailversand: ', error);
         return false;
     }
-}
+} */
 
 app.post('/data', async (req, res) => {
     try {
@@ -568,6 +569,307 @@ app.get('/pdf-download/:filename', (req, res) => {
     const filename = req.params.filename;
     const filepath = path.join(__dirname, 'public', 'pdf', filename);
     res.download(filepath); // Setzt Content-Disposition zum Download
+});
+
+function createVerificationToken() {
+    return crypto.randomBytes(32).toString('hex');
+}
+
+function getVerificationExpiry() {
+    const expires = new Date();
+    expires.setHours(expires.getHours() + 24);
+    return expires;
+}
+
+async function generateCustomerNo(connection) {
+    const year = new Date().getFullYear();
+
+    const [rows] = await connection.execute(
+        `SELECT customer_no 
+         FROM users 
+         WHERE customer_no LIKE ?
+         ORDER BY customer_no DESC 
+         LIMIT 1`,
+        [`K${year}%`]
+    );
+
+    let nextNumber = 1;
+
+    if (rows.length > 0 && rows[0].customer_no) {
+        nextNumber = Number(rows[0].customer_no.slice(5)) + 1;
+    }
+
+    return `K${year}${String(nextNumber).padStart(5, '0')}`;
+}
+
+async function sendVerificationEmail(email, token) {
+    const verificationUrl = `${process.env.BASE_URL}/verify-email?token=${token}`;
+
+    const transporter = nodemailer.createTransport({
+        host: 'mail.your-server.de',
+        port: 465,
+        secure: true,
+        auth: {
+            user: process.env.SMTP_USER,
+            pass: process.env.SMTP_PASS
+        }
+    });
+
+    await transporter.sendMail({
+        from: `"Segnitz Rental" <${process.env.SMTP_USER}>`,
+        to: email,
+        subject: 'E-Mail-Adresse bestätigen',
+        text: `Bitte bestätigen Sie Ihre E-Mail-Adresse über diesen Link: ${verificationUrl}`,
+        html: `
+            <p>Bitte bestätigen Sie Ihre E-Mail-Adresse.</p>
+            <p><a href="${verificationUrl}">E-Mail-Adresse bestätigen</a></p>
+            <p>Der Link ist 24 Stunden gültig.</p>
+        `
+    });
+}
+
+app.post('/register-customer', async (req, res) => {
+    const {
+        firstName,
+        lastName,
+        email,
+        phone,
+        address,
+        zip,
+        city,
+        password
+    } = req.body;
+
+    if (!firstName || !lastName || !email || !phone || !address || !zip || !city || !password) {
+        return res.status(400).json({error: 'Pflichtfelder fehlen'});
+    }
+
+    try {
+        const connection = await mysql.createConnection({
+            host: process.env.DB_HOST,
+            port: Number(process.env.DB_PORT),
+            user: process.env.DB_USER,
+            password: process.env.DB_PW,
+            database: process.env.DB_NAME
+        });
+
+        const [existingUsers] = await connection.execute(
+            'SELECT id FROM users WHERE username = ?',
+            [email]
+        );
+
+        if (existingUsers.length > 0) {
+            await connection.end();
+            return res.status(409).json({error: 'Für diese E-Mail existiert bereits ein Konto'});
+        }
+
+        const hashedPassword = await bcrypt.hash(password, 10);
+        const customerNo = await generateCustomerNo(connection);
+        const token = createVerificationToken();
+        const expires = getVerificationExpiry();
+
+        await connection.execute(
+            `INSERT INTO users 
+            (username, password, role, first_name, last_name, phone, address, zip, city, customer_no, email_verified, verification_token, verification_expires)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+                email,
+                hashedPassword,
+                'user',
+                firstName,
+                lastName,
+                phone,
+                address,
+                zip,
+                city,
+                customerNo,
+                0,
+                token,
+                expires
+            ]
+        );
+
+        await connection.end();
+
+        await sendVerificationEmail(email, token);
+
+        console.log(
+            `${new Date().toISOString()} - Registrierung: Neuer Benutzer ${firstName} ${lastName} (E-Mail: ${email}, Kundennummer: ${customerNo}) wurde erfolgreich registriert und eine Bestätigungsmail wurde versendet`
+        );
+
+        res.status(201).json({
+            message: 'Kundenkonto wurde erstellt. Bitte bestätigen Sie Ihre E-Mail-Adresse.',
+            customerNo
+        });
+    } catch (error) {
+        console.error('Fehler beim Erstellen des Kundenkontos:', error);
+        res.status(500).json({error: 'Fehler beim Erstellen des Kundenkontos'});
+    }
+});
+
+app.post('/request-guest-verification', async (req, res) => {
+    const { email } = req.body;
+
+    if (!email) {
+        return res.status(400).json({error: 'E-Mail-Adresse fehlt'});
+    }
+
+    try {
+        const connection = await mysql.createConnection({
+            host: process.env.DB_HOST,
+            port: Number(process.env.DB_PORT),
+            user: process.env.DB_USER,
+            password: process.env.DB_PW,
+            database: process.env.DB_NAME
+        });
+
+        const token = createVerificationToken();
+        const expires = getVerificationExpiry();
+
+        await connection.execute(
+            `INSERT INTO guest_verifications
+            (email, verification_token, verified, expires_at)
+            VALUES (?, ?, ?, ?)`,
+            [email, token, 0, expires]
+        );
+
+        await connection.end();
+
+        await sendVerificationEmail(email, token);
+
+        console.log(
+            `${new Date().toISOString()} - Gast-Verifikation: Bestätigungsmail an ${email} wurde versendet`
+        );
+
+        res.status(200).json({
+            message: 'Bestätigungsmail wurde versendet.'
+        });
+    } catch (error) {
+        console.error('Fehler bei Gast-Verifikation:', error);
+        res.status(500).json({error: 'Fehler beim Versenden der Bestätigungsmail'});
+    }
+});
+
+app.get('/verify-email', async (req, res) => {
+    const { token } = req.query;
+
+    if (!token) {
+        return res.status(400).send('Ungültiger Bestätigungslink.');
+    }
+
+    try {
+        const connection = await mysql.createConnection({
+            host: process.env.DB_HOST,
+            port: Number(process.env.DB_PORT),
+            user: process.env.DB_USER,
+            password: process.env.DB_PW,
+            database: process.env.DB_NAME
+        });
+
+        const [users] = await connection.execute(
+            `SELECT id, username 
+             FROM users 
+             WHERE verification_token = ? 
+             AND verification_expires > NOW()`,
+            [token]
+        );
+
+        if (users.length > 0) {
+            await connection.execute(
+                `UPDATE users 
+                 SET email_verified = 1, verification_token = NULL, verification_expires = NULL 
+                 WHERE id = ?`,
+                [users[0].id]
+            );
+
+            await connection.end();
+
+            return res.send('E-Mail-Adresse wurde erfolgreich bestätigt. Sie können das Fenster schließen.');
+        }
+
+        const [guests] = await connection.execute(
+            `SELECT id, email 
+             FROM guest_verifications 
+             WHERE verification_token = ? 
+             AND expires_at > NOW()`,
+            [token]
+        );
+
+        if (guests.length > 0) {
+            await connection.execute(
+                `UPDATE guest_verifications 
+                 SET verified = 1 
+                 WHERE id = ?`,
+                [guests[0].id]
+            );
+
+            await connection.end();
+
+            return res.send('E-Mail-Adresse wurde erfolgreich bestätigt. Sie können das Fenster schließen.');
+        }
+
+        await connection.end();
+        return res.status(400).send('Bestätigungslink ungültig oder abgelaufen.');
+    } catch (error) {
+        console.error('Fehler bei E-Mail-Verifikation:', error);
+        res.status(500).send('Fehler bei der E-Mail-Verifikation.');
+    }
+});
+
+app.post('/check-email-verification', async (req, res) => {
+    const { email } = req.body;
+
+    if (!email) {
+        return res.status(400).json({ verified: false, error: 'E-Mail-Adresse fehlt' });
+    }
+
+    try {
+        const connection = await mysql.createConnection({
+            host: process.env.DB_HOST,
+            port: Number(process.env.DB_PORT),
+            user: process.env.DB_USER,
+            password: process.env.DB_PW,
+            database: process.env.DB_NAME
+        });
+
+        const [users] = await connection.execute(
+            'SELECT email_verified FROM users WHERE username = ?',
+            [email]
+        );
+
+        if (users.length > 0) {
+            await connection.end();
+
+            return res.json({
+                verified: users[0].email_verified === 1
+            });
+        }
+
+        const [guests] = await connection.execute(
+            `SELECT verified 
+             FROM guest_verifications 
+             WHERE email = ?
+             ORDER BY created_at DESC
+             LIMIT 1`,
+            [email]
+        );
+
+        await connection.end();
+
+        if (guests.length > 0) {
+            return res.json({
+                verified: guests[0].verified === 1
+            });
+        }
+
+        return res.json({ verified: false });
+    } catch (error) {
+        console.error('Fehler beim Prüfen der E-Mail-Verifikation:', error);
+        return res.status(500).json({
+            verified: false,
+            error: 'Fehler beim Prüfen der E-Mail-Verifikation'
+        });
+    }
 });
 
 app.listen(3000, () => {
