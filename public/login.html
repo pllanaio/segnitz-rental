@@ -62,8 +62,7 @@
                             class="needs-validation"
                             id="loginForm"
                             method="post"
-                            name="loginForm"
-                            onsubmit="handleLogin(event)">
+                            name="loginForm">
                             <div id="steps-container">
                                 <div class="step d-block">
                                     <div class="row">
@@ -97,6 +96,8 @@
             <div class="preloader-section section-left"></div>
             <div class="preloader-section section-right"></div>
         </div>
+        <!--General Functionalities-->
+        <script type="text/javascript" src="js/login_config.js"></script>
         <!--Bootstrap-->
         <script type="text/javascript" src="js/bootstrap.bundle.min.js"></script>
         <!-- Static App Form Collection Script -->
@@ -104,30 +105,5 @@
         <!--Popper-->
         <script type="text/javascript" src="js/popper.min.js"></script>
         <!-- Javascript to handle the login -->
-        <script>
-            async function handleLogin(event) {
-                event.preventDefault();
-                const username = document
-                    .getElementById('username')
-                    .value;
-                const password = document
-                    .getElementById('password')
-                    .value;
-
-                const response = await fetch('/login', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({username, password})
-                });
-
-                if (response.ok) {
-                    window.location.href = '/index.html'; // Ändern zu /index.html falls benötigt
-                } else {
-                    alert('Fehler bei der Anmeldung');
-                }
-            }
-        </script>
     </body>
 </html>
