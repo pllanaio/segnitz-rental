@@ -31,7 +31,8 @@ app.get('/', (req, res) => {
 app.get('/auth-status', (req, res) => {
     res.json({
         loggedIn: !!req.session.user,
-        user: req.session.user || null
+        user: req.session.user || null,
+        role: req.session.role || null
     });
 });
 
@@ -39,7 +40,7 @@ app.get('/index.html', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-app.get('/backend.html', checkAuthentication, (req, res) => {
+app.get('/backend.html', checkAdmin, (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'backend.html'));
 });
 
@@ -57,7 +58,7 @@ app.post('/login', async (req, res) => {
 
         // Hole das Passwort des Benutzers aus der Datenbank
         const [rows] = await connection.execute(
-            'SELECT password FROM users WHERE username = ?',
+            'SELECT password, role FROM users WHERE username = ?',
             [username]
         );
 
@@ -66,21 +67,21 @@ app.post('/login', async (req, res) => {
             // Datenbank
             const passwordValid = await bcrypt.compare(password, rows[0].password);
 
-            if (passwordValid) {
-                // Passwort ist korrekt, Benutzer ist authentifiziert
-                req.session.user = username; // Speichere den Benutzernamen in der Session
-                req.session.createdAt = Date.now(); // Speichern des Zeitstempels der Session-Erstellung
-                req.session.user = username; // Speichere den Benutzernamen in der Session
-                res
-                    .status(200)
-                    .send("Login erfolgreich!");
-                console.log(
-                    new Date().toISOString(),
-                    '- Anmeldung: Benutzer',
-                    username,
-                    'erfolgreich angemeldet'
-                );
-            } else {
+if (passwordValid) {
+    req.session.user = username;
+    req.session.role = rows[0].role;
+    req.session.createdAt = Date.now();
+
+    res.status(200).send("Login erfolgreich!");
+
+    console.log(
+        new Date().toISOString(),
+        '- Anmeldung: Benutzer',
+        username,
+        'erfolgreich angemeldet mit Rolle',
+        rows[0].role
+    );
+} else {
                 // Passwort ist falsch
                 res
                     .status(401)
@@ -134,6 +135,14 @@ function checkAuthentication(req, res, next) {
         next(); // der Benutzer ist angemeldet, fahre mit der nächsten Middleware/Routenfunktion fort
     } else {
         res.redirect('/login.html'); // Leite den Benutzer zur Login-Seite um, wenn er nicht angemeldet ist
+    }
+}
+
+function checkAdmin(req, res, next) {
+    if (req.session.user && req.session.role === 'global_admin') {
+        next();
+    } else {
+        return res.status(403).send('Kein Zugriff');
     }
 }
 
@@ -193,7 +202,7 @@ app.get('/workers', async (req, res) => {
     }
 });
 
-app.delete('/delete-material',checkAuthentication, async (req, res) => {
+app.delete('/delete-material',checkAdmin, async (req, res) => {
     const materialName = req.body.name;
     if (!materialName) {
         return res
@@ -235,7 +244,7 @@ app.delete('/delete-material',checkAuthentication, async (req, res) => {
     }
 });
 
-app.delete('/delete-worker',checkAuthentication, async (req, res) => {
+app.delete('/delete-worker',checkAdmin, async (req, res) => {
     const workerName = req.body.name;
     if (!workerName) {
         return res
@@ -463,7 +472,7 @@ console.log(
     }
 });
 
-app.post('/add-material', checkAuthentication, async (req, res) => {
+app.post('/add-material', checkAdmin, async (req, res) => {
     const materialName = req.body.name;
     if (!materialName) {
         return res
@@ -509,7 +518,7 @@ app.post('/add-material', checkAuthentication, async (req, res) => {
     }
 })
 
-app.post('/add-worker', checkAuthentication, async (req, res) => {
+app.post('/add-worker', checkAdmin, async (req, res) => {
     const workerName = req.body.name;
     if (!workerName) {
         return res
