@@ -31,83 +31,89 @@
         </style>
     </head>
     <body>
-        <!-- CONTAINER -->
-        <div class="container d-flex align-items-center min-vh-100">
-            <div class="row g-0 justify-content-center">
-                <!-- TITLE -->
-                <div class="col-12 col-lg-5">
-                    <!-- Ändern zu col-12 col-lg-5 für bessere Responsivität -->
-                    <div id="title-container">
-                        <h2>Segnitz Rental</h2>
-                        <h2>Backend</h2>
-                        <br>
-                        <h3>Konfiguration</h3>
-                        <br>
-                        <p>Fachbetrieb der Innung Sanitär- und Heizungstechnik</p>
-                        <p>Zwergerstraße 2b<br>
-                            85579 Neubiberg<br>
-                            <a href="">Tel.:</a><br>
-                            <a href="mailto:info@segnitzbau.de">E-Mail:info@segnitzbau.de</a>
-                        </p>
-                        <br>
-                        <a href="/index.html">
-                            <button type="button" class="btn btn-secondary">
-                                <i class="bi bi-gear"></i>
-                                Konfiguration beenden
-                            </button>
-                        </a>
-                        <a href="">
-                            <button type="button" class="btn btn-danger" onclick="logout()">
-                                <i class="bi bi-x-circle"></i>
-                                Abmelden
-                            </button>
-                        </a>
-                        <p id="backend-login-status" class="mt-3"></p>
-                    </div>
-                </div>
-                <!-- FORMS -->
-                <div class="col-12 col-lg-7">
-                    <!-- Ändern zu col-12 col-lg-7 für bessere Responsivität -->
-                    <div id="qbox-container_form">
-                        <form
-                            class="needs-validation"
-                            id="form-wrapper"
-                            method="post"
-                            name="form-wrapper"
-                            novalidate=""
-                            onsubmit="event.preventDefault();">
-                            <div id="steps-container">
-                                <div class="step d-block">
-                                    <div class="row">
-                                        <h4>Auswählen welche Datenbank bearbeitet werden soll:
-                                        </h4>
-                                        <select name="DBType" id="DBType" class="form-select col-12">
-                                            <option selected="selected" disabled="disabled" hidden="hidden">Datenbank auswählen...</option>
-                                            <option value="material">Material</option>
-                                            <option value="monteure">Monteure</option>
-                                        </select>
-                                    </div>
-                                    <br>
-                                    <div id="inputGroup" style="display: none;" class="input-group col-12">
-                                        <input
-                                            type="text"
-                                            id="db_edit"
-                                            class="form-control"
-                                            placeholder="Neuen Eintrag hinzufügen"
-                                            aria-label="Neuen Eintrag hinzufügen">
-                                        <button class="btn btn-success" type="button" id="addButton">Hinzufügen</button>
-                                    </div>
-                                    <br>
-                                    <h4>Verfügbare Optionen:
-                                        <span id="itemCount">0</span></h4>
-                                    <div id="selectedOptionsContainer"></div>
+<!-- CONTAINER -->
+<div class="container-fluid min-vh-100 p-0">
+    <div class="row g-0 min-vh-100">
+
+        <aside class="col-12 col-md-3 col-xl-2 bg-primary text-white p-4">
+            <h2>Segnitz Rental</h2>
+            <h5 class="mt-3">Backend</h5>
+            <h6>Konfiguration</h6>
+
+            <p id="backend-login-status" class="mt-4 small"></p>
+
+            <p class="mt-4 mb-1">Zwergerstraße 2b<br>85579 Neubiberg</p>
+            <a class="text-white" href="mailto:info@segnitzbau.de">info@segnitzbau.de</a>
+
+            <a href="/index.html">
+                <button type="button" class="btn btn-light w-100 mt-4">
+                    <i class="bi bi-arrow-left-circle"></i>
+                    Konfiguration beenden
+                </button>
+            </a>
+
+            <a href="#">
+                <button type="button" class="btn btn-danger w-100 mt-2" onclick="logout()">
+                    <i class="bi bi-x-circle"></i>
+                    Abmelden
+                </button>
+            </a>
+        </aside>
+
+        <main class="col-12 col-md-9 col-xl-10 p-4 p-lg-5">
+            <div id="qbox-container_form" class="w-100">
+                <form
+                    class="needs-validation"
+                    id="form-wrapper"
+                    method="post"
+                    name="form-wrapper"
+                    novalidate=""
+                    onsubmit="event.preventDefault();">
+
+                    <div id="steps-container">
+                        <div class="step d-block">
+                            <h4 class="mb-4">Datenbank bearbeiten</h4>
+
+                            <div class="row">
+                                <div class="col-12 col-lg-6">
+                                    <select name="DBType" id="DBType" class="form-select">
+                                        <option selected disabled hidden>Datenbank auswählen...</option>
+                                        <option value="material">Material</option>
+                                        <option value="monteure">Monteure</option>
+                                    </select>
                                 </div>
                             </div>
-                        </form>
+
+                            <br>
+
+                            <div id="inputGroup" style="display: none;" class="input-group col-12 col-lg-6">
+                                <input
+                                    type="text"
+                                    id="db_edit"
+                                    class="form-control"
+                                    placeholder="Neuen Eintrag hinzufügen"
+                                    aria-label="Neuen Eintrag hinzufügen">
+                                <button class="btn btn-success" type="button" id="addButton">
+                                    Hinzufügen
+                                </button>
+                            </div>
+
+                            <br>
+
+                            <h4>
+                                Verfügbare Optionen:
+                                <span id="itemCount">0</span>
+                            </h4>
+
+                            <div id="selectedOptionsContainer"></div>
+                        </div>
                     </div>
-                </div>
+                </form>
             </div>
-        </div>
+        </main>
+
+    </div>
+</div>
         <div id="preloader-wrapper">
             <div id="preloader"></div>
             <div class="preloader-section section-left"></div>
