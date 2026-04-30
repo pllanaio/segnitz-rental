@@ -438,7 +438,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
 
-            if (!validateCustomerDataStep()) {
+            if (!validateCustomerRequiredFields()) {
                 return;
             }
 
@@ -513,6 +513,29 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 });
 
+function validateCustomerRequiredFields() {
+    const requiredFields = [
+        'FirstName',
+        'LastName',
+        'CustomerEmail',
+        'CustomerPhone',
+        'CustomerAddress',
+        'CustomerZip',
+        'CustomerCity'
+    ];
+
+    for (const fieldId of requiredFields) {
+        const field = document.getElementById(fieldId);
+
+        if (!field || !field.value.trim()) {
+            alert('Bitte füllen Sie alle persönlichen Daten aus.');
+            return false;
+        }
+    }
+
+    return true;
+}
+
 function validateProductStep() {
     const selectedProduct = document.getElementById('RentalProduct').value;
 
@@ -542,23 +565,8 @@ function validateRentalPeriodStep() {
 }
 
 function validateCustomerDataStep() {
-    const requiredFields = [
-        'FirstName',
-        'LastName',
-        'CustomerEmail',
-        'CustomerPhone',
-        'CustomerAddress',
-        'CustomerZip',
-        'CustomerCity'
-    ];
-
-    for (const fieldId of requiredFields) {
-        const field = document.getElementById(fieldId);
-
-        if (!field || !field.value.trim()) {
-            alert('Bitte füllen Sie alle persönlichen Daten aus.');
-            return false;
-        }
+    if (!validateCustomerRequiredFields()) {
+        return false;
     }
 
     const isLoggedIn =
