@@ -21,6 +21,13 @@ const {
     PDFCheckBox
 } = require('pdf-lib');
 const crypto = require('crypto');
+const dbConfig = {
+    host: process.env.DB_HOST,
+    port: Number(process.env.DB_PORT),
+    user: process.env.DB_USER,
+    password: process.env.DB_PW,
+    database: process.env.DB_NAME
+};
 
 // Session Middleware konfigurieren
 app.use(session({
@@ -57,13 +64,11 @@ app.get('/backend.html', checkAdmin, (req, res) => {
 // Statische Dateien bereitstellen
 app.use(express.static("public"));
 
-// Login-Route
 app.post('/login', async (req, res) => {
     const {
         username,
         password
     } = req.body;
-
     try {
         const connection = await mysql.createConnection({
             host: process.env.DB_HOST,
@@ -71,13 +76,11 @@ app.post('/login', async (req, res) => {
             password: process.env.DB_PW,
             database: process.env.DB_NAME
         });
-
         // Hole das Passwort des Benutzers aus der Datenbank
         const [rows] = await connection.execute(
             'SELECT password, role FROM users WHERE username = ?',
             [username]
         );
-
         if (rows.length > 0) {
             // Vergleiche das eingegebene Passwort mit dem gehashten Passwort in der
             // Datenbank
@@ -109,7 +112,6 @@ app.post('/login', async (req, res) => {
                 .status(401)
                 .send("Falsche Zugangsdaten.");
         }
-
         await connection.end();
     } catch (error) {
         console.error('Fehler beim Login:', error);
@@ -716,6 +718,58 @@ app.get('/my-profile', async (req, res) => {
         });
     }
 });
+
+app.get('/products', async (req, res) => {
+    const connection = await mysql.createConnection(dbConfig);
+    const [rows] = await connection.execute(
+        'SELECT * FROM rental_products ORDER BY title ASC'
+    );
+    await connection.end();
+    res.json(rows);
+});
+
+app.post('/products', checkAdmin, async (req, res) => {
+    const { productKey, title, description, pricePerDay, deposit, imagePath } = req.body;
+
+    const connection = await mysql.createConnection(dbConfig);
+    await connection.execute(
+        `INSERT INTO rental_products 
+        (product_key, title, description, price_per_day, deposit, image_path)
+        VALUES (?, ?, ?, ?, ?, ?)`,
+        [productKey, title, description, pricePerDay, deposit, imagePath]
+    );
+    await connection.end();
+
+    res.status(201).json({ message: 'Produkt erstellt' });
+});
+
+app.put('/products/:id', checkAdmin, async (req, res) => {
+    const { title, description, pricePerDay, deposit, imagePath, isActive } = req.body;
+
+    const connection = await mysql.createConnection(dbConfig);
+    await connection.execute(
+        `UPDATE rental_products
+         SET title = ?, description = ?, price_per_day = ?, deposit = ?, image_path = ?, is_active = ?
+         WHERE id = ?`,
+        [title, description, pricePerDay, deposit, imagePath, isActive ? 1 : 0, req.params.id]
+    );
+    await connection.end();
+
+    res.json({ message: 'Produkt aktualisiert' });
+});
+
+app.delete('/products/:id', checkAdmin, async (req, res) => {
+    const connection = await mysql.createConnection(dbConfig);
+    await connection.execute(
+        'DELETE FROM rental_products WHERE id = ?',
+        [req.params.id]
+    );
+    await connection.end();
+
+    res.json({ message: 'Produkt gelöscht' });
+});
+
+
 
 app.listen(3000, () => {
     console.log(
