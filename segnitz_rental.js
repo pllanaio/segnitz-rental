@@ -131,14 +131,6 @@ app.post('/logout', (req, res) => {
     }
 });
 
-function checkAuthentication(req, res, next) {
-    if (req.session.user) {
-        next(); // der Benutzer ist angemeldet, fahre mit der nächsten Middleware/Routenfunktion fort
-    } else {
-        res.redirect('/login.html'); // Leite den Benutzer zur Login-Seite um, wenn er nicht angemeldet ist
-    }
-}
-
 function checkAdmin(req, res, next) {
     if (req.session.user && req.session.role === 'global_admin') {
         next();
@@ -146,13 +138,6 @@ function checkAdmin(req, res, next) {
         return res.status(403).send('Kein Zugriff');
     }
 }
-
-function logDatabaseChange(user, action, table, value, timestamp = new Date()) {
-    console.log(
-        `${timestamp.toISOString()} - Datenbankänderung: Benutzer ${user} hat ein Element in der Tabelle ${table} erfolgreich ${action}. Betroffenes Element: ${JSON.stringify(value)}`
-    );
-}
-
 
 async function generatePDF(formDataObj, templatePath, outputPath) {
 
