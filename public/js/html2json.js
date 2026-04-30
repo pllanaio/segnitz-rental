@@ -48,27 +48,26 @@ document
 
         // Senden der Daten aus dem html-body
         fetch('/data', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: jsonStr
-            })
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: jsonStr
+        })
             .then(response => response.json())
-            .then(data => {
-                // window.open(data.pdfUrl, '_blank'); Prüfen, ob der Button bereits existiert
-                // let downloadButton = document.getElementById('downloadPdfButton'); if
-                // (!downloadButton) { Button existiert noch nicht, also wird er erstellt
-                // downloadButton = document.createElement('button');  downloadButton.id =
-                // 'downloadPdfButton';  Eindeutige ID für den Button downloadButton.textContent
-                // = 'PDF herunterladen';  downloadButton.className = 'btn btn-primary';
-                // downloadButton.onclick = function() { fetch(data.pdfUrl)    .then(response =>
-                // response.blob())    .then(blob => { saveAs(blob, 'Auftragsschein.pdf');
-                // });  };
-                window.location.href = data.pdfUrl;
+            .then(async data => {
+                const response = await fetch(data.pdfUrl);
+                const blob = await response.blob();
 
-                // const container = document.getElementById('final');
-                // container.appendChild(downloadButton); }
+                const downloadUrl = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+
+                link.href = downloadUrl;
+                link.download = 'Mietauftrag.pdf';
+                document.body.appendChild(link);
+                link.click();
+
+                document.body.removeChild(link);
+                URL.revokeObjectURL(downloadUrl);
             })
-            .catch((error) => console.error('Fehler:', error));
     });
