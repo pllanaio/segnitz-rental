@@ -50,25 +50,25 @@ nextBtn.addEventListener('click', async () => {
     // Check if current step is valid before moving to next
     let isValid = true;
     switch (current_step) {
-    case 0:
-        isValid = validateProductStep();
-        break;
-    case 1:
-        isValid = validateRentalPeriodStep();
-        break;
-    case 2:
-        isValid = validateCustomerDataStep();
-        break;
-    case 3:
-        isValid = validateExtraStepOne();
-        break;
-    case 4:
-        isValid = validateExtraStepTwo();
-        break;
-    case 5:
-        isValid = validateSignatureStep();
-        break;
-}
+        case 0:
+            isValid = validateProductStep();
+            break;
+        case 1:
+            isValid = validateRentalPeriodStep();
+            break;
+        case 2:
+            isValid = validateCustomerDataStep();
+            break;
+        case 3:
+            isValid = validateExtraStepOne();
+            break;
+        case 4:
+            isValid = validateExtraStepTwo();
+            break;
+        case 5:
+            isValid = validateSignatureStep();
+            break;
+    }
 
     if (!isValid) {
         return; // Stop the function if the current step is not valid
@@ -209,8 +209,8 @@ submitBtn.addEventListener('click', (event) => {
 
 function logout() {
     fetch('/logout', {
-            method: 'POST'
-        })
+        method: 'POST'
+    })
         .then(response => {
             if (response.ok) {
                 // Optional: Weiterleitung zur Login-Seite oder Anzeige einer Bestätigung
@@ -239,6 +239,7 @@ document.addEventListener("DOMContentLoaded", () => {
     fetch('/auth-status')
         .then(res => res.json())
         .then(data => {
+            const registerBtn = document.getElementById('register-button');
             const profileBtn = document.getElementById('profile-button');
             if (data.loggedIn && data.role === 'global_admin') {
                 // Button → Konfiguration
@@ -263,6 +264,9 @@ document.addEventListener("DOMContentLoaded", () => {
                 if (profileBtn) {
                     profileBtn.style.display = 'inline-block';
                 }
+                if (registerBtn) {
+                    registerBtn.style.display = 'none';
+                }
 
                 loadUserProfileIntoForm();
             } else {
@@ -272,6 +276,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
                 logoutBtn.style.display = 'none';
                 loginStatus.textContent = 'Kein Benutzer angemeldet';
+
+                if (registerBtn) {
+                    registerBtn.style.display = 'inline-block';
+                }
             }
         })
         .catch(err => {

@@ -33,33 +33,31 @@
 
                 <div class="mt-4">
                     <a id="admin-button" href="/login.html">
-                        <button type="button" class="btn btn-light w-100">
+                        <button type="button" class="btn btn-light sidebar-btn mt-2">
                             <i class="bi bi-person-lock"></i>
                             Login
                         </button>
                     </a>
 
-                    <a href="/register.html">
-                        <button type="button" class="btn btn-success w-100 mt-2">
-                            <i class="bi bi-person-plus"></i>
+                    <a id="register-button" href="/register.html">
+                        <button type="button" class="btn btn-success sidebar-btn mt-2">
                             Jetzt registrieren
                         </button>
                     </a>
 
-                    <a id="logout-button" href="#" style="display: none;">
-                        <button type="button" class="btn btn-danger w-100 mt-2" onclick="logout()">
-                            <i class="bi bi-x-circle"></i>
-                            Abmelden
-                        </button>
-                    </a>
-
                     <a id="profile-button" href="/profile.html" style="display: none;">
-                        <button type="button" class="btn btn-outline-light w-100 mt-2">
+                        <button type="button" class="btn btn-outline-light sidebar-btn mt-2">
                             <i class="bi bi-person-circle"></i>
                             Mein Bereich
                         </button>
                     </a>
 
+                    <a id="logout-button" href="#" style="display: none;">
+                        <button type="button" class="btn btn-danger sidebar-btn mt-2" onclick="logout()">
+                            <i class="bi bi-x-circle"></i>
+                            Abmelden
+                        </button>
+                    </a>
                     <p id="login-status" class="mt-3 small">
                         Kein Benutzer angemeldet
                     </p>
@@ -107,7 +105,7 @@
                                             Details anzeigen
                                         </button>
                                     </div>
-                                    
+
                                     <div class="product-card" data-product="anhaenger" data-title="Anhänger"
                                         data-description="Für Transport von Material und Geräten."
                                         data-price="30,00 € / Tag" data-deposit="120,00 €">
