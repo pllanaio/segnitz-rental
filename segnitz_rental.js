@@ -328,13 +328,7 @@ app.post('/data', async (req, res) => {
                 console.error('Fehler beim Mailversand:', mailError);
             }
         }
-
-        if (emailSent) {
-            console.log(`${new Date().toISOString()} - Mailversand: E-Mail erfolgreich vom Benutzer ${activeUser} abgesendet`);
-        } else {
-            console.error(`${new Date().toISOString()} - Mailversand: E-Mailversand vom Benutzer ${activeUser} fehlgeschlagen`);
-        }
-
+        
         res.json({
             pdfUrl: `/pdf-download/${pdfFilename}`
         });

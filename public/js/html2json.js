@@ -57,6 +57,9 @@ document
             .then(response => response.json())
             .then(async data => {
                 const response = await fetch(data.pdfUrl);
+                if (!data.pdfUrl) {
+                    throw new Error('Keine PDF URL vom Server erhalten');
+                }
                 const blob = await response.blob();
 
                 const downloadUrl = URL.createObjectURL(blob);
@@ -70,4 +73,14 @@ document
                 document.body.removeChild(link);
                 URL.revokeObjectURL(downloadUrl);
             })
+            .catch(error => {
+                console.error('Fehler beim PDF-Download:', error);
+                // ❗ HIER rein
+                const submitBtn = document.getElementById('submit-btn');
+                if (submitBtn) {
+                    submitBtn.disabled = false;
+                }
+
+                alert('Fehler beim Erstellen oder Download der PDF.');
+            });
     });
