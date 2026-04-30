@@ -27,10 +27,6 @@ body {
     color: #00011c;
   }
 
-  #btn_work_hours, #btn_work_material{
-    text-align: center;
-  }
-
   .btn-primary:hover {
     background-color: #0d6efd; /* Dies ist die Standardfarbe von Bootstrap für btn-primary */
     border-color: #0d6efd; /* Passen Sie diese Werte entsprechend Ihrer spezifischen Farbeinstellung an */
@@ -436,4 +432,14 @@ body {
 
 .progress {
     margin-bottom: 0 !important;
+}
+
+.sidebar-btn {
+    width: 100%;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    margin-right: 8px;
 }
