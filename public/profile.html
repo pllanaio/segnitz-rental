@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="de">
+
 <head>
     <meta charset="UTF-8">
     <title>Mein Bereich</title>
@@ -7,29 +8,31 @@
     <link rel="stylesheet" href="css/style.css">
     <link rel="stylesheet" href="css/bootstrap-icons-1.11.3/font/bootstrap-icons.min.css">
 </head>
+
 <body>
 
-<div class="container mt-5" style="max-width: 700px;">
-    <h3>Mein Bereich</h3>
+    <div class="container mt-5" style="max-width: 700px;">
+        <h3>Mein Bereich</h3>
 
-    <div id="profileBox" class="card mt-4 d-none">
-        <div class="card-body">
-            <p><strong>Kundennummer:</strong> <span id="customerNo"></span></p>
-            <p><strong>Name:</strong> <span id="name"></span></p>
-            <p><strong>E-Mail:</strong> <span id="email"></span></p>
-            <p><strong>Telefon:</strong> <span id="phone"></span></p>
-            <p><strong>Adresse:</strong> <span id="address"></span></p>
-            <p><strong>E-Mail bestätigt:</strong> <span id="verified"></span></p>
+        <div id="profileBox" class="card mt-4 d-none">
+            <div class="card-body">
+                <p><strong>Kundennummer:</strong> <span id="customerNo"></span></p>
+                <p><strong>Name:</strong> <span id="name"></span></p>
+                <p><strong>E-Mail:</strong> <span id="email"></span></p>
+                <p><strong>Telefon:</strong> <span id="phone"></span></p>
+                <p><strong>Adresse:</strong> <span id="address"></span></p>
+                <p><strong>E-Mail bestätigt:</strong> <span id="verified"></span></p>
+            </div>
         </div>
+
+        <div id="profileError" class="alert alert-danger d-none mt-3"></div>
+
+        <a href="/index.html" class="btn btn-primary mt-4">
+            Zurück zur Startseite
+        </a>
     </div>
 
-    <div id="profileError" class="alert alert-danger d-none mt-3"></div>
-
-    <a href="/index.html" class="btn btn-primary mt-4">
-        Zurück zur Startseite
-    </a>
-</div>
-
-<script src="js/profile_config.js"></script>
+    <script src="js/profile_config.js"></script>
 </body>
+
 </html>

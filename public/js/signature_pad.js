@@ -17,11 +17,11 @@
  */
 
 (function (global, factory) {
-    typeof exports === 'object' && typeof module !== 'undefined'
-        ? module.exports = factory()
-        : typeof define === 'function' && define.amd
-            ? define(factory)
-            : (global.SignaturePad = factory());
+    typeof exports === 'object' && typeof module !== 'undefined' ?
+        module.exports = factory() :
+        typeof define === 'function' && define.amd ?
+        define(factory) :
+        (global.SignaturePad = factory());
 }(this, (function () {
     'use strict';
 
@@ -32,9 +32,9 @@
     }
 
     Point.prototype.velocityFrom = function (start) {
-        return this.time !== start.time
-            ? this.distanceTo(start) / (this.time - start.time)
-            : 1;
+        return this.time !== start.time ?
+            this.distanceTo(start) / (this.time - start.time) :
+            1;
     };
 
     Point.prototype.distanceTo = function (start) {
@@ -103,20 +103,20 @@
             result;
         var timeout = null;
         var previous = 0;
-        if (!options) 
+        if (!options)
             options = {};
         var later = function later() {
-            previous = options.leading === false
-                ? 0
-                : Date.now();
+            previous = options.leading === false ?
+                0 :
+                Date.now();
             timeout = null;
             result = func.apply(context, args);
-            if (!timeout) 
+            if (!timeout)
                 context = args = null;
-            };
+        };
         return function () {
             var now = Date.now();
-            if (!previous && options.leading === false) 
+            if (!previous && options.leading === false)
                 previous = now;
             var remaining = wait - (now - previous);
             context = this;
@@ -128,10 +128,9 @@
                 }
                 previous = now;
                 result = func.apply(context, args);
-                if (!timeout) 
+                if (!timeout)
                     context = args = null;
-                }
-            else if (!timeout && options.trailing !== false) {
+            } else if (!timeout && options.trailing !== false) {
                 timeout = setTimeout(later, remaining);
             }
             return result;
@@ -145,12 +144,12 @@
         this.velocityFilterWeight = opts.velocityFilterWeight || 0.7;
         this.minWidth = opts.minWidth || 0.5;
         this.maxWidth = opts.maxWidth || 2.5;
-        this.throttle = 'throttle' in opts
-            ? opts.throttle
-            : 16; // in miliseconds
-        this.minDistance = 'minDistance' in opts
-            ? opts.minDistance
-            : 5;
+        this.throttle = 'throttle' in opts ?
+            opts.throttle :
+            16; // in miliseconds
+        this.minDistance = 'minDistance' in opts ?
+            opts.minDistance :
+            5;
 
         if (this.throttle) {
             this._strokeMoveUpdate = throttle(
@@ -237,9 +236,9 @@
     SignaturePad.prototype.fromDataURL = function (dataUrl) {
         var _this = this;
 
-        var options = arguments.length > 1 && arguments[1] !== undefined
-            ? arguments[1]
-            : {};
+        var options = arguments.length > 1 && arguments[1] !== undefined ?
+            arguments[1] :
+            {};
 
         var image = new Image();
         var ratio = options.ratio || window.devicePixelRatio || 1;
@@ -264,10 +263,10 @@
                 return this._toSVG();
             default:
                 for (var _len = arguments.length, options = Array(
-                    _len > 1
-                        ? _len - 1
-                        : 0
-                ), _key = 1; _key < _len; _key++) {
+                        _len > 1 ?
+                        _len - 1 :
+                        0
+                    ), _key = 1; _key < _len; _key++) {
                     options[_key - 1] = arguments[_key];
                 }
 
@@ -344,7 +343,12 @@
 
             this
                 ._data[this._data.length - 1]
-                .push({x: point.x, y: point.y, time: point.time, color: this.penColor});
+                .push({
+                    x: point.x,
+                    y: point.y,
+                    time: point.time,
+                    color: this.penColor
+                });
         }
     };
 
@@ -363,9 +367,12 @@
             // When drawing a dot, there's only one point in a group, so without this check
             // such group would end up with exactly the same 2 points.
             if (!point.equals(lastPoint)) {
-                lastPointGroup.push(
-                    {x: point.x, y: point.y, time: point.time, color: this.penColor}
-                );
+                lastPointGroup.push({
+                    x: point.x,
+                    y: point.y,
+                    time: point.time,
+                    color: this.penColor
+                });
             }
         }
 
@@ -393,13 +400,19 @@
 
         this
             ._canvas
-            .addEventListener('touchstart', this._handleTouchStart, {passive: true});
+            .addEventListener('touchstart', this._handleTouchStart, {
+                passive: true
+            });
         this
             ._canvas
-            .addEventListener('touchmove', this._handleTouchMove, {passive: true});
+            .addEventListener('touchmove', this._handleTouchMove, {
+                passive: true
+            });
         this
             ._canvas
-            .addEventListener('touchend', this._handleTouchEnd, {passive: true});
+            .addEventListener('touchend', this._handleTouchEnd, {
+                passive: true
+            });
     };
 
     SignaturePad.prototype._reset = function () {
@@ -426,9 +439,9 @@
         if (points.length > 2) {
             // To reduce the initial lag make it work with 3 points by copying the first
             // point to the beginning.
-            if (points.length === 3) 
+            if (points.length === 3)
                 points.unshift(points[0]);
-            
+
             tmp = this._calculateCurveControlPoints(points[0], points[1], points[2]);
             var c2 = tmp.c2;
             tmp = this._calculateCurveControlPoints(points[1], points[2], points[3]);
@@ -440,7 +453,10 @@
             // points in points array.
             points.shift();
 
-            return {curve: curve, widths: widths};
+            return {
+                curve: curve,
+                widths: widths
+            };
         }
 
         return {};
@@ -553,9 +569,9 @@
 
     SignaturePad.prototype._drawDot = function (point) {
         var ctx = this._ctx;
-        var width = typeof this.dotSize === 'function'
-            ? this.dotSize()
-            : this.dotSize;
+        var width = typeof this.dotSize === 'function' ?
+            this.dotSize() :
+            this.dotSize;
 
         ctx.beginPath();
         this._drawPoint(point.x, point.y, width);
@@ -630,10 +646,10 @@
                     .startPoint
                     .y
                     .toFixed(3) + ' ' + (
-                    'C ' + curve.control1.x.toFixed(3) + ',' + curve.control1.y.toFixed(3) + ' '
-                ) + (curve.control2.x.toFixed(3) + ',' + curve.control2.y.toFixed(3) + ' ') + (
-                    curve.endPoint.x.toFixed(3) + ',' + curve.endPoint.y.toFixed(3)
-                );
+                        'C ' + curve.control1.x.toFixed(3) + ',' + curve.control1.y.toFixed(3) + ' '
+                    ) + (curve.control2.x.toFixed(3) + ',' + curve.control2.y.toFixed(3) + ' ') + (
+                        curve.endPoint.x.toFixed(3) + ',' + curve.endPoint.y.toFixed(3)
+                    );
 
                 path.setAttribute('d', attr);
                 path.setAttribute('stroke-width', (widths.end * 2.25).toFixed(3));
@@ -645,9 +661,9 @@
             }
         }, function (rawPoint) {
             var circle = document.createElement('circle');
-            var dotSize = typeof _this2.dotSize === 'function'
-                ? _this2.dotSize()
-                : _this2.dotSize;
+            var dotSize = typeof _this2.dotSize === 'function' ?
+                _this2.dotSize() :
+                _this2.dotSize;
             circle.setAttribute('r', dotSize);
             circle.setAttribute('cx', rawPoint.x);
             circle.setAttribute('cy', rawPoint.y);
@@ -658,9 +674,9 @@
 
         var prefix = 'data:image/svg+xml;base64,';
         var header = '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xl' +
-                'ink"' + (
-            ' viewBox="' + minX + ' ' + minY + ' ' + maxX + ' ' + maxY + '"'
-        ) + (' width="' + maxX + '"') + (' height="' + maxY + '"') + '>';
+            'ink"' + (
+                ' viewBox="' + minX + ' ' + minY + ' ' + maxX + ' ' + maxY + '"'
+            ) + (' width="' + maxX + '"') + (' height="' + maxY + '"') + '>';
         var body = svg.innerHTML;
 
         // IE hack for missing innerHTML property on SVGElement

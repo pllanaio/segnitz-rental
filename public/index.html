@@ -1,349 +1,311 @@
 <html lang="en" class=" mtcytyc idc0_350">
-    <head>
-        <meta charset="utf-8">
-        <meta content="width=device-width, initial-scale=1" name="viewport">
-        <title>Segnitz Rental</title>
-        <!-- CSS -->
-        <link rel="stylesheet" href="css/bootstrap.min.css">
-        <link rel="stylesheet" href="css/style.css">
-        <link
-            rel="stylesheet"
-            href="css/bootstrap-icons-1.11.3/font/bootstrap-icons.min.css">
-        <!-- FONT -->
-        <link rel="stylesheet" href="css/fonts.css">
-        <!--FAVICON-->
-        <link rel="apple-touch-icon" sizes="180x180" href="img/apple-touch-icon.png">
-        <link rel="icon" type="image/png" sizes="32x32" href="img/favicon-32x32.png">
-        <link rel="icon" type="image/png" sizes="16x16" href="img/favicon-16x16.png">
-        <link rel="manifest" href="img/site.webmanifest">
-        <link rel="mask-icon" href="img/safari-pinned-tab.svg" color="#ffffff">
-        <meta name="msapplication-TileColor" content="#ffffff">
-        <meta name="theme-color" content="#ffffff">
-    </head>
-    <body>
-<!-- CONTAINER -->
-<div class="container-fluid min-vh-100 p-0">
-    <div class="row g-0 min-vh-100">
 
-        <!-- SIDEBAR -->
-        <aside class="col-12 col-md-3 col-xl-2 bg-primary text-white p-4">
-            <h2>Segnitz Rental</h2>
-            <p class="mt-4 mb-1">TESTADRESSE</p>
-            <a class="text-white" href="mailto:info@segnitzbau.de">info@segnitzbau.de</a>
+<head>
+    <meta charset="utf-8">
+    <meta content="width=device-width, initial-scale=1" name="viewport">
+    <title>Segnitz Rental</title>
+    <!-- CSS -->
+    <link rel="stylesheet" href="css/bootstrap.min.css">
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/bootstrap-icons-1.11.3/font/bootstrap-icons.min.css">
+    <!-- FONT -->
+    <link rel="stylesheet" href="css/fonts.css">
+    <!--FAVICON-->
+    <link rel="apple-touch-icon" sizes="180x180" href="img/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="img/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="img/favicon-16x16.png">
+    <link rel="manifest" href="img/site.webmanifest">
+    <link rel="mask-icon" href="img/safari-pinned-tab.svg" color="#ffffff">
+    <meta name="msapplication-TileColor" content="#ffffff">
+    <meta name="theme-color" content="#ffffff">
+</head>
 
-            <div class="mt-4">
-                <a id="admin-button" href="/login.html">
-                    <button type="button" class="btn btn-light w-100">
-                        <i class="bi bi-person-lock"></i>
-                        Login
-                    </button>
-                </a>
+<body>
+    <!-- CONTAINER -->
+    <div class="container-fluid min-vh-100 p-0">
+        <div class="row g-0 min-vh-100">
 
-                <a href="/register.html">
-    <button type="button" class="btn btn-success w-100 mt-2">
-        <i class="bi bi-person-plus"></i>
-        Jetzt registrieren
-    </button>
-</a>
+            <!-- SIDEBAR -->
+            <aside class="col-12 col-md-3 col-xl-2 bg-primary text-white p-4">
+                <h2>Segnitz Rental</h2>
+                <p class="mt-4 mb-1">TESTADRESSE</p>
+                <a class="text-white" href="mailto:info@segnitzbau.de">info@segnitzbau.de</a>
 
-                <a id="logout-button" href="#" style="display: none;">
-                    <button type="button" class="btn btn-danger w-100 mt-2" onclick="logout()">
-                        <i class="bi bi-x-circle"></i>
-                        Abmelden
-                    </button>
-                </a>
+                <div class="mt-4">
+                    <a id="admin-button" href="/login.html">
+                        <button type="button" class="btn btn-light w-100">
+                            <i class="bi bi-person-lock"></i>
+                            Login
+                        </button>
+                    </a>
 
-                <a id="profile-button" href="/profile.html" style="display: none;">
-    <button type="button" class="btn btn-outline-light w-100 mt-2">
-        <i class="bi bi-person-circle"></i>
-        Mein Bereich
-    </button>
-</a>
+                    <a href="/register.html">
+                        <button type="button" class="btn btn-success w-100 mt-2">
+                            <i class="bi bi-person-plus"></i>
+                            Jetzt registrieren
+                        </button>
+                    </a>
 
-                <p id="login-status" class="mt-3 small">
-                    Kein Benutzer angemeldet
-                </p>
-            </div>
-        </aside>
+                    <a id="logout-button" href="#" style="display: none;">
+                        <button type="button" class="btn btn-danger w-100 mt-2" onclick="logout()">
+                            <i class="bi bi-x-circle"></i>
+                            Abmelden
+                        </button>
+                    </a>
 
-        <!-- MAIN CONTENT -->
-<main class="col-12 col-md-9 col-xl-10 p-0 d-flex flex-column min-vh-100">
-    <div class="progress w-100" style="height: 6px; border-radius: 0;">
-                <div
-                    aria-valuemax="100"
-                    aria-valuemin="0"
-                    aria-valuenow="0"
-                    class="progress-bar progress-bar-striped progress-bar-animated bg-primary"
-                    role="progressbar"
-                    style="width: 0%;"></div>
-            </div>
+                    <a id="profile-button" href="/profile.html" style="display: none;">
+                        <button type="button" class="btn btn-outline-light w-100 mt-2">
+                            <i class="bi bi-person-circle"></i>
+                            Mein Bereich
+                        </button>
+                    </a>
 
-<div id="qbox-container_form" class="flex-grow-1 w-100 p-4 p-lg-5">
-                <form
-                    class="needs-validation"
-                    id="form-wrapper"
-                    method="post"
-                    name="form-wrapper"
-                    novalidate="">
+                    <p id="login-status" class="mt-3 small">
+                        Kein Benutzer angemeldet
+                    </p>
+                </div>
+            </aside>
 
-                    <div id="steps-container">
-                        <div class="step d-block">
-                            <h4 class="mb-4">Wählen Sie ein Produkt zur Vermietung aus</h4>
+            <!-- MAIN CONTENT -->
+            <main class="col-12 col-md-9 col-xl-10 p-0 d-flex flex-column min-vh-100">
+                <div class="progress w-100" style="height: 6px; border-radius: 0;">
+                    <div aria-valuemax="100" aria-valuemin="0" aria-valuenow="0"
+                        class="progress-bar progress-bar-striped progress-bar-animated bg-primary" role="progressbar"
+                        style="width: 0%;"></div>
+                </div>
 
-                            <input type="hidden" name="RentalProduct" id="RentalProduct">
+                <div id="qbox-container_form" class="flex-grow-1 w-100 p-4 p-lg-5">
+                    <form class="needs-validation" id="form-wrapper" method="post" name="form-wrapper" novalidate="">
 
-                            <div class="product-grid">
-                                <div
-                                    class="product-card"
-                                    data-product="bautrockner"
-                                    data-title="Bautrockner"
-                                    data-description="Für die Trocknung von Räumen, Kellern und Baustellen."
-                                    data-price="25,00 € / Tag"
-                                    data-deposit="100,00 €">
-                                    <img src="img/products/bautrockner.jpg" alt="Bautrockner">
-                                    <h5>Bautrockner</h5>
-                                    <p>Raumtrocknung und Bautrocknung.</p>
-                                    <button type="button" class="btn btn-outline-primary btn-sm product-details-btn">
-                                        Details anzeigen
-                                    </button>
+                        <div id="steps-container">
+                            <div class="step d-block">
+                                <h4 class="mb-4">Wählen Sie ein Produkt zur Vermietung aus</h4>
+
+                                <input type="hidden" name="RentalProduct" id="RentalProduct">
+
+                                <div class="product-grid">
+                                    <div class="product-card" data-product="bautrockner" data-title="Bautrockner"
+                                        data-description="Für die Trocknung von Räumen, Kellern und Baustellen."
+                                        data-price="25,00 € / Tag" data-deposit="100,00 €">
+                                        <img src="img/products/bautrockner.jpg" alt="Bautrockner">
+                                        <h5>Bautrockner</h5>
+                                        <p>Raumtrocknung und Bautrocknung.</p>
+                                        <button type="button"
+                                            class="btn btn-outline-primary btn-sm product-details-btn">
+                                            Details anzeigen
+                                        </button>
+                                    </div>
+
+                                    <div class="product-card" data-product="ruettelplatte" data-title="Rüttelplatte"
+                                        data-description="Für Pflasterarbeiten, Untergrundverdichtung und kleinere Baustellen."
+                                        data-price="35,00 € / Tag" data-deposit="150,00 €">
+                                        <img src="img/products/ruettelplatte.jpg" alt="Rüttelplatte">
+                                        <h5>Rüttelplatte</h5>
+                                        <p>Verdichtung von Untergründen.</p>
+                                        <button type="button"
+                                            class="btn btn-outline-primary btn-sm product-details-btn">
+                                            Details anzeigen
+                                        </button>
+                                    </div>
+
+                                    <div class="product-card" data-product="anhaenger" data-title="Anhänger"
+                                        data-description="Für Transport von Material und Geräten."
+                                        data-price="30,00 € / Tag" data-deposit="120,00 €">
+                                        <img src="img/products/anhaenger.jpg" alt="Anhänger">
+                                        <h5>Anhänger</h5>
+                                        <p>Für Transport von Material und Geräten.</p>
+                                        <button type="button"
+                                            class="btn btn-outline-primary btn-sm product-details-btn">
+                                            Details anzeigen
+                                        </button>
+                                    </div>
                                 </div>
+                            </div>
+                            <div class="step d-none" id="page1">
+                                <h4 class="mb-4">Mietzeitraum auswählen</h4>
 
-                                <div
-                                    class="product-card"
-                                    data-product="ruettelplatte"
-                                    data-title="Rüttelplatte"
-                                    data-description="Für Pflasterarbeiten, Untergrundverdichtung und kleinere Baustellen."
-                                    data-price="35,00 € / Tag"
-                                    data-deposit="150,00 €">
-                                    <img src="img/products/ruettelplatte.jpg" alt="Rüttelplatte">
-                                    <h5>Rüttelplatte</h5>
-                                    <p>Verdichtung von Untergründen.</p>
-                                    <button type="button" class="btn btn-outline-primary btn-sm product-details-btn">
-                                        Details anzeigen
-                                    </button>
+                                <div class="row g-3">
+                                    <div class="col-12 col-lg-6">
+                                        <label class="form-label" for="RentalStartDate">Mietbeginn</label>
+                                        <input type="date" class="form-control" id="RentalStartDate"
+                                            name="RentalStartDate">
+                                    </div>
+
+                                    <div class="col-12 col-lg-6">
+                                        <label class="form-label" for="RentalEndDate">Mietende</label>
+                                        <input type="date" class="form-control" id="RentalEndDate" name="RentalEndDate">
+                                    </div>
+
+                                    <div class="col-12">
+                                        <div id="rentalDurationInfo" class="alert alert-info d-none mt-3"></div>
+                                    </div>
                                 </div>
+                            </div>
+                            <div class="step d-none" id="page2">
+                                <h4 class="mb-4">Persönliche Daten</h4>
 
-                                <div
-                                    class="product-card"
-                                    data-product="anhaenger"
-                                    data-title="Anhänger"
-                                    data-description="Für Transport von Material und Geräten."
-                                    data-price="30,00 € / Tag"
-                                    data-deposit="120,00 €">
-                                    <img src="img/products/anhaenger.jpg" alt="Anhänger">
-                                    <h5>Anhänger</h5>
-                                    <p>Für Transport von Material und Geräten.</p>
-                                    <button type="button" class="btn btn-outline-primary btn-sm product-details-btn">
-                                        Details anzeigen
-                                    </button>
+                                <div class="row g-3">
+                                    <div class="col-12 col-lg-6">
+                                        <label class="form-label" for="FirstName">Vorname</label>
+                                        <input type="text" class="form-control" id="FirstName" name="FirstName">
+                                    </div>
+
+                                    <div class="col-12 col-lg-6">
+                                        <label class="form-label" for="LastName">Nachname</label>
+                                        <input type="text" class="form-control" id="LastName" name="LastName">
+                                    </div>
+
+                                    <div class="col-12 col-lg-6">
+                                        <label class="form-label" for="CustomerEmail">E-Mail</label>
+                                        <input type="email" class="form-control" id="CustomerEmail"
+                                            name="CustomerEmail">
+                                    </div>
+
+                                    <div class="col-12 col-lg-6">
+                                        <label class="form-label" for="CustomerPhone">Telefon</label>
+                                        <input type="tel" class="form-control" id="CustomerPhone" name="CustomerPhone">
+                                    </div>
+
+                                    <div class="col-12">
+                                        <label class="form-label" for="CustomerAddress">Adresse</label>
+                                        <input type="text" class="form-control" id="CustomerAddress"
+                                            name="CustomerAddress">
+                                    </div>
+
+                                    <div class="col-12 col-lg-4">
+                                        <label class="form-label" for="CustomerZip">PLZ</label>
+                                        <input type="text" class="form-control" id="CustomerZip" name="CustomerZip">
+                                    </div>
+
+                                    <div class="col-12 col-lg-8">
+                                        <label class="form-label" for="CustomerCity">Ort</label>
+                                        <input type="text" class="form-control" id="CustomerCity" name="CustomerCity">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="step d-none" id="page3">
+                                <h4>Extra Step maybe</h4>
+                            </div>
+                            <div class="step d-none" id="page6">
+                                <h4>Extra Step maybe </h4>
+                            </div>
+                            <div class="step d-none" id="page7">
+                                <div class="mt-1">
+                                    <div class="closing-text">
+                                        <h4>Fast fertig</h4>
+                                        <h6>Bitte unterschreiben Sie noch im Signaturfeld</h6>
+                                        <div class="row">
+                                            <h6>Die ordnungsgemäße Ausführung der Arbeiten, die Einsatzzeit und der
+                                                Materialverbrauch werden hiermit anerkannt:</h6>
+                                            <br>
+                                            <h6>Zahlbar sofort nach Rechnungserhalt, ohne Abzug.</h6>
+                                            <div id="signature-pad" class="m-signature-pad">
+                                                <div class="m-signature-pad--body">
+                                                    <canvas></canvas>
+                                                    <input type="hidden" name="Signature" id="Signature" value="">
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <br>
+                                        <div class="container text-center">
+                                            <div class="row justify-content-center">
+                                                <div class="col-md-auto">
+                                                    <button id="clear-signature" class="btn btn-warning"
+                                                        onclick="clearCanvas()" type="button">Signaturfeld
+                                                        leeren</button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <br>
+                                        <div class="form-check form-switch">
+                                            <input class="form-check-input" type="checkbox" role="switch" name="agbs"
+                                                id="agbs">
+                                            <label class="form-check-label">Hiermit stimme ich den AGBs zu</label>
+                                        </div>
+                                        <div class="form-check form-switch">
+                                            <input class="form-check-input" type="checkbox" role="switch" name="dsgvo"
+                                                id="dsgvo">
+                                            <label class="form-check-label">Hiermit stimme ich der Datenschutzerklärung
+                                                zu</label>
+                                        </div>
+                                        <input type="hidden" id="locationDateField" name="OrtDatum" value="">
+                                        <br>
+                                        <br>
+                                        <h6>Falls Sie das Dokument per E-Mail erhalten möchten, geben Sie diese bitte
+                                            hier an:
+                                        </h6>
+                                        <input type="email" class="form-control" id="email" name="email"
+                                            placeholder="name@beispiel.de">
+                                    </div>
+                                </div>
+                            </div>
+                            <div id="success">
+                                <div class="mt-5">
+                                    <h4>Formular erfolgreich übermittelt</h4>
+                                    <h4>PDF erzeugt und heruntergeladen</h4>
+                                    <p></p>
+                                    <div id="final"></div>
+                                    <p></p>
+                                    <a class="back-link" href="">
+                                        <button type="button" class="btn btn-danger">Zurück zum Anfang</button>
+                                    </a>
                                 </div>
                             </div>
                         </div>
-<div class="step d-none" id="page1">
-    <h4 class="mb-4">Mietzeitraum auswählen</h4>
-
-    <div class="row g-3">
-        <div class="col-12 col-lg-6">
-            <label class="form-label" for="RentalStartDate">Mietbeginn</label>
-            <input
-                type="date"
-                class="form-control"
-                id="RentalStartDate"
-                name="RentalStartDate">
-        </div>
-
-        <div class="col-12 col-lg-6">
-            <label class="form-label" for="RentalEndDate">Mietende</label>
-            <input
-                type="date"
-                class="form-control"
-                id="RentalEndDate"
-                name="RentalEndDate">
-        </div>
-
-        <div class="col-12">
-            <div id="rentalDurationInfo" class="alert alert-info d-none mt-3"></div>
+                        <div id="q-box__buttons">
+                            <button id="prev-btn" type="button" class="d-none">Zurück</button>
+                            <button id="next-btn" type="button" class="d-inline-block">Weiter</button>
+                            <button id="submit-btn" type="submit" class="d-inline-block"
+                                onclick="submitSignature()">Absenden</button>
+                        </div>
+                    </form>
+                </div>
+            </main>
         </div>
     </div>
-</div>
-<div class="step d-none" id="page2">
-    <h4 class="mb-4">Persönliche Daten</h4>
-
-    <div class="row g-3">
-        <div class="col-12 col-lg-6">
-            <label class="form-label" for="FirstName">Vorname</label>
-            <input type="text" class="form-control" id="FirstName" name="FirstName">
-        </div>
-
-        <div class="col-12 col-lg-6">
-            <label class="form-label" for="LastName">Nachname</label>
-            <input type="text" class="form-control" id="LastName" name="LastName">
-        </div>
-
-        <div class="col-12 col-lg-6">
-            <label class="form-label" for="CustomerEmail">E-Mail</label>
-            <input type="email" class="form-control" id="CustomerEmail" name="CustomerEmail">
-        </div>
-
-        <div class="col-12 col-lg-6">
-            <label class="form-label" for="CustomerPhone">Telefon</label>
-            <input type="tel" class="form-control" id="CustomerPhone" name="CustomerPhone">
-        </div>
-
-        <div class="col-12">
-            <label class="form-label" for="CustomerAddress">Adresse</label>
-            <input type="text" class="form-control" id="CustomerAddress" name="CustomerAddress">
-        </div>
-
-        <div class="col-12 col-lg-4">
-            <label class="form-label" for="CustomerZip">PLZ</label>
-            <input type="text" class="form-control" id="CustomerZip" name="CustomerZip">
-        </div>
-
-        <div class="col-12 col-lg-8">
-            <label class="form-label" for="CustomerCity">Ort</label>
-            <input type="text" class="form-control" id="CustomerCity" name="CustomerCity">
-        </div>
     </div>
-</div>
-                                <div class="step d-none" id="page3">
-                                    <h4>Extra Step maybe</h4>
-                                </div>
-                                <div class="step d-none" id="page6">
-                                    <h4>Extra Step maybe </h4>
-                                </div>
-                                <div class="step d-none" id="page7">
-                                    <div class="mt-1">
-                                        <div class="closing-text">
-                                            <h4>Fast fertig</h4>
-                                            <h6>Bitte unterschreiben Sie noch im Signaturfeld</h6>
-                                            <div class="row">
-                                                <h6>Die ordnungsgemäße Ausführung der Arbeiten, die Einsatzzeit und der
-                                                    Materialverbrauch werden hiermit anerkannt:</h6>
-                                                <br>
-                                                <h6>Zahlbar sofort nach Rechnungserhalt, ohne Abzug.</h6>
-                                                <div id="signature-pad" class="m-signature-pad">
-                                                    <div class="m-signature-pad--body">
-                                                        <canvas></canvas>
-                                                        <input type="hidden" name="Signature" id="Signature" value="">
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            <br>
-                                            <div class="container text-center">
-                                                <div class="row justify-content-center">
-                                                    <div class="col-md-auto">
-                                                        <button
-                                                            id="clear-signature"
-                                                            class="btn btn-warning"
-                                                            onclick="clearCanvas()"
-                                                            type="button">Signaturfeld leeren</button>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            <br>
-                                            <div class="form-check form-switch">
-                                                <input
-                                                    class="form-check-input"
-                                                    type="checkbox"
-                                                    role="switch"
-                                                    name="agbs"
-                                                    id="agbs">
-                                                <label class="form-check-label">Hiermit stimme ich den AGBs zu</label>
-                                            </div>
-                                            <div class="form-check form-switch">
-                                                <input
-                                                    class="form-check-input"
-                                                    type="checkbox"
-                                                    role="switch"
-                                                    name="dsgvo"
-                                                    id="dsgvo">
-                                                <label class="form-check-label">Hiermit stimme ich der Datenschutzerklärung zu</label>
-                                            </div>
-                                            <input type="hidden" id="locationDateField" name="OrtDatum" value="">
-                                            <br>
-                                            <br>
-                                            <h6>Falls Sie das Dokument per E-Mail erhalten möchten, geben Sie diese bitte
-                                                hier an:
-                                            </h6>
-                                            <input
-                                                type="email"
-                                                class="form-control"
-                                                id="email"
-                                                name="email"
-                                                placeholder="name@beispiel.de">
-                                        </div>
-                                    </div>
-                                </div>
-                                <div id="success">
-                                    <div class="mt-5">
-                                        <h4>Formular erfolgreich übermittelt</h4>
-                                        <h4>PDF erzeugt und heruntergeladen</h4>
-                                        <p></p>
-                                        <div id="final"></div>
-                                        <p></p>
-                                        <a class="back-link" href="">
-                                            <button type="button" class="btn btn-danger">Zurück zum Anfang</button>
-                                        </a>
-                                    </div>
-                                </div>
-                            </div>
-                            <div id="q-box__buttons">
-                                <button id="prev-btn" type="button" class="d-none">Zurück</button>
-                                <button id="next-btn" type="button" class="d-inline-block">Weiter</button>
-                                <button
-                                    id="submit-btn"
-                                    type="submit"
-                                    class="d-inline-block"
-                                    onclick="submitSignature()">Absenden</button>
-                            </div>
-                        </form>
-                    </div>
-                </main>
-            </div>
-        </div>
-        </div>
-        <div id="preloader-wrapper">
-            <div id="preloader"></div>
-            <div class="preloader-section section-left"></div>
-            <div class="preloader-section section-right"></div>
-        </div>
-        <!-- General Functionalities -->
-        <script type="text/javascript" src="js/frontend_config.js"></script>
-        <!--Bootstrap-->
-        <script type="text/javascript" src="js/bootstrap.bundle.min.js"></script>
-        <!--Signature-->
-        <script type="text/javascript" src="js/signature_pad.js"></script>
-        <script type="text/javascript" src="js/signature_handler.js"></script>
-        <!--HTML2json-->
-        <script type="text/javascript" src="js/html2json.js"></script>
-        <!--DateAndLocation-->
-        <script type="text/javascript" src="js/dateandlocation.js"></script>
+    <div id="preloader-wrapper">
+        <div id="preloader"></div>
+        <div class="preloader-section section-left"></div>
+        <div class="preloader-section section-right"></div>
+    </div>
+    <!-- General Functionalities -->
+    <script type="text/javascript" src="js/frontend_config.js"></script>
+    <!--Bootstrap-->
+    <script type="text/javascript" src="js/bootstrap.bundle.min.js"></script>
+    <!--Signature-->
+    <script type="text/javascript" src="js/signature_pad.js"></script>
+    <script type="text/javascript" src="js/signature_handler.js"></script>
+    <!--HTML2json-->
+    <script type="text/javascript" src="js/html2json.js"></script>
+    <!--DateAndLocation-->
+    <script type="text/javascript" src="js/dateandlocation.js"></script>
 
-        <!-- 👉 HIER DAS MODAL EINFÜGEN -->
-<div class="modal fade" id="productDetailsModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Produktdetails</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body">
-                <h5 id="modalProductTitle"></h5>
-                <p id="modalProductDescription"></p>
-                <p><strong>Preis:</strong> <span id="modalProductPrice"></span></p>
-                <p><strong>Kaution:</strong> <span id="modalProductDeposit"></span></p>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
-                    Schließen
-                </button>
-                <button type="button" class="btn btn-primary" id="selectProductFromModal">
-                    Dieses Produkt auswählen
-                </button>
+    <!-- 👉 HIER DAS MODAL EINFÜGEN -->
+    <div class="modal fade" id="productDetailsModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Produktdetails</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <h5 id="modalProductTitle"></h5>
+                    <p id="modalProductDescription"></p>
+                    <p><strong>Preis:</strong> <span id="modalProductPrice"></span></p>
+                    <p><strong>Kaution:</strong> <span id="modalProductDeposit"></span></p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                        Schließen
+                    </button>
+                    <button type="button" class="btn btn-primary" id="selectProductFromModal">
+                        Dieses Produkt auswählen
+                    </button>
+                </div>
             </div>
         </div>
     </div>
-</div>
-    </body>
+</body>
+
 </html>

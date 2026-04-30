@@ -285,8 +285,8 @@ function validateStep7() {
     const machineUsageTextfield = document.getElementById('MachineUsageTextfield');
     const disposeTextfield = document.getElementById('DisposeTextfield');
     const workTextfield = document.getElementById('WorkTextfield');
-    const CarProvisionFee = document.getElementById ('CarProvisionFee');
-    const kfz_pauschale = document.getElementById ('kfz_pauschale');
+    const CarProvisionFee = document.getElementById('CarProvisionFee');
+    const kfz_pauschale = document.getElementById('kfz_pauschale');
 
     // Prüfe, ob die zugehörigen Textfelder ausgefüllt sind, wenn die Checkboxen
     // aktiviert sind
@@ -302,7 +302,7 @@ function validateStep7() {
         alert('Bitte geben Sie Details zu weiteren Arbeiten an.');
         isValid = false;
     }
-    if (CarProvisionFee.checked && !kfz_pauschale.value.trim()){
+    if (CarProvisionFee.checked && !kfz_pauschale.value.trim()) {
         alert('Bitte geben Sie Details zur Kfz-Bereitstellung an.');
         isValid = false;
     }
@@ -339,7 +339,9 @@ function validateStep8() {
 }
 
 function logout() {
-    fetch('/logout', {method: 'POST'})
+    fetch('/logout', {
+            method: 'POST'
+        })
         .then(response => {
             if (response.ok) {
                 // Optional: Weiterleitung zur Login-Seite oder Anzeige einer Bestätigung
@@ -390,10 +392,10 @@ document.addEventListener("DOMContentLoaded", () => {
                 loginStatus.textContent = `Angemeldet als: ${data.user}`;
 
                 if (profileBtn) {
-    profileBtn.style.display = 'inline-block';
-}
+                    profileBtn.style.display = 'inline-block';
+                }
 
-loadUserProfileIntoForm();
+                loadUserProfileIntoForm();
             } else {
                 btn.href = '/login.html';
                 btn.querySelector('button').innerHTML =
@@ -495,13 +497,13 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!startDate || !endDate) {
             infoBox.classList.add('d-none');
             startInput.addEventListener('change', () => {
-    endInput.min = startInput.value;
-    endInput.value = '';
+                endInput.min = startInput.value;
+                endInput.value = '';
 
-    infoBox.classList.add('d-none');
+                infoBox.classList.add('d-none');
 
-    updateRentalDurationInfo();
-});
+                updateRentalDurationInfo();
+            });
             return;
         }
 
@@ -509,18 +511,18 @@ document.addEventListener('DOMContentLoaded', () => {
         const end = new Date(endDate);
 
         if (end < start) {
-infoBox.classList.remove('d-none');
-infoBox.classList.remove('alert-info');
-infoBox.classList.add('alert-danger');
-infoBox.textContent = 'Das Mietende darf nicht vor dem Mietbeginn liegen.';
+            infoBox.classList.remove('d-none');
+            infoBox.classList.remove('alert-info');
+            infoBox.classList.add('alert-danger');
+            infoBox.textContent = 'Das Mietende darf nicht vor dem Mietbeginn liegen.';
             return;
         }
 
         const days = Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1;
-infoBox.classList.remove('d-none');
-infoBox.classList.remove('alert-danger');
-infoBox.classList.add('alert-info');
-infoBox.textContent = `Ausgewählter Mietzeitraum: ${days} Tag${days === 1 ? '' : 'e'}`;
+        infoBox.classList.remove('d-none');
+        infoBox.classList.remove('alert-danger');
+        infoBox.classList.add('alert-info');
+        infoBox.textContent = `Ausgewählter Mietzeitraum: ${days} Tag${days === 1 ? '' : 'e'}`;
     }
 
     startInput.addEventListener('change', () => {
@@ -588,7 +590,9 @@ async function registerCustomer() {
 
     const response = await fetch('/register-customer', {
         method: 'POST',
-        headers: {'Content-Type': 'application/json'},
+        headers: {
+            'Content-Type': 'application/json'
+        },
         body: JSON.stringify({
             firstName,
             lastName,
@@ -625,8 +629,12 @@ document.getElementById('checkVerificationBtn').addEventListener('click', async 
 
     const response = await fetch('/check-email-verification', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email })
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            email
+        })
     });
 
     const result = await response.json();

@@ -24,9 +24,9 @@ document
                     value: element.value
                 };
                 if (element.type === 'checkbox' || element.type === 'radio') {
-                    elementData.value = element.checked
-                        ? 'on'
-                        : 'off';
+                    elementData.value = element.checked ?
+                        'on' :
+                        'off';
                     if (element.checked) {
                         elementData.checked = element.checked;
                     }
@@ -48,12 +48,12 @@ document
 
         // Senden der Daten aus dem html-body
         fetch('/data', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: jsonStr
-        })
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: jsonStr
+            })
             .then(response => response.json())
             .then(data => {
                 // window.open(data.pdfUrl, '_blank'); Prüfen, ob der Button bereits existiert
