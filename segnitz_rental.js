@@ -166,7 +166,7 @@ async function generatePDF(formDataObj, templatePath, outputPath) {
     formDataObj
         .form
         .forEach(step => {
-            if (step.step === 8) {
+            if (true) {
                 const signatureElement = step
                     .elements
                     .find(element => element.name === "Signature");
@@ -296,11 +296,13 @@ async function generatePDF(formDataObj, templatePath, outputPath) {
 
 app.post('/data', async (req, res) => {
     try {
-        const formData = req.body.form; // Zugriff auf das Array der Formularschritte
-        const emailElement = formData[7]
-            .elements
-            .find(el => el.name === "email"); // Findet das E-Mail-Element im achten Schritt
-        const email = emailElement.value; // Die E-Mail-Adresse aus dem Formular extrahieren
+        const formData = req.body.form;
+
+        const emailElement = formData
+            .flatMap(step => step.elements)
+            .find(el => el.name === "email" || el.name === "CustomerEmail");
+
+        const email = emailElement ? emailElement.value : null;
 
         const timestamp = new Date().getTime();
         const pdfFilename = `pdf_${timestamp}.pdf`;
