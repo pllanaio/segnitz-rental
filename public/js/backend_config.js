@@ -43,16 +43,18 @@ document.addEventListener('DOMContentLoaded', function () {
 
     function addNewItem(item) {
         var selectedDB = select.value;
-        var endpoint = selectedDB === 'material'
-            ? '/add-material'
-            : '/add-worker';
+        var endpoint = selectedDB === 'material' ?
+            '/add-material' :
+            '/add-worker';
         fetch(endpoint, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({name: item})
-        })
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    name: item
+                })
+            })
             .then(response => {
                 if (response.ok) {
                     alert('Eintrag erfolgreich hinzugefügt');
@@ -136,16 +138,18 @@ document.addEventListener('DOMContentLoaded', function () {
 
     function deleteItem(item) {
         var selectedValue = select.value;
-        var endpoint = selectedValue === 'material'
-            ? '/delete-material'
-            : '/delete-worker';
+        var endpoint = selectedValue === 'material' ?
+            '/delete-material' :
+            '/delete-worker';
         fetch(endpoint, {
-            method: 'DELETE',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({name: item})
-        })
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    name: item
+                })
+            })
             .then(response => {
                 if (response.ok) {
                     alert('Eintrag erfolgreich gelöscht');
@@ -162,7 +166,9 @@ document.addEventListener('DOMContentLoaded', function () {
 });
 
 function logout() {
-    fetch('/logout', {method: 'POST'})
+    fetch('/logout', {
+            method: 'POST'
+        })
         .then(response => {
             if (response.ok) {
                 // Optional: Weiterleitung zur Login-Seite oder Anzeige einer Bestätigung

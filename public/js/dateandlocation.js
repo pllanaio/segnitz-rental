@@ -38,7 +38,7 @@ async function getPlaceName(latitude, longitude) {
 
     try {
         const response = await fetch(url);
-        if (!response.ok) 
+        if (!response.ok)
             throw new Error('Ortsabfrage fehlgeschlagen');
         const data = await response.json();
         // Zugriff auf den Stadtteil, falls vorhanden, sonst Stadt, sonst Land

@@ -3,14 +3,23 @@ const app = express();
 const path = require("path");
 const bcrypt = require('bcrypt');
 require('dotenv').config();
-app.use(express.json({limit: '1mb'}));
-app.use(express.urlencoded({limit: '1mb', extended: true}));
+app.use(express.json({
+    limit: '1mb'
+}));
+app.use(express.urlencoded({
+    limit: '1mb',
+    extended: true
+}));
 const session = require('express-session');
 const fsp = require("fs").promises;
 const fs = require('fs');
 const mysql = require('mysql2/promise');
 const nodemailer = require('nodemailer');
-const {PDFDocument, PDFTextField, PDFCheckBox} = require('pdf-lib');
+const {
+    PDFDocument,
+    PDFTextField,
+    PDFCheckBox
+} = require('pdf-lib');
 const crypto = require('crypto');
 
 // Session Middleware konfigurieren
@@ -20,7 +29,7 @@ app.use(session({
     saveUninitialized: false,
     cookie: {
         secure: false,
-        maxAge: 30*60*1000
+        maxAge: 30 * 60 * 1000
     }
 }));
 
@@ -50,12 +59,18 @@ app.use(express.static("public"));
 
 // Login-Route
 app.post('/login', async (req, res) => {
-    const {username, password} = req.body;
+    const {
+        username,
+        password
+    } = req.body;
 
     try {
-        const connection = await mysql.createConnection(
-            {host: process.env.DB_HOST, user: process.env.DB_USER, password: process.env.DB_PW, database: process.env.DB_NAME}
-        );
+        const connection = await mysql.createConnection({
+            host: process.env.DB_HOST,
+            user: process.env.DB_USER,
+            password: process.env.DB_PW,
+            database: process.env.DB_NAME
+        });
 
         // Hole das Passwort des Benutzers aus der Datenbank
         const [rows] = await connection.execute(
@@ -68,21 +83,21 @@ app.post('/login', async (req, res) => {
             // Datenbank
             const passwordValid = await bcrypt.compare(password, rows[0].password);
 
-if (passwordValid) {
-    req.session.user = username;
-    req.session.role = rows[0].role;
-    req.session.createdAt = Date.now();
+            if (passwordValid) {
+                req.session.user = username;
+                req.session.role = rows[0].role;
+                req.session.createdAt = Date.now();
 
-    res.status(200).send("Login erfolgreich!");
+                res.status(200).send("Login erfolgreich!");
 
-    console.log(
-        new Date().toISOString(),
-        '- Anmeldung: Benutzer',
-        username,
-        'erfolgreich angemeldet mit Rolle',
-        rows[0].role
-    );
-} else {
+                console.log(
+                    new Date().toISOString(),
+                    '- Anmeldung: Benutzer',
+                    username,
+                    'erfolgreich angemeldet mit Rolle',
+                    rows[0].role
+                );
+            } else {
                 // Passwort ist falsch
                 res
                     .status(401)
@@ -171,7 +186,7 @@ async function generatePDF(formDataObj, templatePath, outputPath) {
                 .elements
                 .forEach(element => {
                     // Ignoriere einige Felder sodass keine Fehler auftreten
-                    if (element.name === "total_work" || element.name === "total_material" || element.name === "Signature" || ((element.name.startsWith("work_") || element.name.startsWith("material_")) && !element.name.includes("_combined_"))||element.name === "email") {
+                    if (element.name === "total_work" || element.name === "total_material" || element.name === "Signature" || ((element.name.startsWith("work_") || element.name.startsWith("material_")) && !element.name.includes("_combined_")) || element.name === "email") {
                         return;
                     }
 
@@ -297,9 +312,9 @@ app.post('/data', async (req, res) => {
             path.join(__dirname, 'public', 'json', `data_${timestamp}.json`),
             JSON.stringify(req.body, null, 2)
         );
-console.log(
-    `${new Date().toISOString()} - Dateigenerierung: JSON-Datei vom Benutzer ${activeUser} erfolgreich generiert und gespeichert`
-);
+        console.log(
+            `${new Date().toISOString()} - Dateigenerierung: JSON-Datei vom Benutzer ${activeUser} erfolgreich generiert und gespeichert`
+        );
 
         await generatePDF(req.body, templatePdfPath, pdfFilepath);
         console.log(
@@ -316,7 +331,9 @@ console.log(
             console.error(`${new Date().toISOString()} - Mailversand: E-Mailversand vom Benutzer ${activeUser} fehlgeschlagen`);
         }
 
-        res.json({pdfUrl: `/pdf-download/${pdfFilename}`});
+        res.json({
+            pdfUrl: `/pdf-download/${pdfFilename}`
+        });
     } catch (err) {
         console.error('Fehler:', err);
         res
@@ -401,7 +418,9 @@ app.post('/register-customer', async (req, res) => {
     } = req.body;
 
     if (!firstName || !lastName || !email || !phone || !address || !zip || !city || !password) {
-        return res.status(400).json({error: 'Pflichtfelder fehlen'});
+        return res.status(400).json({
+            error: 'Pflichtfelder fehlen'
+        });
     }
 
     try {
@@ -420,7 +439,9 @@ app.post('/register-customer', async (req, res) => {
 
         if (existingUsers.length > 0) {
             await connection.end();
-            return res.status(409).json({error: 'Für diese E-Mail existiert bereits ein Konto'});
+            return res.status(409).json({
+                error: 'Für diese E-Mail existiert bereits ein Konto'
+            });
         }
 
         const hashedPassword = await bcrypt.hash(password, 10);
@@ -463,15 +484,21 @@ app.post('/register-customer', async (req, res) => {
         });
     } catch (error) {
         console.error('Fehler beim Erstellen des Kundenkontos:', error);
-        res.status(500).json({error: 'Fehler beim Erstellen des Kundenkontos'});
+        res.status(500).json({
+            error: 'Fehler beim Erstellen des Kundenkontos'
+        });
     }
 });
 
 app.post('/request-guest-verification', async (req, res) => {
-    const { email } = req.body;
+    const {
+        email
+    } = req.body;
 
     if (!email) {
-        return res.status(400).json({error: 'E-Mail-Adresse fehlt'});
+        return res.status(400).json({
+            error: 'E-Mail-Adresse fehlt'
+        });
     }
 
     try {
@@ -506,12 +533,16 @@ app.post('/request-guest-verification', async (req, res) => {
         });
     } catch (error) {
         console.error('Fehler bei Gast-Verifikation:', error);
-        res.status(500).json({error: 'Fehler beim Versenden der Bestätigungsmail'});
+        res.status(500).json({
+            error: 'Fehler beim Versenden der Bestätigungsmail'
+        });
     }
 });
 
 app.get('/verify-email', async (req, res) => {
-    const { token } = req.query;
+    const {
+        token
+    } = req.query;
 
     if (!token) {
         return res.status(400).send('Ungültiger Bestätigungslink.');
@@ -577,10 +608,15 @@ app.get('/verify-email', async (req, res) => {
 });
 
 app.post('/check-email-verification', async (req, res) => {
-    const { email } = req.body;
+    const {
+        email
+    } = req.body;
 
     if (!email) {
-        return res.status(400).json({ verified: false, error: 'E-Mail-Adresse fehlt' });
+        return res.status(400).json({
+            verified: false,
+            error: 'E-Mail-Adresse fehlt'
+        });
     }
 
     try {
@@ -622,7 +658,9 @@ app.post('/check-email-verification', async (req, res) => {
             });
         }
 
-        return res.json({ verified: false });
+        return res.json({
+            verified: false
+        });
     } catch (error) {
         console.error('Fehler beim Prüfen der E-Mail-Verifikation:', error);
         return res.status(500).json({
@@ -634,7 +672,9 @@ app.post('/check-email-verification', async (req, res) => {
 
 app.get('/my-profile', async (req, res) => {
     if (!req.session.user) {
-        return res.status(401).json({ error: 'Nicht angemeldet' });
+        return res.status(401).json({
+            error: 'Nicht angemeldet'
+        });
     }
 
     try {
@@ -665,13 +705,17 @@ app.get('/my-profile', async (req, res) => {
         await connection.end();
 
         if (rows.length === 0) {
-            return res.status(404).json({ error: 'Benutzer nicht gefunden' });
+            return res.status(404).json({
+                error: 'Benutzer nicht gefunden'
+            });
         }
 
         res.json(rows[0]);
     } catch (error) {
         console.error('Fehler beim Laden des Benutzerprofils:', error);
-        res.status(500).json({ error: 'Fehler beim Laden des Benutzerprofils' });
+        res.status(500).json({
+            error: 'Fehler beim Laden des Benutzerprofils'
+        });
     }
 });
 

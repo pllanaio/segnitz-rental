@@ -3,8 +3,8 @@ var wrapper = document.getElementById("signature-pad"),
     signaturePad;
 
 /**
-    *  Behandlung der Größenänderung der Unterschriftenfelds
-    */
+ *  Behandlung der Größenänderung der Unterschriftenfelds
+ */
 function resizeCanvas() {
     var oldContent = signaturePad.toData();
     var ratio = Math.max(window.devicePixelRatio || 1, 1);
@@ -18,8 +18,8 @@ function resizeCanvas() {
 }
 
 /**
-    *  Speichern des Inhaltes als Bild
-    */
+ *  Speichern des Inhaltes als Bild
+ */
 function download(filename) {
     var blob = dataURLToBlob(signaturePad.toDataURL());
     var url = window
@@ -40,8 +40,8 @@ function download(filename) {
 }
 
 /**
-    * DataURL in Binär umwandeln
-    */
+ * DataURL in Binär umwandeln
+ */
 function dataURLToBlob(dataURL) {
     // Code von https://github.com/ebidel/filer.js
     var parts = dataURL.split(';base64,');
@@ -52,7 +52,9 @@ function dataURLToBlob(dataURL) {
     for (var i = 0; i < rawLength; ++i) {
         uInt8Array[i] = raw.charCodeAt(i);
     }
-    return new Blob([uInt8Array], {type: contentType});
+    return new Blob([uInt8Array], {
+        type: contentType
+    });
 }
 
 /**

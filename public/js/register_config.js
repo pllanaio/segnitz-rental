@@ -19,7 +19,9 @@ document.getElementById('registerForm').addEventListener('submit', async (e) => 
 
     const res = await fetch('/register-customer', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+            'Content-Type': 'application/json'
+        },
         body: JSON.stringify(data)
     });
 

@@ -44,5 +44,5 @@ async function createUser(username, password, role = 'user') {
 }
 
 //createUser('admin', 'test1234', 'global_admin');
- createUser('leon', 'test', 'user');
+createUser('leon', 'test', 'user');
 // createUser('mitarbeiter1', 'test1234', 'bearbeiter');

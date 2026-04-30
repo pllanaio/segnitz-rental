@@ -1,131 +1,123 @@
 <!DOCTYPE html>
 <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Segnitz Rental - Backend</title>
-        <!-- CSS -->
-        <link rel="stylesheet" href="css/tempus-dominus.min.css">
-        <link rel="stylesheet" href="css/bootstrap.min.css">
-        <link rel="stylesheet" href="css/style.css">
-        <link
-            rel="stylesheet"
-            href="css/bootstrap-icons-1.11.3/font/bootstrap-icons.min.css">
-        <!-- FONT -->
-        <link rel="stylesheet" href="css/fonts.css">
-        <!--FAVICON-->
-        <link rel="apple-touch-icon" sizes="180x180" href="img/apple-touch-icon.png">
-        <link rel="icon" type="image/png" sizes="32x32" href="img/favicon-32x32.png">
-        <link rel="icon" type="image/png" sizes="16x16" href="img/favicon-16x16.png">
-        <link rel="manifest" href="img/site.webmanifest">
-        <link rel="mask-icon" href="img/safari-pinned-tab.svg" color="#ffffff">
-        <meta name="msapplication-TileColor" content="#ffffff">
-        <meta name="theme-color" content="#ffffff">
-        <style>
-            .btn-primary:hover {
-                background-color: #0d6efd;
-                /* Dies ist die Standardfarbe von Bootstrap für btn-primary */
-                border-color: #0d6efd;
-                /* Passen Sie diese Werte entsprechend Ihrer spezifischen Farbeinstellung an */
-            }
-        </style>
-    </head>
-    <body>
-<!-- CONTAINER -->
-<div class="container-fluid min-vh-100 p-0">
-    <div class="row g-0 min-vh-100">
 
-        <aside class="col-12 col-md-3 col-xl-2 bg-primary text-white p-4">
-            <h2>Segnitz Rental</h2>
-            <h5 class="mt-3">Backend</h5>
-            <h6>Konfiguration</h6>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Segnitz Rental - Backend</title>
+    <!-- CSS -->
+    <link rel="stylesheet" href="css/tempus-dominus.min.css">
+    <link rel="stylesheet" href="css/bootstrap.min.css">
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/bootstrap-icons-1.11.3/font/bootstrap-icons.min.css">
+    <!-- FONT -->
+    <link rel="stylesheet" href="css/fonts.css">
+    <!--FAVICON-->
+    <link rel="apple-touch-icon" sizes="180x180" href="img/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="img/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="img/favicon-16x16.png">
+    <link rel="manifest" href="img/site.webmanifest">
+    <link rel="mask-icon" href="img/safari-pinned-tab.svg" color="#ffffff">
+    <meta name="msapplication-TileColor" content="#ffffff">
+    <meta name="theme-color" content="#ffffff">
+    <style>
+        .btn-primary:hover {
+            background-color: #0d6efd;
+            /* Dies ist die Standardfarbe von Bootstrap für btn-primary */
+            border-color: #0d6efd;
+            /* Passen Sie diese Werte entsprechend Ihrer spezifischen Farbeinstellung an */
+        }
+    </style>
+</head>
 
-            <p id="backend-login-status" class="mt-4 small"></p>
+<body>
+    <!-- CONTAINER -->
+    <div class="container-fluid min-vh-100 p-0">
+        <div class="row g-0 min-vh-100">
 
-            <p class="mt-4 mb-1">Zwergerstraße 2b<br>85579 Neubiberg</p>
-            <a class="text-white" href="mailto:info@segnitzbau.de">info@segnitzbau.de</a>
+            <aside class="col-12 col-md-3 col-xl-2 bg-primary text-white p-4">
+                <h2>Segnitz Rental</h2>
+                <h5 class="mt-3">Backend</h5>
+                <h6>Konfiguration</h6>
 
-            <a href="/index.html">
-                <button type="button" class="btn btn-light w-100 mt-4">
-                    <i class="bi bi-arrow-left-circle"></i>
-                    Konfiguration beenden
-                </button>
-            </a>
+                <p id="backend-login-status" class="mt-4 small"></p>
 
-            <a href="#">
-                <button type="button" class="btn btn-danger w-100 mt-2" onclick="logout()">
-                    <i class="bi bi-x-circle"></i>
-                    Abmelden
-                </button>
-            </a>
-        </aside>
+                <p class="mt-4 mb-1">Zwergerstraße 2b<br>85579 Neubiberg</p>
+                <a class="text-white" href="mailto:info@segnitzbau.de">info@segnitzbau.de</a>
 
-        <main class="col-12 col-md-9 col-xl-10 p-4 p-lg-5">
-            <div id="qbox-container_form" class="w-100">
-                <form
-                    class="needs-validation"
-                    id="form-wrapper"
-                    method="post"
-                    name="form-wrapper"
-                    novalidate=""
-                    onsubmit="event.preventDefault();">
+                <a href="/index.html">
+                    <button type="button" class="btn btn-light w-100 mt-4">
+                        <i class="bi bi-arrow-left-circle"></i>
+                        Konfiguration beenden
+                    </button>
+                </a>
 
-                    <div id="steps-container">
-                        <div class="step d-block">
-                            <h4 class="mb-4">Datenbank bearbeiten</h4>
+                <a href="#">
+                    <button type="button" class="btn btn-danger w-100 mt-2" onclick="logout()">
+                        <i class="bi bi-x-circle"></i>
+                        Abmelden
+                    </button>
+                </a>
+            </aside>
 
-                            <div class="row">
-                                <div class="col-12 col-lg-6">
-                                    <select name="DBType" id="DBType" class="form-select">
-                                        <option selected disabled hidden>Datenbank auswählen...</option>
-                                        <option value="material">Material</option>
-                                        <option value="monteure">Monteure</option>
-                                    </select>
+            <main class="col-12 col-md-9 col-xl-10 p-4 p-lg-5">
+                <div id="qbox-container_form" class="w-100">
+                    <form class="needs-validation" id="form-wrapper" method="post" name="form-wrapper" novalidate=""
+                        onsubmit="event.preventDefault();">
+
+                        <div id="steps-container">
+                            <div class="step d-block">
+                                <h4 class="mb-4">Datenbank bearbeiten</h4>
+
+                                <div class="row">
+                                    <div class="col-12 col-lg-6">
+                                        <select name="DBType" id="DBType" class="form-select">
+                                            <option selected disabled hidden>Datenbank auswählen...</option>
+                                            <option value="material">Material</option>
+                                            <option value="monteure">Monteure</option>
+                                        </select>
+                                    </div>
                                 </div>
+
+                                <br>
+
+                                <div id="inputGroup" style="display: none;" class="input-group col-12 col-lg-6">
+                                    <input type="text" id="db_edit" class="form-control"
+                                        placeholder="Neuen Eintrag hinzufügen" aria-label="Neuen Eintrag hinzufügen">
+                                    <button class="btn btn-success" type="button" id="addButton">
+                                        Hinzufügen
+                                    </button>
+                                </div>
+
+                                <br>
+
+                                <h4>
+                                    Verfügbare Optionen:
+                                    <span id="itemCount">0</span>
+                                </h4>
+
+                                <div id="selectedOptionsContainer"></div>
                             </div>
-
-                            <br>
-
-                            <div id="inputGroup" style="display: none;" class="input-group col-12 col-lg-6">
-                                <input
-                                    type="text"
-                                    id="db_edit"
-                                    class="form-control"
-                                    placeholder="Neuen Eintrag hinzufügen"
-                                    aria-label="Neuen Eintrag hinzufügen">
-                                <button class="btn btn-success" type="button" id="addButton">
-                                    Hinzufügen
-                                </button>
-                            </div>
-
-                            <br>
-
-                            <h4>
-                                Verfügbare Optionen:
-                                <span id="itemCount">0</span>
-                            </h4>
-
-                            <div id="selectedOptionsContainer"></div>
                         </div>
-                    </div>
-                </form>
-            </div>
-        </main>
+                    </form>
+                </div>
+            </main>
 
-    </div>
-</div>
-        <div id="preloader-wrapper">
-            <div id="preloader"></div>
-            <div class="preloader-section section-left"></div>
-            <div class="preloader-section section-right"></div>
         </div>
-        <!--Bootstrap-->
-        <script type="text/javascript" src="js/bootstrap.bundle.min.js"></script>
-        <!-- Static App Form Collection Script -->
-        <script type="text/javascript" src="js/static-forms.js"></script>
-        <!--Popper-->
-        <script type="text/javascript" src="js/popper.min.js"></script>
-        <!-- JavaScript to populate dropdown options -->
-        <script type="text/javascript" src="js/backend_config.js"></script>
-    </body>
+    </div>
+    <div id="preloader-wrapper">
+        <div id="preloader"></div>
+        <div class="preloader-section section-left"></div>
+        <div class="preloader-section section-right"></div>
+    </div>
+    <!--Bootstrap-->
+    <script type="text/javascript" src="js/bootstrap.bundle.min.js"></script>
+    <!-- Static App Form Collection Script -->
+    <script type="text/javascript" src="js/static-forms.js"></script>
+    <!--Popper-->
+    <script type="text/javascript" src="js/popper.min.js"></script>
+    <!-- JavaScript to populate dropdown options -->
+    <script type="text/javascript" src="js/backend_config.js"></script>
+</body>
+
 </html>
