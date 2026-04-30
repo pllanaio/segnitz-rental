@@ -66,21 +66,12 @@ document
                 const link = document.createElement('a');
 
                 link.href = downloadUrl;
-                link.download = data.pdfUrl.split('/').pop();
+                link.download = `Mietauftrag_${timestamp}.pdf`;
                 document.body.appendChild(link);
                 link.click();
 
                 document.body.removeChild(link);
                 URL.revokeObjectURL(downloadUrl);
             })
-            .catch(error => {
-                console.error('Fehler beim PDF-Download:', error);
-                // ❗ HIER rein
-                const submitBtn = document.getElementById('submit-btn');
-                if (submitBtn) {
-                    submitBtn.disabled = false;
-                }
 
-                alert('Fehler beim Erstellen oder Download der PDF.');
-            });
     });
