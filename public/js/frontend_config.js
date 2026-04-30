@@ -177,7 +177,7 @@ prevBtn.addEventListener('click', () => {
 submitBtn.addEventListener('click', (event) => {
     // Stelle sicher, dass alle Validierungen bestanden sind, bevor das Formular
     // abgesendet wird
-    let signatureValid = validateStep8(); // Diese Funktion überprüft die Unterschrift und Zustimmungen
+    let signatureValid = validateSignatureStep(); // Diese Funktion überprüft die Unterschrift und Zustimmungen
 
     if (!signatureValid) {
         event.preventDefault(); // Verhindere das Absenden des Formulars
@@ -221,38 +221,6 @@ submitBtn.addEventListener('click', (event) => {
             })
     }
 });
-
-function validateStep1() {
-    const selectedProduct = document.getElementById('RentalProduct').value;
-
-    if (!selectedProduct) {
-        alert('Bitte wählen Sie ein Produkt aus.');
-        return false;
-    }
-
-    return true;
-}
-
-function validateStep2() {
-    const startDate = document.getElementById('RentalStartDate').value;
-    const endDate = document.getElementById('RentalEndDate').value;
-
-    if (!startDate || !endDate) {
-        alert('Bitte wählen Sie Mietbeginn und Mietende aus.');
-        return false;
-    }
-
-    if (new Date(endDate) < new Date(startDate)) {
-        alert('Das Mietende darf nicht vor dem Mietbeginn liegen.');
-        return false;
-    }
-
-    return true;
-}
-
-function validateStep3() {
-    return true;
-}
 
 function logout() {
     fetch('/logout', {
