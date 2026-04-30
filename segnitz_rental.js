@@ -299,7 +299,7 @@ app.post('/data', async (req, res) => {
         const email = emailElement ? emailElement.value : null;
 
         const timestamp = new Date().getTime();
-        const pdfFilename = `pdf_${timestamp}.pdf`;
+        const pdfFilename = `Mietauftrag_${timestamp}.pdf`;
         const pdfFilepath = path.join(__dirname, 'public', 'pdf', pdfFilename);
         const templatePdfPath = path.join(__dirname, 'public', 'pdf', 'template.pdf');
         const activeUser = req.session.user || 'Gast';
@@ -328,7 +328,7 @@ app.post('/data', async (req, res) => {
                 console.error('Fehler beim Mailversand:', mailError);
             }
         }
-        
+
         res.json({
             pdfUrl: `/pdf-download/${pdfFilename}`
         });

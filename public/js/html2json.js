@@ -66,7 +66,7 @@ document
                 const link = document.createElement('a');
 
                 link.href = downloadUrl;
-                link.download = 'Mietauftrag.pdf';
+                link.download = data.pdfUrl.split('/').pop();
                 document.body.appendChild(link);
                 link.click();
 
