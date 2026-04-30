@@ -40,6 +40,13 @@
                     </button>
                 </a>
 
+                <a href="/register.html">
+    <button type="button" class="btn btn-success w-100 mt-2">
+        <i class="bi bi-person-plus"></i>
+        Jetzt registrieren
+    </button>
+</a>
+
                 <a id="logout-button" href="#" style="display: none;">
                     <button type="button" class="btn btn-danger w-100 mt-2" onclick="logout()">
                         <i class="bi bi-x-circle"></i>
@@ -192,60 +199,6 @@
             <input type="text" class="form-control" id="CustomerCity" name="CustomerCity">
         </div>
     </div>
-    <div class="col-12">
-    <div class="form-check form-switch">
-        <input
-            class="form-check-input"
-            type="checkbox"
-            id="CreateCustomerAccount"
-            name="CreateCustomerAccount">
-        <label class="form-check-label" for="CreateCustomerAccount">
-            Kundenkonto erstellen
-        </label>
-    </div>
-    <small class="text-muted">
-        Ohne Kundenkonto können Sie als Gast fortfahren.
-    </small>
-</div>
-
-<div class="col-12 col-lg-6 d-none" id="CustomerPasswordWrapper">
-    <label class="form-label" for="CustomerPassword">Gewünschtes Passwort</label>
-    <input
-        type="password"
-        class="form-control"
-        id="CustomerPassword"
-        name="CustomerPassword"
-        autocomplete="new-password">
-</div>
-
-<div class="col-12 col-lg-6 d-none" id="CustomerPasswordRepeatWrapper">
-    <label class="form-label" for="CustomerPasswordRepeat">Passwort wiederholen</label>
-    <input
-        type="password"
-        class="form-control"
-        id="CustomerPasswordRepeat"
-        name="CustomerPasswordRepeat"
-        autocomplete="new-password">
-</div>
-
-<div class="col-12 mt-3 d-none" id="registerButtonWrapper">
-    <button
-        type="button"
-        class="btn btn-success"
-        id="registerBtn">
-        <i class="bi bi-person-plus"></i>
-        Jetzt registrieren
-    </button>
-    <button type="button" class="btn btn-outline-primary d-none" id="checkVerificationBtn">
-    Verifikation prüfen
-    </button>
-</div>
-<br>
-<div class="col-12">
-    <div id="registrationSuccess" class="alert alert-success d-none">
-        Kundenkonto wurde erfolgreich erstellt.
-    </div>
-</div>
 </div>
                                 <div class="step d-none" id="page3">
                                     <h4>Geben Sie den Termin, die Uhrzeit und den Arbeitsbericht des Monteurs an</h4>
