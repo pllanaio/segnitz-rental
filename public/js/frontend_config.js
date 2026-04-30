@@ -229,57 +229,45 @@ function logout() {
 // AUTH STATUS HANDLING
 // ==========================
 document.addEventListener("DOMContentLoaded", () => {
-    const btn = document.getElementById('admin-button');
+    const adminBtn = document.getElementById('admin-button');
     const loginStatus = document.getElementById('login-status');
     const logoutBtn = document.getElementById('logout-button');
+    const registerBtn = document.getElementById('register-button');
+    const profileBtn = document.getElementById('profile-button');
 
-    // Falls Seite kein Login-Bereich hat (z.B. backend.html), einfach abbrechen
-    if (!btn || !loginStatus || !logoutBtn) return;
+    if (!adminBtn || !loginStatus || !logoutBtn) return;
 
     fetch('/auth-status')
         .then(res => res.json())
         .then(data => {
-            const registerBtn = document.getElementById('register-button');
-            const profileBtn = document.getElementById('profile-button');
-            if (data.loggedIn && data.role === 'global_admin') {
-                // Button → Konfiguration
-                btn.href = '/backend.html';
-                btn.querySelector('button').innerHTML =
-                    '<i class="bi bi-gear"></i> Konfiguration';
-                logoutBtn.style.display = 'inline-block';
-                loginStatus.textContent = `Angemeldet als: ${data.user}`;
-            } else if (data.loggedIn) {
-                btn.href = '#';
-                btn.querySelector('button').innerHTML =
-                    '<i class="bi bi-person-check"></i> Eingeloggt';
+            if (data.loggedIn) {
+                registerBtn.style.display = 'none';
+                logoutBtn.style.display = 'block';
+                profileBtn.style.display = 'block';
 
-                logoutBtn.style.display = 'inline-block';
-                loginStatus.textContent = `Angemeldet als: ${data.user}`;
-                // Logout anzeigen
-                logoutBtn.style.display = 'inline-block';
-
-                // User anzeigen
                 loginStatus.textContent = `Angemeldet als: ${data.user}`;
 
-                if (profileBtn) {
-                    profileBtn.style.display = 'inline-block';
+                if (data.role === 'global_admin') {
+                    adminBtn.href = '/backend.html';
+                    adminBtn.querySelector('button').innerHTML =
+                        '<i class="bi bi-gear"></i> Konfiguration';
+                } else {
+                    adminBtn.href = '#';
+                    adminBtn.querySelector('button').innerHTML =
+                        '<i class="bi bi-person-check"></i> Eingeloggt';
+
+                    loadUserProfileIntoForm();
                 }
-                if (registerBtn) {
-                    registerBtn.style.display = 'none';
-                }
-
-                loadUserProfileIntoForm();
             } else {
-                btn.href = '/login.html';
-                btn.querySelector('button').innerHTML =
+                adminBtn.href = '/login.html';
+                adminBtn.querySelector('button').innerHTML =
                     '<i class="bi bi-person-lock"></i> Login';
 
+                registerBtn.style.display = 'block';
                 logoutBtn.style.display = 'none';
-                loginStatus.textContent = 'Kein Benutzer angemeldet';
+                profileBtn.style.display = 'none';
 
-                if (registerBtn) {
-                    registerBtn.style.display = 'inline-block';
-                }
+                loginStatus.textContent = 'Kein Benutzer angemeldet';
             }
         })
         .catch(err => {
