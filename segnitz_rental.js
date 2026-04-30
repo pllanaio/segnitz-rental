@@ -257,42 +257,36 @@ async function generatePDF(formDataObj, templatePath, outputPath) {
     fs.writeFileSync(outputPath, pdfBytes);
 }
 
-/*async function sendEmailWithPDF(recipients, pdfFilePath, pdfFilename) {
+async function sendEmailWithPDF(recipients, pdfFilePath, pdfFilename) {
+    if (!recipients || recipients.length === 0) {
+        return false;
+    }
+
     const transporter = nodemailer.createTransport({
         host: 'mail.your-server.de',
         port: 465,
         secure: true,
         auth: {
-            user: "",
-            pass: ""
+            user: process.env.SMTP_USER,
+            pass: process.env.SMTP_PASS
         }
     });
 
-    const mailOptions = {
-        from: '"Segnitz Rental" <rental@segnitzbau.de>',
-        to: recipients.join(", "), // Array von Empfängern als Komma-getrennter String
-        subject: `Regiebericht vom ${new Date().toISOString()}`,
-        text: `Regiebericht vom ${new Date().toISOString()}`,
+    await transporter.sendMail({
+        from: `"Segnitz Rental" <${process.env.SMTP_USER}>`,
+        to: recipients.join(', '),
+        subject: 'Ihr Mietauftrag',
+        text: 'Im Anhang finden Sie Ihren Mietauftrag als PDF.',
         attachments: [
             {
                 filename: pdfFilename,
                 path: pdfFilePath
             }
         ]
-    };
+    });
 
-    try {
-       let info = await transporter.sendMail(mailOptions);
-       // console.log(
-       //     `${new Date().toISOString()} - E-Mail versendet: %s`,
-       //     info.messageId
-       // );
-        return true;
-    } catch (error) {
-        console.error('Fehler im Mailversand: ', error);
-        return false;
-    }
-} */
+    return true;
+}
 
 app.post('/data', async (req, res) => {
     try {
@@ -323,9 +317,17 @@ app.post('/data', async (req, res) => {
             `${new Date().toISOString()} - Dateigenerierung: PDF-Datei erfolgreich vom Benutzer ${activeUser} generiert und gespeichert`
         );
 
-        const recipients = [process.env.MAIN_EMAIL, email];
+        if (email) {
+            try {
+                await sendEmailWithPDF([email], pdfFilepath, pdfFilename);
 
-        const emailSent = await sendEmailWithPDF(recipients, pdfFilepath, pdfFilename);
+                console.log(
+                    `${new Date().toISOString()} - Mailversand: PDF erfolgreich an ${email} versendet`
+                );
+            } catch (mailError) {
+                console.error('Fehler beim Mailversand:', mailError);
+            }
+        }
 
         if (emailSent) {
             console.log(`${new Date().toISOString()} - Mailversand: E-Mail erfolgreich vom Benutzer ${activeUser} abgesendet`);
