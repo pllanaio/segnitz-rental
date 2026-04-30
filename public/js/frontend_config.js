@@ -50,25 +50,25 @@ nextBtn.addEventListener('click', async () => {
     // Check if current step is valid before moving to next
     let isValid = true;
     switch (current_step) {
-        case 0:
-            isValid = validateStep1();
-            break;
-        case 1:
-            isValid = validateStep2();
-            break;
-        case 2:
-            isValid = validateStep3();
-            break;
-        case 3:
-            isValid = validateStep4();
-            break;
-        case 4:
-            isValid = validateStep7();
-            break;
-        case 5:
-            isValid = validateStep8();
-            break;
-    }
+    case 0:
+        isValid = validateProductStep();
+        break;
+    case 1:
+        isValid = validateRentalPeriodStep();
+        break;
+    case 2:
+        isValid = validateCustomerDataStep();
+        break;
+    case 3:
+        isValid = validateExtraStepOne();
+        break;
+    case 4:
+        isValid = validateExtraStepTwo();
+        break;
+    case 5:
+        isValid = validateSignatureStep();
+        break;
+}
 
     if (!isValid) {
         return; // Stop the function if the current step is not valid
@@ -252,90 +252,6 @@ function validateStep2() {
 
 function validateStep3() {
     return true;
-}
-
-function validateStep4() {
-    let isValid = true;
-    const dateTimePickerInput = document
-        .querySelector(
-            'input[name="DateTimePickerInput"]'
-        )
-        .value;
-    const workReport = document
-        .querySelector('textarea[name="WorkReport"]')
-        .value;
-
-    // Überprüfung, ob das Datum ausgewählt wurde
-    if (!dateTimePickerInput) {
-        alert('Bitte geben Sie den Termin und die Uhrzeit an.');
-        isValid = false;
-    } else if (!workReport.trim()) {
-        alert('Der Arbeitsbericht darf nicht leer sein.');
-        isValid = false;
-    }
-
-    return isValid;
-}
-
-function validateStep7() {
-    let isValid = true;
-    const machineUsageCheck = document.getElementById('MachineUsageCheck');
-    const disposeCheck = document.getElementById('DisposeCheck');
-    const workCheck = document.getElementById('WorkCheck');
-    const machineUsageTextfield = document.getElementById('MachineUsageTextfield');
-    const disposeTextfield = document.getElementById('DisposeTextfield');
-    const workTextfield = document.getElementById('WorkTextfield');
-    const CarProvisionFee = document.getElementById('CarProvisionFee');
-    const kfz_pauschale = document.getElementById('kfz_pauschale');
-
-    // Prüfe, ob die zugehörigen Textfelder ausgefüllt sind, wenn die Checkboxen
-    // aktiviert sind
-    if (machineUsageCheck.checked && !machineUsageTextfield.value.trim()) {
-        alert('Bitte geben Sie Details zum Maschineneinsatz an.');
-        isValid = false;
-    }
-    if (disposeCheck.checked && !disposeTextfield.value.trim()) {
-        alert('Bitte geben Sie Details zur Entsorgung an.');
-        isValid = false;
-    }
-    if (workCheck.checked && !workTextfield.value.trim()) {
-        alert('Bitte geben Sie Details zu weiteren Arbeiten an.');
-        isValid = false;
-    }
-    if (CarProvisionFee.checked && !kfz_pauschale.value.trim()) {
-        alert('Bitte geben Sie Details zur Kfz-Bereitstellung an.');
-        isValid = false;
-    }
-    return isValid;
-}
-
-function validateStep8() {
-    let isValid = true;
-    const signatureCanvas = signaturePad.isEmpty(); // Nutzt die isEmpty() Funktion von SignaturePad, um zu prüfen, ob eine Unterschrift geleistet wurde
-    const agbsChecked = document
-        .getElementById('agbs')
-        .checked;
-    const dsgvoChecked = document
-        .getElementById('dsgvo')
-        .checked;
-
-    // Überprüfe, ob eine Unterschrift geleistet wurde
-    if (signatureCanvas) {
-        alert('Bitte leisten Sie Ihre Unterschrift.');
-        isValid = false;
-    }
-
-    if (!agbsChecked) {
-        alert('Bitte stimmen Sie den Allgemeinen Geschäftsbedingungen zu.');
-        isValid = false;
-    }
-
-    if (!dsgvoChecked) {
-        alert('Bitte stimmen Sie der Datenschutzerklärung zu.');
-        isValid = false;
-    }
-
-    return isValid;
 }
 
 function logout() {
@@ -534,119 +450,6 @@ document.addEventListener('DOMContentLoaded', () => {
     endInput.addEventListener('change', updateRentalDurationInfo);
 });
 
-document.addEventListener('DOMContentLoaded', () => {
-    const createAccountCheckbox = document.getElementById('CreateCustomerAccount');
-    const passwordWrapper = document.getElementById('CustomerPasswordWrapper');
-    const passwordRepeatWrapper = document.getElementById('CustomerPasswordRepeatWrapper');
-
-    if (!createAccountCheckbox || !passwordWrapper || !passwordRepeatWrapper) return;
-
-    createAccountCheckbox.addEventListener('change', () => {
-        const shouldCreateAccount = createAccountCheckbox.checked;
-
-        passwordWrapper.classList.toggle('d-none', !shouldCreateAccount);
-        passwordRepeatWrapper.classList.toggle('d-none', !shouldCreateAccount);
-
-        if (!shouldCreateAccount) {
-            document.getElementById('CustomerPassword').value = '';
-            document.getElementById('CustomerPasswordRepeat').value = '';
-        }
-    });
-});
-
-const createAccountCheckbox = document.getElementById('CreateCustomerAccount');
-const passwordWrapper = document.getElementById('CustomerPasswordWrapper');
-const passwordRepeatWrapper = document.getElementById('CustomerPasswordRepeatWrapper');
-const registerWrapper = document.getElementById('registerButtonWrapper');
-
-createAccountCheckbox.addEventListener('change', () => {
-    const active = createAccountCheckbox.checked;
-
-    passwordWrapper.classList.toggle('d-none', !active);
-    passwordRepeatWrapper.classList.toggle('d-none', !active);
-    registerWrapper.classList.toggle('d-none', !active);
-});
-
-async function registerCustomer() {
-    const firstName = document.getElementById('FirstName').value.trim();
-    const lastName = document.getElementById('LastName').value.trim();
-    const email = document.getElementById('CustomerEmail').value.trim();
-    const phone = document.getElementById('CustomerPhone').value.trim();
-    const address = document.getElementById('CustomerAddress').value.trim();
-    const zip = document.getElementById('CustomerZip').value.trim();
-    const city = document.getElementById('CustomerCity').value.trim();
-    const password = document.getElementById('CustomerPassword').value;
-    const passwordRepeat = document.getElementById('CustomerPasswordRepeat').value;
-
-    if (!firstName || !lastName || !email || !phone || !address || !zip || !city) {
-        alert('Bitte alle Felder ausfüllen');
-        return;
-    }
-
-    if (!password || password !== passwordRepeat) {
-        alert('Passwörter stimmen nicht überein');
-        return;
-    }
-
-    const response = await fetch('/register-customer', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-            firstName,
-            lastName,
-            email,
-            phone,
-            address,
-            zip,
-            city,
-            password
-        })
-    });
-
-    const result = await response.json();
-
-    if (!response.ok) {
-        alert(result.error || 'Fehler bei Registrierung');
-        return;
-    }
-
-    // ✅ Erfolg anzeigen
-    const successBox = document.getElementById('registrationSuccess');
-    successBox.classList.remove('d-none');
-
-    // 🔒 Button deaktivieren (kein doppelt registrieren)
-    document.getElementById('registerBtn').disabled = true;
-}
-
-document.getElementById('registerBtn').addEventListener('click', registerCustomer);
-
-let customerEmailVerified = false;
-
-document.getElementById('checkVerificationBtn').addEventListener('click', async () => {
-    const email = document.getElementById('CustomerEmail').value.trim();
-
-    const response = await fetch('/check-email-verification', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-            email
-        })
-    });
-
-    const result = await response.json();
-
-    if (result.verified) {
-        customerEmailVerified = true;
-        alert('E-Mail wurde erfolgreich verifiziert.');
-    } else {
-        alert('E-Mail wurde noch nicht bestätigt.');
-    }
-});
-
 async function loadUserProfileIntoForm() {
     try {
         const response = await fetch('/my-profile');
@@ -668,4 +471,84 @@ async function loadUserProfileIntoForm() {
     } catch (error) {
         console.error('Fehler beim Vorbefüllen der Kundendaten:', error);
     }
+}
+
+function validateProductStep() {
+    const selectedProduct = document.getElementById('RentalProduct').value;
+
+    if (!selectedProduct) {
+        alert('Bitte wählen Sie ein Produkt aus.');
+        return false;
+    }
+
+    return true;
+}
+
+function validateRentalPeriodStep() {
+    const startDate = document.getElementById('RentalStartDate').value;
+    const endDate = document.getElementById('RentalEndDate').value;
+
+    if (!startDate || !endDate) {
+        alert('Bitte wählen Sie Mietbeginn und Mietende aus.');
+        return false;
+    }
+
+    if (new Date(endDate) < new Date(startDate)) {
+        alert('Das Mietende darf nicht vor dem Mietbeginn liegen.');
+        return false;
+    }
+
+    return true;
+}
+
+function validateCustomerDataStep() {
+    const requiredFields = [
+        'FirstName',
+        'LastName',
+        'CustomerEmail',
+        'CustomerPhone',
+        'CustomerAddress',
+        'CustomerZip',
+        'CustomerCity'
+    ];
+
+    for (const fieldId of requiredFields) {
+        const field = document.getElementById(fieldId);
+
+        if (!field || !field.value.trim()) {
+            alert('Bitte füllen Sie alle persönlichen Daten aus.');
+            return false;
+        }
+    }
+
+    return true;
+}
+
+function validateExtraStepOne() {
+    return true;
+}
+
+function validateExtraStepTwo() {
+    return true;
+}
+
+function validateSignatureStep() {
+    let isValid = true;
+
+    if (signaturePad.isEmpty()) {
+        alert('Bitte leisten Sie Ihre Unterschrift.');
+        isValid = false;
+    }
+
+    if (!document.getElementById('agbs').checked) {
+        alert('Bitte stimmen Sie den Allgemeinen Geschäftsbedingungen zu.');
+        isValid = false;
+    }
+
+    if (!document.getElementById('dsgvo').checked) {
+        alert('Bitte stimmen Sie der Datenschutzerklärung zu.');
+        isValid = false;
+    }
+
+    return isValid;
 }
