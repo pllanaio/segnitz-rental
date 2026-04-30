@@ -181,8 +181,6 @@ submitBtn.addEventListener('click', (event) => {
         event.preventDefault();
     } else {
 
-        submitBtn.disabled = true;
-
         preloader
             .classList
             .add('d-block');
