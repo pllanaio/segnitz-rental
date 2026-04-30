@@ -15,7 +15,7 @@ let bodyElement = document.querySelector('body');
 let succcessDiv = document.getElementById('success');
 
 let current_step = 0;
-let stepCount = 7;
+let stepCount = 5;
 step[current_step]
     .classList
     .add('d-block');
@@ -57,24 +57,17 @@ nextBtn.addEventListener('click', async () => {
             isValid = validateStep2();
             break;
         case 2:
-            isValid = await validateStep3();
+            isValid = validateStep3();
             break;
         case 3:
             isValid = validateStep4();
             break;
         case 4:
-            isValid = validateStep5();
-            break;
-        case 5:
-            isValid = validateStep6();
-            break;
-        case 6:
             isValid = validateStep7();
             break;
-        case 7:
+        case 5:
             isValid = validateStep8();
             break;
-
     }
 
     if (!isValid) {
@@ -279,82 +272,6 @@ function validateStep4() {
     } else if (!workReport.trim()) {
         alert('Der Arbeitsbericht darf nicht leer sein.');
         isValid = false;
-    }
-
-    return isValid;
-}
-
-function validateStep5() {
-    let isValid = true;
-    const totalWork = parseInt(document.getElementById('total_work').value);
-    const dateRegex = /^\d{2}\.\d{2}\.\d{4}$/;
-
-    for (let i = 0; i < totalWork; i++) {
-        const workInput = document.getElementById('work_' + i);
-        const workSelect = document.getElementById('work_dropdown_' + i);
-        const workDate = document.getElementById('work_date_' + i);
-
-        // Überprüfung des Datumsfeldes
-        if (!workDate.value || !dateRegex.test(workDate.value)) {
-            alert('Bitte geben Sie ein gültiges Datum im Format TT.MM.JJJJ in das Datumsfeld ' + (i + 1) + ' ein.');
-            isValid = false;
-            break;
-        } else {
-            const [day, month, year] = workDate.value.split('.').map(Number);
-            if (day < 1 || day > 31 || month < 1 || month > 12 || year > 9999) {
-                alert('Bitte geben Sie ein gültiges Datum im Format TT.MM.JJJJ in das Datumsfeld ' + (i + 1) + ' ein.');
-                isValid = false;
-                break;
-            }
-        }
-
-        // Überprüfung, ob im Dropdown noch "Monteur auswählen" ausgewählt ist
-        if (workSelect.value === 'Monteur auswählen...') {
-            alert('Bitte wählen Sie einen Monteur für das Monteursfeld ' + (i + 1) + '.');
-            isValid = false;
-            break;
-        }
-        
-        // Überprüfung, ob das Eingabefeld leer ist oder keine Zahl enthält
-        if (!workInput.value || isNaN(workInput.value) || workInput.value == "0") {
-            alert('Bitte geben Sie eine gültige Stundenanzahl in das Monteursfeld ' + (i + 1) + ' ein.');
-            isValid = false;
-            break;
-        }
-    }
-
-    return isValid;
-}
-
-function validateStep6() {
-    let isValid = true;
-    const totalMaterial = parseInt(document.getElementById('total_material').value);
-
-    for (let i = 0; i < totalMaterial; i++) {
-        const materialInput = document.getElementById('material_' + i);
-        const materialSelect = document.getElementById('material_dropdown_' + i);
-        const materialPrice = document.getElementById('material_price_' + i); // Assuming the IDs are 'material_price_0', 'material_price_1', etc.
-
-        // Überprüfung, ob das Eingabefeld leer ist oder keine Zahl enthält
-        if (!materialInput.value || isNaN(materialInput.value) || materialInput.value == "0") {
-            alert('Bitte geben Sie eine gültige Zahl in das Materialfeld ' + (i + 1) + ' ein.');
-            isValid = false;
-            break;
-        }
-
-        // Überprüfung, ob im Dropdown noch "Material auswählen" ausgewählt ist
-        if (materialSelect.value === 'Material auswählen...') {
-            alert('Bitte wählen Sie ein Material für das Materialfeld ' + (i + 1) + '.');
-            isValid = false;
-            break;
-        }
-
-        // Überprüfung, ob das material_price-Feld nur Zahlen enthält oder leer ist
-        if (materialPrice.value && isNaN(parseFloat(materialPrice.value))) {
-            alert('Das Feld "Materialpreis" für Materialfeld ' + (i + 1) + ' darf nur Zahlen enthalten oder leer sein.');
-            isValid = false;
-            break;
-        }
     }
 
     return isValid;
