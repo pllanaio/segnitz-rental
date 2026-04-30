@@ -872,6 +872,49 @@ app.post('/check-email-verification', async (req, res) => {
     }
 });
 
+app.get('/my-profile', async (req, res) => {
+    if (!req.session.user) {
+        return res.status(401).json({ error: 'Nicht angemeldet' });
+    }
+
+    try {
+        const connection = await mysql.createConnection({
+            host: process.env.DB_HOST,
+            port: Number(process.env.DB_PORT),
+            user: process.env.DB_USER,
+            password: process.env.DB_PW,
+            database: process.env.DB_NAME
+        });
+
+        const [rows] = await connection.execute(
+            `SELECT 
+                username AS email,
+                first_name AS firstName,
+                last_name AS lastName,
+                phone,
+                address,
+                zip,
+                city,
+                customer_no AS customerNo,
+                email_verified AS emailVerified
+             FROM users
+             WHERE username = ?`,
+            [req.session.user]
+        );
+
+        await connection.end();
+
+        if (rows.length === 0) {
+            return res.status(404).json({ error: 'Benutzer nicht gefunden' });
+        }
+
+        res.json(rows[0]);
+    } catch (error) {
+        console.error('Fehler beim Laden des Benutzerprofils:', error);
+        res.status(500).json({ error: 'Fehler beim Laden des Benutzerprofils' });
+    }
+});
+
 app.listen(3000, () => {
     console.log(
         "*********** Segnitz Rental System ***********"

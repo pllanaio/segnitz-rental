@@ -451,6 +451,7 @@ document.addEventListener("DOMContentLoaded", () => {
     fetch('/auth-status')
         .then(res => res.json())
         .then(data => {
+            const profileBtn = document.getElementById('profile-button');
             if (data.loggedIn && data.role === 'global_admin') {
                 // Button → Konfiguration
                 btn.href = '/backend.html';
@@ -470,6 +471,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
                 // User anzeigen
                 loginStatus.textContent = `Angemeldet als: ${data.user}`;
+
+                if (profileBtn) {
+    profileBtn.style.display = 'inline-block';
+}
+
+loadUserProfileIntoForm();
             } else {
                 btn.href = '/login.html';
                 btn.querySelector('button').innerHTML =
@@ -714,3 +721,26 @@ document.getElementById('checkVerificationBtn').addEventListener('click', async 
         alert('E-Mail wurde noch nicht bestätigt.');
     }
 });
+
+async function loadUserProfileIntoForm() {
+    try {
+        const response = await fetch('/my-profile');
+
+        if (!response.ok) {
+            return;
+        }
+
+        const user = await response.json();
+
+        document.getElementById('FirstName').value = user.firstName || '';
+        document.getElementById('LastName').value = user.lastName || '';
+        document.getElementById('CustomerEmail').value = user.email || '';
+        document.getElementById('CustomerPhone').value = user.phone || '';
+        document.getElementById('CustomerAddress').value = user.address || '';
+        document.getElementById('CustomerZip').value = user.zip || '';
+        document.getElementById('CustomerCity').value = user.city || '';
+
+    } catch (error) {
+        console.error('Fehler beim Vorbefüllen der Kundendaten:', error);
+    }
+}
