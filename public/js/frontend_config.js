@@ -13,6 +13,8 @@ let form = document.getElementsByTagName('form')[0];
 let preloader = document.getElementById('preloader-wrapper');
 let bodyElement = document.querySelector('body');
 let succcessDiv = document.getElementById('success');
+let guestVerificationRequested = false;
+let guestEmailVerified = false;
 
 let current_step = 0;
 let stepCount = 5;
@@ -422,6 +424,95 @@ async function loadUserProfileIntoForm() {
     }
 }
 
+document.addEventListener('DOMContentLoaded', () => {
+    const guestOrderBtn = document.getElementById('guestOrderBtn');
+    const checkGuestVerificationBtn = document.getElementById('checkGuestVerificationBtn');
+    const guestVerificationInfo = document.getElementById('guestVerificationInfo');
+
+    if (guestOrderBtn) {
+        guestOrderBtn.addEventListener('click', async () => {
+            const email = document.getElementById('CustomerEmail').value.trim();
+
+            if (!email) {
+                alert('Bitte geben Sie zuerst Ihre E-Mail-Adresse ein.');
+                return;
+            }
+
+            if (!validateCustomerDataStep()) {
+                return;
+            }
+
+            try {
+                guestOrderBtn.disabled = true;
+
+                const response = await fetch('/request-guest-verification', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ email })
+                });
+
+                const result = await response.json();
+
+                if (!response.ok) {
+                    alert(result.error || 'Fehler beim Versenden des Bestätigungslinks.');
+                    guestOrderBtn.disabled = false;
+                    return;
+                }
+
+                guestVerificationRequested = true;
+                guestEmailVerified = false;
+
+                if (guestVerificationInfo) {
+                    guestVerificationInfo.classList.remove('d-none');
+                }
+
+                alert('Bestätigungslink wurde versendet.');
+
+            } catch (error) {
+                console.error('Fehler bei Gast-Verifikation:', error);
+                alert('Fehler beim Versenden des Bestätigungslinks.');
+                guestOrderBtn.disabled = false;
+            }
+        });
+    }
+
+    if (checkGuestVerificationBtn) {
+        checkGuestVerificationBtn.addEventListener('click', async () => {
+            const email = document.getElementById('CustomerEmail').value.trim();
+
+            if (!email) {
+                alert('Bitte geben Sie Ihre E-Mail-Adresse ein.');
+                return;
+            }
+
+            try {
+                const response = await fetch('/check-email-verification', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ email })
+                });
+
+                const result = await response.json();
+
+                if (result.verified) {
+                    guestEmailVerified = true;
+                    alert('E-Mail wurde erfolgreich bestätigt. Sie können fortfahren.');
+                } else {
+                    alert('E-Mail wurde noch nicht bestätigt.');
+                }
+
+            } catch (error) {
+                console.error('Fehler beim Prüfen der Gast-Verifikation:', error);
+                alert('Fehler beim Prüfen der Verifikation.');
+            }
+        });
+    }
+});
+
 function validateProductStep() {
     const selectedProduct = document.getElementById('RentalProduct').value;
 
@@ -468,6 +559,24 @@ function validateCustomerDataStep() {
             alert('Bitte füllen Sie alle persönlichen Daten aus.');
             return false;
         }
+    }
+
+    const isLoggedIn =
+        document.getElementById('logout-button') &&
+        document.getElementById('logout-button').style.display !== 'none';
+
+    if (isLoggedIn) {
+        return true;
+    }
+
+    if (!guestVerificationRequested) {
+        alert('Bitte wählen Sie "Als Gast bestellen", um Ihre E-Mail-Adresse zu bestätigen.');
+        return false;
+    }
+
+    if (!guestEmailVerified) {
+        alert('Bitte bestätigen Sie zuerst Ihre E-Mail-Adresse und klicken Sie anschließend auf "Verifikation prüfen".');
+        return false;
     }
 
     return true;
