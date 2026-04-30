@@ -56,22 +56,23 @@ document
         })
             .then(response => response.json())
             .then(async data => {
-                const response = await fetch(data.pdfUrl);
                 if (!data.pdfUrl) {
                     throw new Error('Keine PDF URL vom Server erhalten');
                 }
+
+                const response = await fetch(data.pdfUrl);
                 const blob = await response.blob();
 
                 const downloadUrl = URL.createObjectURL(blob);
                 const link = document.createElement('a');
 
                 link.href = downloadUrl;
-                link.download = `Mietauftrag_${timestamp}.pdf`;
+                link.download = data.pdfUrl.split('/').pop();
+
                 document.body.appendChild(link);
                 link.click();
 
                 document.body.removeChild(link);
                 URL.revokeObjectURL(downloadUrl);
             })
-
     });
