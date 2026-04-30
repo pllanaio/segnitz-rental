@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Registrierung</title>
+
+<link rel="stylesheet" href="css/bootstrap.min.css">
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/bootstrap-icons-1.11.3/font/bootstrap-icons.min.css">
+</head>
+
+<body>
+
+<div class="container mt-5" style="max-width: 600px;">
+    <h3>Konto erstellen</h3>
+
+    <div id="msg" class="alert d-none"></div>
+
+    <form id="registerForm">
+        <input class="form-control mt-2" placeholder="Vorname" id="firstName">
+        <input class="form-control mt-2" placeholder="Nachname" id="lastName">
+        <input class="form-control mt-2" placeholder="E-Mail" id="email">
+        <input class="form-control mt-2" placeholder="Telefon" id="phone">
+        <input class="form-control mt-2" placeholder="Adresse" id="address">
+        <input class="form-control mt-2" placeholder="PLZ" id="zip">
+        <input class="form-control mt-2" placeholder="Ort" id="city">
+
+        <input type="password" class="form-control mt-2" placeholder="Passwort" id="password">
+        <input type="password" class="form-control mt-2" placeholder="Passwort wiederholen" id="passwordRepeat">
+
+        <button class="btn btn-success mt-3 w-100">Registrieren</button>
+    </form>
+
+    <a href="/login.html" class="btn btn-outline-primary mt-3 w-100">
+        Bereits registriert? Login
+    </a>
+</div>
+
+<script src="js/register_config.js"></script>
+
+</body>
+</html>

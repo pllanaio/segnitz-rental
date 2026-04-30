@@ -258,19 +258,6 @@ function validateStep2() {
 }
 
 function validateStep3() {
-    const createAccount = document.getElementById('CreateCustomerAccount').checked;
-    const registerBtn = document.getElementById('registerBtn');
-
-    if (createAccount && !registerBtn.disabled) {
-        alert('Bitte zuerst registrieren.');
-        return false;
-    }
-
-    if (!customerEmailVerified) {
-    alert('Bitte bestätigen Sie zuerst Ihre E-Mail-Adresse.');
-    return false;
-}
-
     return true;
 }
 
