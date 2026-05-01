@@ -18,6 +18,7 @@ let guestEmailVerified = false;
 let rentalProducts = [];
 let currentProductPage = 1;
 const productsPerPage = 12;
+let filteredRentalProducts = [];
 
 let current_step = 0;
 let stepCount = 5;
@@ -635,6 +636,7 @@ async function loadRentalProducts() {
         const products = await response.json();
 
         rentalProducts = products.filter(product => product.is_active === 1);
+        filteredRentalProducts = [...rentalProducts];
         currentProductPage = 1;
 
         renderProductPage();
@@ -710,6 +712,7 @@ function renderProductPage() {
     productGrid.innerHTML = '';
 
     if (rentalProducts.length === 0) {
+        const productsForPage = filteredRentalProducts.slice(startIndex, endIndex);
         productGrid.innerHTML = `
             <div class="alert alert-warning">
                 Aktuell sind keine Produkte verfügbar.
@@ -732,7 +735,7 @@ function renderProductPage() {
 
 function renderProductPagination() {
     const pagination = document.getElementById('productPagination');
-    const totalPages = Math.ceil(rentalProducts.length / productsPerPage);
+    const totalPages = Math.ceil(filteredRentalProducts.length / productsPerPage);
 
     pagination.innerHTML = '';
 
@@ -782,3 +785,29 @@ function renderProductPagination() {
 
     pagination.appendChild(nextBtn);
 }
+
+document.addEventListener('DOMContentLoaded', () => {
+    const searchInput = document.getElementById('productSearchInput');
+
+    if (!searchInput) return;
+
+    searchInput.addEventListener('input', () => {
+        const query = searchInput.value.trim().toLowerCase();
+
+        filteredRentalProducts = rentalProducts.filter(product => {
+            return [
+                product.title,
+                product.description,
+                product.product_key,
+                product.price_per_day,
+                product.deposit
+            ]
+                .join(' ')
+                .toLowerCase()
+                .includes(query);
+        });
+
+        currentProductPage = 1;
+        renderProductPage();
+    });
+});

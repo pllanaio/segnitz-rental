@@ -1,4 +1,5 @@
 let products = [];
+let filteredProducts = [];
 
 document.addEventListener('DOMContentLoaded', () => {
     const form = document.getElementById('productForm');
@@ -9,6 +10,30 @@ document.addEventListener('DOMContentLoaded', () => {
 
     form.addEventListener('submit', saveProduct);
     cancelEditBtn.addEventListener('click', resetForm);
+
+    const backendSearchInput = document.getElementById('backendProductSearchInput');
+
+if (backendSearchInput) {
+    backendSearchInput.addEventListener('input', () => {
+        const query = backendSearchInput.value.trim().toLowerCase();
+
+        filteredProducts = products.filter(product => {
+            return [
+                product.title,
+                product.description,
+                product.product_key,
+                product.price_per_day,
+                product.deposit,
+                product.is_active ? 'aktiv' : 'inaktiv'
+            ]
+                .join(' ')
+                .toLowerCase()
+                .includes(query);
+        });
+
+        renderBackendProductList();
+    });
+}
 });
 
 async function loadProducts() {
@@ -17,21 +42,29 @@ async function loadProducts() {
     try {
         const response = await fetch('/products');
         products = await response.json();
+        filteredProducts = [...products];
 
-        productList.innerHTML = '';
+        renderBackendProductList();
 
-        if (products.length === 0) {
-            productList.innerHTML = '<div class="alert alert-info">Noch keine Produkte angelegt.</div>';
-            return;
-        }
-
-        products.forEach(product => {
-            productList.appendChild(createProductCard(product));
-        });
     } catch (error) {
         console.error('Fehler beim Laden der Produkte:', error);
         showMessage('Produkte konnten nicht geladen werden.', 'danger');
     }
+}
+
+function renderBackendProductList() {
+    const productList = document.getElementById('productList');
+
+    productList.innerHTML = '';
+
+    if (filteredProducts.length === 0) {
+        productList.innerHTML = '<div class="alert alert-info">Keine Produkte gefunden.</div>';
+        return;
+    }
+
+    filteredProducts.forEach(product => {
+        productList.appendChild(createProductCard(product));
+    });
 }
 
 function createProductCard(product) {
