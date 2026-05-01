@@ -731,31 +731,93 @@ app.get('/products', async (req, res) => {
 app.post('/products', checkAdmin, async (req, res) => {
     const { productKey, title, description, pricePerDay, deposit, imagePath } = req.body;
 
-    const connection = await mysql.createConnection(dbConfig);
-    await connection.execute(
-        `INSERT INTO rental_products 
-        (product_key, title, description, price_per_day, deposit, image_path)
-        VALUES (?, ?, ?, ?, ?, ?)`,
-        [productKey, title, description, pricePerDay, deposit, imagePath]
-    );
-    await connection.end();
+    const normalizedPricePerDay = Number(String(pricePerDay).replace(',', '.'));
+    const normalizedDeposit = Number(String(deposit).replace(',', '.'));
 
-    res.status(201).json({ message: 'Produkt erstellt' });
+    if (!productKey || !title) {
+        return res.status(400).json({ error: 'Produkt-Key und Titel sind Pflichtfelder.' });
+    }
+
+    if (
+        Number.isNaN(normalizedPricePerDay) ||
+        Number.isNaN(normalizedDeposit) ||
+        normalizedPricePerDay < 0 ||
+        normalizedDeposit < 0 ||
+        normalizedPricePerDay > 999999.99 ||
+        normalizedDeposit > 999999.99
+    ) {
+        return res.status(400).json({
+            error: 'Preis und Kaution müssen zwischen 0 und 999999.99 liegen.'
+        });
+    }
+
+    let connection;
+
+    try {
+        connection = await mysql.createConnection(dbConfig);
+
+        await connection.execute(
+            `INSERT INTO rental_products 
+            (product_key, title, description, price_per_day, deposit, image_path)
+            VALUES (?, ?, ?, ?, ?, ?)`,
+            [productKey, title, description, normalizedPricePerDay, normalizedDeposit, imagePath]
+        );
+
+        res.status(201).json({ message: 'Produkt erstellt' });
+    } catch (error) {
+        console.error('Fehler beim Erstellen des Produkts:', error);
+        res.status(500).json({ error: 'Produkt konnte nicht gespeichert werden.' });
+    } finally {
+        if (connection) {
+            await connection.end();
+        }
+    }
 });
 
 app.put('/products/:id', checkAdmin, async (req, res) => {
     const { title, description, pricePerDay, deposit, imagePath, isActive } = req.body;
 
-    const connection = await mysql.createConnection(dbConfig);
-    await connection.execute(
-        `UPDATE rental_products
-         SET title = ?, description = ?, price_per_day = ?, deposit = ?, image_path = ?, is_active = ?
-         WHERE id = ?`,
-        [title, description, pricePerDay, deposit, imagePath, isActive ? 1 : 0, req.params.id]
-    );
-    await connection.end();
+    const normalizedPricePerDay = Number(String(pricePerDay).replace(',', '.'));
+    const normalizedDeposit = Number(String(deposit).replace(',', '.'));
 
-    res.json({ message: 'Produkt aktualisiert' });
+    if (!title) {
+        return res.status(400).json({ error: 'Titel ist ein Pflichtfeld.' });
+    }
+
+    if (
+        Number.isNaN(normalizedPricePerDay) ||
+        Number.isNaN(normalizedDeposit) ||
+        normalizedPricePerDay < 0 ||
+        normalizedDeposit < 0 ||
+        normalizedPricePerDay > 999999.99 ||
+        normalizedDeposit > 999999.99
+    ) {
+        return res.status(400).json({
+            error: 'Preis und Kaution müssen zwischen 0 und 999999.99 liegen.'
+        });
+    }
+
+    let connection;
+
+    try {
+        connection = await mysql.createConnection(dbConfig);
+
+        await connection.execute(
+            `UPDATE rental_products
+             SET title = ?, description = ?, price_per_day = ?, deposit = ?, image_path = ?, is_active = ?
+             WHERE id = ?`,
+            [title, description, normalizedPricePerDay, normalizedDeposit, imagePath, isActive ? 1 : 0, req.params.id]
+        );
+
+        res.json({ message: 'Produkt aktualisiert' });
+    } catch (error) {
+        console.error('Fehler beim Aktualisieren des Produkts:', error);
+        res.status(500).json({ error: 'Produkt konnte nicht aktualisiert werden.' });
+    } finally {
+        if (connection) {
+            await connection.end();
+        }
+    }
 });
 
 app.delete('/products/:id', checkAdmin, async (req, res) => {
