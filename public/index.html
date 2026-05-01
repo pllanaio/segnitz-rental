@@ -73,6 +73,7 @@
                 </div>
 
                 <div id="qbox-container_form" class="flex-grow-1 w-100 p-4 p-lg-5">
+                    <form id="productSearchForm" onsubmit="return false;"></form>
                     <form class="needs-validation" id="form-wrapper" method="post" name="form-wrapper" novalidate="">
 
                         <div id="steps-container">
@@ -81,7 +82,7 @@
                                     <h4 class="mb-0">Wählen Sie ein Produkt zur Vermietung aus</h4>
 
                                     <input type="search" id="productSearchInput" class="form-control w-auto"
-                                        placeholder="Produkt suchen...">
+                                        placeholder="Produkt suchen..." form="productSearchForm">
                                 </div>
 
                                 <input type="hidden" name="RentalProduct" id="RentalProduct">
