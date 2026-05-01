@@ -1038,6 +1038,32 @@ app.delete('/product-images/:id', checkAdmin, async (req, res) => {
     }
 });
 
+async function getOrCreateActiveCart(connection, req) {
+    const sessionId = req.sessionID;
+
+    const [existingCarts] = await connection.execute(
+        `SELECT id 
+         FROM carts 
+         WHERE session_id = ? 
+         AND status = 'active'
+         ORDER BY created_at DESC
+         LIMIT 1`,
+        [sessionId]
+    );
+
+    if (existingCarts.length > 0) {
+        return existingCarts[0].id;
+    }
+
+    const [result] = await connection.execute(
+        `INSERT INTO carts (session_id, status)
+         VALUES (?, 'active')`,
+        [sessionId]
+    );
+
+    return result.insertId;
+}
+
 app.listen(3000, () => {
     console.log(
         "*********** Segnitz Rental System ***********"
