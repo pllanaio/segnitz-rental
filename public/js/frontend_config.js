@@ -277,40 +277,11 @@ document.addEventListener("DOMContentLoaded", () => {
         });
 });
 
-document.querySelectorAll('.product-card').forEach(card => {
-    card.addEventListener('click', () => {
-        document
-            .querySelectorAll('.product-card')
-            .forEach(c => c.classList.remove('selected'));
-
-        card.classList.add('selected');
-
-        document.getElementById('RentalProduct').value =
-            card.dataset.product;
-    });
-});
-
 let selectedProductCard = null;
 
 document.addEventListener("DOMContentLoaded", () => {
     const modalElement = document.getElementById('productDetailsModal');
     const selectProductFromModalBtn = document.getElementById('selectProductFromModal');
-
-    document.querySelectorAll('.product-card').forEach(card => {
-        card.addEventListener('click', () => {
-            selectProductCard(card);
-        });
-
-        const detailsButton = card.querySelector('.product-details-btn');
-
-        if (detailsButton) {
-            detailsButton.addEventListener('click', (event) => {
-                event.stopPropagation();
-                selectedProductCard = card;
-                showProductDetails(card);
-            });
-        }
-    });
 
     if (selectProductFromModalBtn) {
         selectProductFromModalBtn.addEventListener('click', () => {
@@ -617,4 +588,79 @@ function validateSignatureStep() {
     }
 
     return isValid;
+}
+
+document.addEventListener('DOMContentLoaded', loadRentalProducts);
+
+async function loadRentalProducts() {
+    const productGrid = document.getElementById('productGrid');
+
+    if (!productGrid) return;
+
+    try {
+        const response = await fetch('/products');
+        const products = await response.json();
+
+        const activeProducts = products.filter(product => product.is_active === 1);
+
+        productGrid.innerHTML = '';
+
+        if (activeProducts.length === 0) {
+            productGrid.innerHTML = `
+                <div class="alert alert-warning">
+                    Aktuell sind keine Produkte verfügbar.
+                </div>
+            `;
+            return;
+        }
+
+        activeProducts.forEach(product => {
+            productGrid.appendChild(createRentalProductCard(product));
+        });
+
+    } catch (error) {
+        console.error('Fehler beim Laden der Produkte:', error);
+        productGrid.innerHTML = `
+            <div class="alert alert-danger">
+                Produkte konnten nicht geladen werden.
+            </div>
+        `;
+    }
+}
+
+function createRentalProductCard(product) {
+    const card = document.createElement('div');
+
+    card.className = 'product-card';
+    card.dataset.product = product.product_key;
+    card.dataset.title = product.title;
+    card.dataset.description = product.description || '';
+    card.dataset.price = `${Number(product.price_per_day).toFixed(2)} € / Tag`;
+    card.dataset.deposit = `${Number(product.deposit).toFixed(2)} €`;
+    card.dataset.image = product.image_path || '';
+
+    card.innerHTML = `
+        ${product.image_path ? `<img src="${product.image_path}" alt="${product.title}">` : ''}
+        <h5>${product.title}</h5>
+        <p>${product.description || ''}</p>
+        <button type="button" class="btn btn-outline-primary btn-sm product-details-btn">
+            Details anzeigen
+        </button>
+    `;
+
+    card.addEventListener('click', () => {
+        selectProductCard(card);
+    });
+
+    const detailsButton = card.querySelector('.product-details-btn');
+
+    if (detailsButton) {
+        detailsButton.addEventListener('click', event => {
+            event.stopPropagation();
+            selectedProductCard = card;
+            showProductDetails(card);
+        });
+    }
+
+    return card;
 }
