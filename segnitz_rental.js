@@ -755,9 +755,9 @@ app.get('/products', async (req, res) => {
         );
 
         const [images] = await connection.execute(
-            `SELECT id, image_path, sort_order
-             FROM rental_product_images
-             ORDER BY product_id ASC, sort_order ASC, id ASC`
+            `SELECT id, product_id, image_path, sort_order
+            FROM rental_product_images
+            ORDER BY product_id ASC, sort_order ASC, id ASC`
         );
 
         const productsWithImages = products.map(product => {
