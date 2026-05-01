@@ -53,6 +53,16 @@ async function getOrCreateActiveCart(connection, req) {
     );
 
     if (existingCart.length > 0) {
+        if (userEmail) {
+            await connection.execute(
+                `UPDATE rental_carts
+             SET user_email = ?
+             WHERE id = ?
+             AND user_email IS NULL`,
+                [userEmail, existingCart[0].id]
+            );
+        }
+
         return existingCart[0].id;
     }
 
@@ -63,10 +73,6 @@ async function getOrCreateActiveCart(connection, req) {
     );
 
     return result.insertId;
-}
-
-function datesOverlap(startA, endA, startB, endB) {
-    return startA <= endB && endA >= startB;
 }
 
 async function checkProductAvailability(connection, productId, rentalStart, rentalEnd, excludeCartItemId = null) {
@@ -86,28 +92,7 @@ async function checkProductAvailability(connection, productId, rentalStart, rent
         return false;
     }
 
-    let cartSql = `
-        SELECT ci.id
-        FROM rental_cart_items ci
-        JOIN rental_carts c ON c.id = ci.cart_id
-        WHERE ci.product_id = ?
-        AND c.status = 'active'
-        AND ci.rental_start <= ?
-        AND ci.rental_end >= ?
-    `;
-
-    const params = [productId, rentalEnd, rentalStart];
-
-    if (excludeCartItemId) {
-        cartSql += ` AND ci.id != ?`;
-        params.push(excludeCartItemId);
-    }
-
-    cartSql += ` LIMIT 1`;
-
-    const [cartConflicts] = await connection.execute(cartSql, params);
-
-    return cartConflicts.length === 0;
+    return true;
 }
 
 const productImageStorage = multer.diskStorage({
@@ -1364,175 +1349,6 @@ app.delete('/cart/items/:id', async (req, res) => {
         if (connection) {
             await connection.end();
         }
-    }
-});
-
-async function getOrCreateActiveCart(connection, req) {
-    const sessionId = req.sessionID;
-
-    const [existingCarts] = await connection.execute(
-        `SELECT id 
-         FROM carts 
-         WHERE session_id = ? 
-         AND status = 'active'
-         ORDER BY created_at DESC
-         LIMIT 1`,
-        [sessionId]
-    );
-
-    if (existingCarts.length > 0) {
-        return existingCarts[0].id;
-    }
-
-    const [result] = await connection.execute(
-        `INSERT INTO carts (session_id, status)
-         VALUES (?, 'active')`,
-        [sessionId]
-    );
-
-    return result.insertId;
-}
-
-app.get('/cart', async (req, res) => {
-    let connection;
-
-    try {
-        connection = await mysql.createConnection(dbConfig);
-        const cartId = await getOrCreateActiveCart(connection, req);
-
-        const [items] = await connection.execute(
-            `SELECT 
-                ci.id AS cart_item_id,
-                ci.product_id,
-                ci.quantity,
-                ci.rental_start,
-                ci.rental_end,
-                ci.price_per_day,
-                ci.deposit,
-                rp.title,
-                rp.product_key
-             FROM cart_items ci
-             JOIN rental_products rp ON rp.id = ci.product_id
-             WHERE ci.cart_id = ?
-             ORDER BY ci.created_at ASC`,
-            [cartId]
-        );
-
-        res.json({
-            cartId,
-            items
-        });
-    } catch (error) {
-        console.error('Fehler beim Laden des Warenkorbs:', error);
-        res.status(500).json({ error: 'Warenkorb konnte nicht geladen werden.' });
-    } finally {
-        if (connection) await connection.end();
-    }
-});
-
-app.post('/cart/items', async (req, res) => {
-    const { productId, rentalStart, rentalEnd, quantity } = req.body;
-
-    if (!productId || !rentalStart || !rentalEnd) {
-        return res.status(400).json({ error: 'Produkt und Mietzeitraum sind erforderlich.' });
-    }
-
-    if (new Date(rentalEnd) < new Date(rentalStart)) {
-        return res.status(400).json({ error: 'Das Mietende darf nicht vor dem Mietbeginn liegen.' });
-    }
-
-    let connection;
-
-    try {
-        connection = await mysql.createConnection(dbConfig);
-        const cartId = await getOrCreateActiveCart(connection, req);
-
-        const [products] = await connection.execute(
-            `SELECT id, price_per_day, deposit 
-             FROM rental_products 
-             WHERE id = ? 
-             AND is_active = 1`,
-            [productId]
-        );
-
-        if (products.length === 0) {
-            return res.status(404).json({ error: 'Produkt nicht gefunden oder nicht aktiv.' });
-        }
-
-        const product = products[0];
-
-        await connection.execute(
-            `INSERT INTO cart_items
-             (cart_id, product_id, quantity, rental_start, rental_end, price_per_day, deposit)
-             VALUES (?, ?, ?, ?, ?, ?, ?)`,
-            [
-                cartId,
-                productId,
-                quantity || 1,
-                rentalStart,
-                rentalEnd,
-                product.price_per_day,
-                product.deposit
-            ]
-        );
-
-        res.status(201).json({ message: 'Produkt wurde in den Warenkorb gelegt.' });
-    } catch (error) {
-        console.error('Fehler beim Hinzufügen zum Warenkorb:', error);
-        res.status(500).json({ error: 'Produkt konnte nicht in den Warenkorb gelegt werden.' });
-    } finally {
-        if (connection) await connection.end();
-    }
-});
-
-app.put('/cart/items/:id', async (req, res) => {
-    const { quantity, rentalStart, rentalEnd } = req.body;
-    const cartItemId = req.params.id;
-
-    if (!quantity || quantity < 1) {
-        return res.status(400).json({ error: 'Die Menge muss mindestens 1 sein.' });
-    }
-
-    if (!rentalStart || !rentalEnd) {
-        return res.status(400).json({ error: 'Mietbeginn und Mietende sind erforderlich.' });
-    }
-
-    if (new Date(rentalEnd) < new Date(rentalStart)) {
-        return res.status(400).json({ error: 'Das Mietende darf nicht vor dem Mietbeginn liegen.' });
-    }
-
-    let connection;
-
-    try {
-        connection = await mysql.createConnection(dbConfig);
-        const cartId = await getOrCreateActiveCart(connection, req);
-
-        const [existingItems] = await connection.execute(
-            `SELECT id 
-             FROM cart_items 
-             WHERE id = ? 
-             AND cart_id = ?`,
-            [cartItemId, cartId]
-        );
-
-        if (existingItems.length === 0) {
-            return res.status(404).json({ error: 'Warenkorbposition nicht gefunden.' });
-        }
-
-        await connection.execute(
-            `UPDATE cart_items
-             SET quantity = ?, rental_start = ?, rental_end = ?
-             WHERE id = ?
-             AND cart_id = ?`,
-            [quantity, rentalStart, rentalEnd, cartItemId, cartId]
-        );
-
-        res.json({ message: 'Warenkorbposition aktualisiert.' });
-    } catch (error) {
-        console.error('Fehler beim Aktualisieren der Warenkorbposition:', error);
-        res.status(500).json({ error: 'Warenkorbposition konnte nicht aktualisiert werden.' });
-    } finally {
-        if (connection) await connection.end();
     }
 });
 
