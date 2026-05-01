@@ -115,8 +115,16 @@ async function saveProduct(event) {
         await uploadProductImages(savedProductId);
 
         showMessage(result.message || 'Produkt gespeichert.', 'success');
-        resetForm();
-        loadProducts();
+
+        await loadProducts();
+
+        const updatedProduct = products.find(product => product.id == savedProductId);
+
+        if (updatedProduct) {
+            editProduct(updatedProduct.id);
+        }
+
+        document.getElementById('productImages').value = '';
     } catch (error) {
         console.error('Fehler beim Speichern:', error);
         showMessage('Fehler beim Speichern des Produkts.', 'danger');
@@ -161,12 +169,15 @@ function renderExistingImages(product) {
 
     product.images.forEach(image => {
         const col = document.createElement('div');
-        col.className = 'col-6 col-md-3';
+        col.className = 'col-6 col-md-3 draggable-image';
+        col.draggable = true;
+        col.dataset.imageId = image.id;
 
         col.innerHTML = `
-            <div class="card">
+            <div class="card h-100">
                 <img src="${image.path}" class="card-img-top" style="height:120px; object-fit:cover;">
                 <div class="card-body p-2">
+                    <small class="text-muted d-block mb-2">Ziehen zum Sortieren</small>
                     <button type="button" class="btn btn-danger btn-sm w-100">
                         Löschen
                     </button>
@@ -178,8 +189,93 @@ function renderExistingImages(product) {
             deleteProductImage(image.id, product.id);
         });
 
+        addImageDragEvents(col, product.id);
+
         container.appendChild(col);
     });
+}
+
+let draggedImageElement = null;
+
+function addImageDragEvents(element, productId) {
+    element.addEventListener('dragstart', () => {
+        draggedImageElement = element;
+        element.classList.add('dragging');
+    });
+
+    element.addEventListener('dragend', async () => {
+        element.classList.remove('dragging');
+        draggedImageElement = null;
+
+        await saveImageOrder(productId);
+    });
+
+    element.addEventListener('dragover', event => {
+        event.preventDefault();
+
+        const container = document.getElementById('existingImages');
+        const afterElement = getDragAfterElement(container, event.clientY);
+
+        if (!draggedImageElement) return;
+
+        if (afterElement == null) {
+            container.appendChild(draggedImageElement);
+        } else {
+            container.insertBefore(draggedImageElement, afterElement);
+        }
+    });
+}
+
+function getDragAfterElement(container, y) {
+    const draggableElements = [
+        ...container.querySelectorAll('.draggable-image:not(.dragging)')
+    ];
+
+    return draggableElements.reduce((closest, child) => {
+        const box = child.getBoundingClientRect();
+        const offset = y - box.top - box.height / 2;
+
+        if (offset < 0 && offset > closest.offset) {
+            return {
+                offset,
+                element: child
+            };
+        }
+
+        return closest;
+    }, {
+        offset: Number.NEGATIVE_INFINITY
+    }).element;
+}
+
+async function saveImageOrder(productId) {
+    const imageIds = [
+        ...document.querySelectorAll('#existingImages .draggable-image')
+    ].map(element => Number(element.dataset.imageId));
+
+    try {
+        const response = await fetch(`/products/${productId}/images/order`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ imageIds })
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+            showMessage(result.error || 'Bildreihenfolge konnte nicht gespeichert werden.', 'danger');
+            return;
+        }
+
+        showMessage('Bildreihenfolge gespeichert.', 'success');
+        await loadProducts();
+
+    } catch (error) {
+        console.error('Fehler beim Speichern der Bildreihenfolge:', error);
+        showMessage('Fehler beim Speichern der Bildreihenfolge.', 'danger');
+    }
 }
 
 async function deleteProductImage(imageId, productId) {
