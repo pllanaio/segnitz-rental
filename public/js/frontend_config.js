@@ -810,4 +810,10 @@ document.addEventListener('DOMContentLoaded', () => {
         currentProductPage = 1;
         renderProductPage();
     });
+
+    searchInput.addEventListener('keydown', event => {
+        if (event.key === 'Enter') {
+            event.preventDefault();
+        }
+    });
 });
