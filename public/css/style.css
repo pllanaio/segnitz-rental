@@ -483,3 +483,14 @@ body {
         grid-template-columns: 1fr;
     }
 }
+
+.product-card {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+.modal-product-image {
+    height: 320px;
+    object-fit: cover;
+}
