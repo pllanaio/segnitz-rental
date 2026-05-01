@@ -28,6 +28,31 @@ const dbConfig = {
     password: process.env.DB_PW,
     database: process.env.DB_NAME
 };
+const multer = require('multer');
+
+const productImageStorage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        cb(null, path.join(__dirname, 'public', 'img', 'products'));
+    },
+    filename: (req, file, cb) => {
+        const ext = path.extname(file.originalname).toLowerCase();
+        cb(null, `product_${Date.now()}_${Math.round(Math.random() * 1E9)}${ext}`);
+    }
+});
+
+const uploadProductImages = multer({
+    storage: productImageStorage,
+    limits: {
+        fileSize: 5 * 1024 * 1024,
+        files: 10
+    },
+    fileFilter: (req, file, cb) => {
+        if (!file.mimetype.startsWith('image/')) {
+            return cb(new Error('Nur Bilddateien erlaubt.'));
+        }
+        cb(null, true);
+    }
+});
 
 // Session Middleware konfigurieren
 app.use(session({
@@ -831,7 +856,48 @@ app.delete('/products/:id', checkAdmin, async (req, res) => {
     res.json({ message: 'Produkt gelöscht' });
 });
 
+app.post('/products/:id/images', checkAdmin, uploadProductImages.array('images', 10), async (req, res) => {
+    const productId = req.params.id;
 
+    let connection;
+
+    try {
+        connection = await mysql.createConnection(dbConfig);
+
+        const [existingImages] = await connection.execute(
+            'SELECT COUNT(*) AS count FROM rental_product_images WHERE product_id = ?',
+            [productId]
+        );
+
+        const existingCount = existingImages[0].count;
+        const uploadCount = req.files.length;
+
+        if (existingCount + uploadCount > 10) {
+            return res.status(400).json({
+                error: 'Maximal 10 Bilder pro Produkt erlaubt.'
+            });
+        }
+
+        for (let i = 0; i < req.files.length; i++) {
+            const imagePath = `img/products/${req.files[i].filename}`;
+
+            await connection.execute(
+                `INSERT INTO rental_product_images 
+                 (product_id, image_path, sort_order)
+                 VALUES (?, ?, ?)`,
+                [productId, imagePath, existingCount + i]
+            );
+        }
+
+        res.json({ message: 'Bilder erfolgreich hochgeladen.' });
+
+    } catch (error) {
+        console.error('Fehler beim Bilderupload:', error);
+        res.status(500).json({ error: 'Bilder konnten nicht hochgeladen werden.' });
+    } finally {
+        if (connection) await connection.end();
+    }
+});
 
 app.listen(3000, () => {
     console.log(
