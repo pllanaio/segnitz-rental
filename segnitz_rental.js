@@ -755,7 +755,7 @@ app.get('/products', async (req, res) => {
         );
 
         const [images] = await connection.execute(
-            `SELECT product_id, image_path, sort_order
+            `SELECT id, image_path, sort_order
              FROM rental_product_images
              ORDER BY product_id ASC, sort_order ASC, id ASC`
         );
@@ -763,12 +763,15 @@ app.get('/products', async (req, res) => {
         const productsWithImages = products.map(product => {
             const productImages = images
                 .filter(image => image.product_id === product.id)
-                .map(image => image.image_path);
+                .map(image => ({
+                    id: image.id,
+                    path: image.image_path
+                }));
 
             return {
                 ...product,
                 images: productImages,
-                image_path: productImages[0] || product.image_path || ''
+                image_path: productImages[0]?.path || product.image_path || ''
             };
         });
 
@@ -877,14 +880,49 @@ app.put('/products/:id', checkAdmin, async (req, res) => {
 });
 
 app.delete('/products/:id', checkAdmin, async (req, res) => {
-    const connection = await mysql.createConnection(dbConfig);
-    await connection.execute(
-        'DELETE FROM rental_products WHERE id = ?',
-        [req.params.id]
-    );
-    await connection.end();
+    let connection;
 
-    res.json({ message: 'Produkt gelöscht' });
+    try {
+        connection = await mysql.createConnection(dbConfig);
+
+        // 1. Alle Bilder vorher holen
+        const [images] = await connection.execute(
+            'SELECT image_path FROM rental_product_images WHERE product_id = ?',
+            [req.params.id]
+        );
+
+        // 2. Produkt löschen (CASCADE löscht DB-Bilder)
+        await connection.execute(
+            'DELETE FROM rental_products WHERE id = ?',
+            [req.params.id]
+        );
+
+        // 3. Dateien auf der Festplatte löschen
+        for (const image of images) {
+            const filePath = path.join(__dirname, 'public', image.image_path);
+
+            try {
+                if (fs.existsSync(filePath)) {
+                    fs.unlinkSync(filePath);
+                    console.log('Bild gelöscht:', filePath);
+                } else {
+                    console.warn('Datei nicht gefunden:', filePath);
+                }
+            } catch (fileError) {
+                console.error('Fehler beim Löschen der Datei:', filePath, fileError);
+            }
+        }
+
+        res.json({ message: 'Produkt und Bilder gelöscht.' });
+
+    } catch (error) {
+        console.error('Fehler beim Löschen des Produkts:', error);
+        res.status(500).json({ error: 'Produkt konnte nicht gelöscht werden.' });
+    } finally {
+        if (connection) {
+            await connection.end();
+        }
+    }
 });
 
 app.post('/products/:id/images', checkAdmin, uploadProductImages.array('images', 10), async (req, res) => {
@@ -925,6 +963,41 @@ app.post('/products/:id/images', checkAdmin, uploadProductImages.array('images',
     } catch (error) {
         console.error('Fehler beim Bilderupload:', error);
         res.status(500).json({ error: 'Bilder konnten nicht hochgeladen werden.' });
+    } finally {
+        if (connection) await connection.end();
+    }
+});
+
+app.delete('/product-images/:id', checkAdmin, async (req, res) => {
+    let connection;
+
+    try {
+        connection = await mysql.createConnection(dbConfig);
+
+        const [rows] = await connection.execute(
+            'SELECT image_path FROM rental_product_images WHERE id = ?',
+            [req.params.id]
+        );
+
+        if (rows.length === 0) {
+            return res.status(404).json({ error: 'Bild nicht gefunden.' });
+        }
+
+        const imagePath = path.join(__dirname, 'public', rows[0].image_path);
+
+        await connection.execute(
+            'DELETE FROM rental_product_images WHERE id = ?',
+            [req.params.id]
+        );
+
+        if (fs.existsSync(imagePath)) {
+            fs.unlinkSync(imagePath);
+        }
+
+        res.json({ message: 'Bild gelöscht.' });
+    } catch (error) {
+        console.error('Fehler beim Löschen des Bildes:', error);
+        res.status(500).json({ error: 'Bild konnte nicht gelöscht werden.' });
     } finally {
         if (connection) await connection.end();
     }
