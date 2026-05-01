@@ -30,6 +30,86 @@ const dbConfig = {
 };
 const multer = require('multer');
 
+function getCartSessionKey(req) {
+    if (!req.session.cartKey) {
+        req.session.cartKey = crypto.randomUUID();
+    }
+
+    return req.session.cartKey;
+}
+
+async function getOrCreateActiveCart(connection, req) {
+    const sessionKey = getCartSessionKey(req);
+    const userEmail = req.session.user || null;
+
+    const [existingCart] = await connection.execute(
+        `SELECT id
+         FROM rental_carts
+         WHERE status = 'active'
+         AND (session_id = ? OR user_email = ?)
+         ORDER BY id DESC
+         LIMIT 1`,
+        [sessionKey, userEmail]
+    );
+
+    if (existingCart.length > 0) {
+        return existingCart[0].id;
+    }
+
+    const [result] = await connection.execute(
+        `INSERT INTO rental_carts (session_id, user_email)
+         VALUES (?, ?)`,
+        [sessionKey, userEmail]
+    );
+
+    return result.insertId;
+}
+
+function datesOverlap(startA, endA, startB, endB) {
+    return startA <= endB && endA >= startB;
+}
+
+async function checkProductAvailability(connection, productId, rentalStart, rentalEnd, excludeCartItemId = null) {
+    const [orderConflicts] = await connection.execute(
+        `SELECT roi.id
+         FROM rental_order_items roi
+         JOIN rental_orders ro ON ro.id = roi.order_id
+         WHERE roi.product_id = ?
+         AND ro.status NOT IN ('cancelled', 'returned')
+         AND roi.rental_start <= ?
+         AND roi.rental_end >= ?
+         LIMIT 1`,
+        [productId, rentalEnd, rentalStart]
+    );
+
+    if (orderConflicts.length > 0) {
+        return false;
+    }
+
+    let cartSql = `
+        SELECT ci.id
+        FROM rental_cart_items ci
+        JOIN rental_carts c ON c.id = ci.cart_id
+        WHERE ci.product_id = ?
+        AND c.status = 'active'
+        AND ci.rental_start <= ?
+        AND ci.rental_end >= ?
+    `;
+
+    const params = [productId, rentalEnd, rentalStart];
+
+    if (excludeCartItemId) {
+        cartSql += ` AND ci.id != ?`;
+        params.push(excludeCartItemId);
+    }
+
+    cartSql += ` LIMIT 1`;
+
+    const [cartConflicts] = await connection.execute(cartSql, params);
+
+    return cartConflicts.length === 0;
+}
+
 const productImageStorage = multer.diskStorage({
     destination: (req, file, cb) => {
         cb(null, path.join(__dirname, 'public', 'img', 'products'));
@@ -784,6 +864,37 @@ app.get('/products', async (req, res) => {
     }
 });
 
+app.get('/products/:id/availability', async (req, res) => {
+    let connection;
+
+    try {
+        connection = await mysql.createConnection(dbConfig);
+
+        const [blockedPeriods] = await connection.execute(
+            `SELECT 
+                roi.rental_start AS rentalStart,
+                roi.rental_end AS rentalEnd
+             FROM rental_order_items roi
+             JOIN rental_orders ro ON ro.id = roi.order_id
+             WHERE roi.product_id = ?
+             AND ro.status NOT IN ('cancelled', 'returned')
+             ORDER BY roi.rental_start ASC`,
+            [req.params.id]
+        );
+
+        res.json(blockedPeriods);
+    } catch (error) {
+        console.error('Fehler beim Laden der Produktverfügbarkeit:', error);
+        res.status(500).json({
+            error: 'Produktverfügbarkeit konnte nicht geladen werden.'
+        });
+    } finally {
+        if (connection) {
+            await connection.end();
+        }
+    }
+});
+
 app.post('/products', checkAdmin, async (req, res) => {
     const { productKey, title, description, pricePerDay, deposit, imagePath } = req.body;
 
@@ -1035,6 +1146,224 @@ app.delete('/product-images/:id', checkAdmin, async (req, res) => {
         res.status(500).json({ error: 'Bild konnte nicht gelöscht werden.' });
     } finally {
         if (connection) await connection.end();
+    }
+});
+
+app.get('/cart', async (req, res) => {
+    let connection;
+
+    try {
+        connection = await mysql.createConnection(dbConfig);
+        const cartId = await getOrCreateActiveCart(connection, req);
+
+        const [items] = await connection.execute(
+            `SELECT 
+                ci.id,
+                ci.product_id AS productId,
+                ci.rental_start AS rentalStart,
+                ci.rental_end AS rentalEnd,
+                ci.quantity,
+                p.product_key AS productKey,
+                p.title,
+                p.description,
+                p.price_per_day AS pricePerDay,
+                p.deposit,
+                p.image_path AS imagePath
+             FROM rental_cart_items ci
+             JOIN rental_products p ON p.id = ci.product_id
+             WHERE ci.cart_id = ?
+             ORDER BY ci.id ASC`,
+            [cartId]
+        );
+
+        res.json({
+            cartId,
+            items
+        });
+    } catch (error) {
+        console.error('Fehler beim Laden des Warenkorbs:', error);
+        res.status(500).json({
+            error: 'Warenkorb konnte nicht geladen werden.'
+        });
+    } finally {
+        if (connection) {
+            await connection.end();
+        }
+    }
+});
+
+app.post('/cart/items', async (req, res) => {
+    const { productId, rentalStart, rentalEnd } = req.body;
+
+    if (!productId || !rentalStart || !rentalEnd) {
+        return res.status(400).json({
+            error: 'Produkt, Mietbeginn und Mietende sind Pflichtfelder.'
+        });
+    }
+
+    if (new Date(rentalEnd) < new Date(rentalStart)) {
+        return res.status(400).json({
+            error: 'Das Mietende darf nicht vor dem Mietbeginn liegen.'
+        });
+    }
+
+    let connection;
+
+    try {
+        connection = await mysql.createConnection(dbConfig);
+
+        const [products] = await connection.execute(
+            `SELECT id
+             FROM rental_products
+             WHERE id = ?
+             AND is_active = 1`,
+            [productId]
+        );
+
+        if (products.length === 0) {
+            return res.status(404).json({
+                error: 'Produkt wurde nicht gefunden oder ist nicht aktiv.'
+            });
+        }
+
+        const isAvailable = await checkProductAvailability(
+            connection,
+            productId,
+            rentalStart,
+            rentalEnd
+        );
+
+        if (!isAvailable) {
+            return res.status(409).json({
+                error: 'Das Produkt ist im ausgewählten Zeitraum nicht verfügbar.'
+            });
+        }
+
+        const cartId = await getOrCreateActiveCart(connection, req);
+
+        const [result] = await connection.execute(
+            `INSERT INTO rental_cart_items
+             (cart_id, product_id, rental_start, rental_end, quantity)
+             VALUES (?, ?, ?, ?, 1)`,
+            [cartId, productId, rentalStart, rentalEnd]
+        );
+
+        res.status(201).json({
+            message: 'Produkt wurde zum Warenkorb hinzugefügt.',
+            itemId: result.insertId
+        });
+    } catch (error) {
+        console.error('Fehler beim Hinzufügen zum Warenkorb:', error);
+        res.status(500).json({
+            error: 'Produkt konnte nicht zum Warenkorb hinzugefügt werden.'
+        });
+    } finally {
+        if (connection) {
+            await connection.end();
+        }
+    }
+});
+
+app.put('/cart/items/:id', async (req, res) => {
+    const { rentalStart, rentalEnd } = req.body;
+
+    if (!rentalStart || !rentalEnd) {
+        return res.status(400).json({
+            error: 'Mietbeginn und Mietende sind Pflichtfelder.'
+        });
+    }
+
+    if (new Date(rentalEnd) < new Date(rentalStart)) {
+        return res.status(400).json({
+            error: 'Das Mietende darf nicht vor dem Mietbeginn liegen.'
+        });
+    }
+
+    let connection;
+
+    try {
+        connection = await mysql.createConnection(dbConfig);
+
+        const cartId = await getOrCreateActiveCart(connection, req);
+
+        const [items] = await connection.execute(
+            `SELECT id, product_id
+             FROM rental_cart_items
+             WHERE id = ?
+             AND cart_id = ?`,
+            [req.params.id, cartId]
+        );
+
+        if (items.length === 0) {
+            return res.status(404).json({
+                error: 'Warenkorbposition wurde nicht gefunden.'
+            });
+        }
+
+        const isAvailable = await checkProductAvailability(
+            connection,
+            items[0].product_id,
+            rentalStart,
+            rentalEnd,
+            req.params.id
+        );
+
+        if (!isAvailable) {
+            return res.status(409).json({
+                error: 'Das Produkt ist im ausgewählten Zeitraum nicht verfügbar.'
+            });
+        }
+
+        await connection.execute(
+            `UPDATE rental_cart_items
+             SET rental_start = ?, rental_end = ?
+             WHERE id = ?
+             AND cart_id = ?`,
+            [rentalStart, rentalEnd, req.params.id, cartId]
+        );
+
+        res.json({
+            message: 'Warenkorbposition wurde aktualisiert.'
+        });
+    } catch (error) {
+        console.error('Fehler beim Aktualisieren der Warenkorbposition:', error);
+        res.status(500).json({
+            error: 'Warenkorbposition konnte nicht aktualisiert werden.'
+        });
+    } finally {
+        if (connection) {
+            await connection.end();
+        }
+    }
+});
+
+app.delete('/cart/items/:id', async (req, res) => {
+    let connection;
+
+    try {
+        connection = await mysql.createConnection(dbConfig);
+
+        const cartId = await getOrCreateActiveCart(connection, req);
+
+        await connection.execute(
+            `DELETE FROM rental_cart_items
+             WHERE id = ?
+             AND cart_id = ?`,
+            [req.params.id, cartId]
+        );
+
+        res.json({
+            message: 'Warenkorbposition wurde gelöscht.'
+        });
+    } catch (error) {
+        console.error('Fehler beim Löschen der Warenkorbposition:', error);
+        res.status(500).json({
+            error: 'Warenkorbposition konnte nicht gelöscht werden.'
+        });
+    } finally {
+        if (connection) {
+            await connection.end();
+        }
     }
 });
 
