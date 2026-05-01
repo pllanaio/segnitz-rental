@@ -138,11 +138,79 @@ function editProduct(id) {
     document.getElementById('pricePerDay').value = product.price_per_day;
     document.getElementById('deposit').value = product.deposit;
     document.getElementById('isActive').checked = product.is_active === 1;
+    renderExistingImages(product);
 
     document.getElementById('saveProductBtn').textContent = 'Änderungen speichern';
     document.getElementById('cancelEditBtn').classList.remove('d-none');
 
     window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function renderExistingImages(product) {
+    const wrapper = document.getElementById('existingImagesWrapper');
+    const container = document.getElementById('existingImages');
+
+    container.innerHTML = '';
+
+    if (!product.images || product.images.length === 0) {
+        wrapper.classList.add('d-none');
+        return;
+    }
+
+    wrapper.classList.remove('d-none');
+
+    product.images.forEach(image => {
+        const col = document.createElement('div');
+        col.className = 'col-6 col-md-3';
+
+        col.innerHTML = `
+            <div class="card">
+                <img src="${image.path}" class="card-img-top" style="height:120px; object-fit:cover;">
+                <div class="card-body p-2">
+                    <button type="button" class="btn btn-danger btn-sm w-100">
+                        Löschen
+                    </button>
+                </div>
+            </div>
+        `;
+
+        col.querySelector('button').addEventListener('click', () => {
+            deleteProductImage(image.id, product.id);
+        });
+
+        container.appendChild(col);
+    });
+}
+
+async function deleteProductImage(imageId, productId) {
+    if (!confirm('Bild wirklich löschen?')) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/product-images/${imageId}`, {
+            method: 'DELETE'
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+            showMessage(result.error || 'Bild konnte nicht gelöscht werden.', 'danger');
+            return;
+        }
+
+        showMessage(result.message || 'Bild gelöscht.', 'success');
+
+        await loadProducts();
+
+        const updatedProduct = products.find(product => product.id === productId);
+        if (updatedProduct) {
+            renderExistingImages(updatedProduct);
+        }
+    } catch (error) {
+        console.error('Fehler beim Löschen des Bildes:', error);
+        showMessage('Fehler beim Löschen des Bildes.', 'danger');
+    }
 }
 
 async function deleteProduct(id) {
@@ -177,6 +245,8 @@ function resetForm() {
     document.getElementById('isActive').checked = true;
     document.getElementById('saveProductBtn').textContent = 'Produkt speichern';
     document.getElementById('cancelEditBtn').classList.add('d-none');
+    document.getElementById('existingImagesWrapper').classList.add('d-none');
+    document.getElementById('existingImages').innerHTML = '';
 }
 
 function showMessage(message, type) {
