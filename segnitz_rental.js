@@ -1156,6 +1156,94 @@ app.post('/cart/items', async (req, res) => {
     }
 });
 
+app.put('/cart/items/:id', async (req, res) => {
+    const { quantity, rentalStart, rentalEnd } = req.body;
+    const cartItemId = req.params.id;
+
+    if (!quantity || quantity < 1) {
+        return res.status(400).json({ error: 'Die Menge muss mindestens 1 sein.' });
+    }
+
+    if (!rentalStart || !rentalEnd) {
+        return res.status(400).json({ error: 'Mietbeginn und Mietende sind erforderlich.' });
+    }
+
+    if (new Date(rentalEnd) < new Date(rentalStart)) {
+        return res.status(400).json({ error: 'Das Mietende darf nicht vor dem Mietbeginn liegen.' });
+    }
+
+    let connection;
+
+    try {
+        connection = await mysql.createConnection(dbConfig);
+        const cartId = await getOrCreateActiveCart(connection, req);
+
+        const [existingItems] = await connection.execute(
+            `SELECT id 
+             FROM cart_items 
+             WHERE id = ? 
+             AND cart_id = ?`,
+            [cartItemId, cartId]
+        );
+
+        if (existingItems.length === 0) {
+            return res.status(404).json({ error: 'Warenkorbposition nicht gefunden.' });
+        }
+
+        await connection.execute(
+            `UPDATE cart_items
+             SET quantity = ?, rental_start = ?, rental_end = ?
+             WHERE id = ?
+             AND cart_id = ?`,
+            [quantity, rentalStart, rentalEnd, cartItemId, cartId]
+        );
+
+        res.json({ message: 'Warenkorbposition aktualisiert.' });
+    } catch (error) {
+        console.error('Fehler beim Aktualisieren der Warenkorbposition:', error);
+        res.status(500).json({ error: 'Warenkorbposition konnte nicht aktualisiert werden.' });
+    } finally {
+        if (connection) await connection.end();
+    }
+});
+
+app.delete('/cart/items/:id', async (req, res) => {
+    const cartItemId = req.params.id;
+
+    let connection;
+
+    try {
+        connection = await mysql.createConnection(dbConfig);
+        const cartId = await getOrCreateActiveCart(connection, req);
+
+        const [existingItems] = await connection.execute(
+            `SELECT id 
+             FROM cart_items 
+             WHERE id = ? 
+             AND cart_id = ?`,
+            [cartItemId, cartId]
+        );
+
+        if (existingItems.length === 0) {
+            return res.status(404).json({ error: 'Warenkorbposition nicht gefunden.' });
+        }
+
+        await connection.execute(
+            `DELETE FROM cart_items
+             WHERE id = ?
+             AND cart_id = ?`,
+            [cartItemId, cartId]
+        );
+
+        res.json({ message: 'Produkt wurde aus dem Warenkorb entfernt.' });
+    } catch (error) {
+        console.error('Fehler beim Löschen der Warenkorbposition:', error);
+        res.status(500).json({ error: 'Warenkorbposition konnte nicht gelöscht werden.' });
+    } finally {
+        if (connection) await connection.end();
+    }
+});
+
 app.listen(3000, () => {
     console.log(
         "*********** Segnitz Rental System ***********"
