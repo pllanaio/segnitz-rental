@@ -968,6 +968,41 @@ app.post('/products/:id/images', checkAdmin, uploadProductImages.array('images',
     }
 });
 
+app.put('/products/:id/images/order', checkAdmin, async (req, res) => {
+    const productId = req.params.id;
+    const { imageIds } = req.body;
+
+    if (!Array.isArray(imageIds)) {
+        return res.status(400).json({ error: 'Ungültige Bildreihenfolge.' });
+    }
+
+    if (imageIds.length > 10) {
+        return res.status(400).json({ error: 'Maximal 10 Bilder pro Produkt erlaubt.' });
+    }
+
+    let connection;
+
+    try {
+        connection = await mysql.createConnection(dbConfig);
+
+        for (let index = 0; index < imageIds.length; index++) {
+            await connection.execute(
+                `UPDATE rental_product_images
+                 SET sort_order = ?
+                 WHERE id = ? AND product_id = ?`,
+                [index, imageIds[index], productId]
+            );
+        }
+
+        res.json({ message: 'Bildreihenfolge gespeichert.' });
+    } catch (error) {
+        console.error('Fehler beim Speichern der Bildreihenfolge:', error);
+        res.status(500).json({ error: 'Bildreihenfolge konnte nicht gespeichert werden.' });
+    } finally {
+        if (connection) await connection.end();
+    }
+});
+
 app.delete('/product-images/:id', checkAdmin, async (req, res) => {
     let connection;
 

@@ -494,3 +494,11 @@ body {
     height: 320px;
     object-fit: cover;
 }
+
+.draggable-image {
+    cursor: grab;
+}
+
+.draggable-image.dragging {
+    opacity: 0.5;
+}
