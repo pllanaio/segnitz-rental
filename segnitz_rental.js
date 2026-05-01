@@ -781,13 +781,6 @@ app.post('/products', checkAdmin, async (req, res) => {
     try {
         connection = await mysql.createConnection(dbConfig);
 
-        await connection.execute(
-            `INSERT INTO rental_products 
-            (product_key, title, description, price_per_day, deposit, image_path)
-            VALUES (?, ?, ?, ?, ?, ?)`,
-            [productKey, title, description, normalizedPricePerDay, normalizedDeposit, imagePath]
-        );
-
         const [result] = await connection.execute(
             `INSERT INTO rental_products 
     (product_key, title, description, price_per_day, deposit, image_path)

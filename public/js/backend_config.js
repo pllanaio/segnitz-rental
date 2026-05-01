@@ -113,7 +113,7 @@ async function saveProduct(event) {
         const savedProductId = productId || result.productId;
 
         await uploadProductImages(savedProductId);
-        
+
         showMessage(result.message || 'Produkt gespeichert.', 'success');
         resetForm();
         loadProducts();
@@ -202,6 +202,35 @@ function loadBackendUser() {
             console.error('Auth-Status Fehler:', err);
             backendLoginStatus.textContent = 'Benutzer konnte nicht geladen werden';
         });
+}
+
+async function uploadProductImages(productId) {
+    const imageInput = document.getElementById('productImages');
+
+    if (!imageInput || imageInput.files.length === 0) {
+        return;
+    }
+
+    if (imageInput.files.length > 10) {
+        throw new Error('Maximal 10 Bilder pro Produkt erlaubt.');
+    }
+
+    const formData = new FormData();
+
+    Array.from(imageInput.files).forEach(file => {
+        formData.append('images', file);
+    });
+
+    const response = await fetch(`/products/${productId}/images`, {
+        method: 'POST',
+        body: formData
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+        throw new Error(result.error || 'Bilder konnten nicht hochgeladen werden.');
+    }
 }
 
 function logout() {
