@@ -1352,43 +1352,6 @@ app.delete('/cart/items/:id', async (req, res) => {
     }
 });
 
-app.delete('/cart/items/:id', async (req, res) => {
-    const cartItemId = req.params.id;
-
-    let connection;
-
-    try {
-        connection = await mysql.createConnection(dbConfig);
-        const cartId = await getOrCreateActiveCart(connection, req);
-
-        const [existingItems] = await connection.execute(
-            `SELECT id 
-             FROM cart_items 
-             WHERE id = ? 
-             AND cart_id = ?`,
-            [cartItemId, cartId]
-        );
-
-        if (existingItems.length === 0) {
-            return res.status(404).json({ error: 'Warenkorbposition nicht gefunden.' });
-        }
-
-        await connection.execute(
-            `DELETE FROM cart_items
-             WHERE id = ?
-             AND cart_id = ?`,
-            [cartItemId, cartId]
-        );
-
-        res.json({ message: 'Produkt wurde aus dem Warenkorb entfernt.' });
-    } catch (error) {
-        console.error('Fehler beim Löschen der Warenkorbposition:', error);
-        res.status(500).json({ error: 'Warenkorbposition konnte nicht gelöscht werden.' });
-    } finally {
-        if (connection) await connection.end();
-    }
-});
-
 app.listen(3000, () => {
     console.log(
         "*********** Segnitz Rental System ***********"
