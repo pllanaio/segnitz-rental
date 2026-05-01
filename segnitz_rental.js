@@ -745,12 +745,40 @@ app.get('/my-profile', async (req, res) => {
 });
 
 app.get('/products', async (req, res) => {
-    const connection = await mysql.createConnection(dbConfig);
-    const [rows] = await connection.execute(
-        'SELECT * FROM rental_products ORDER BY title ASC'
-    );
-    await connection.end();
-    res.json(rows);
+    let connection;
+
+    try {
+        connection = await mysql.createConnection(dbConfig);
+
+        const [products] = await connection.execute(
+            'SELECT * FROM rental_products ORDER BY title ASC'
+        );
+
+        const [images] = await connection.execute(
+            `SELECT product_id, image_path, sort_order
+             FROM rental_product_images
+             ORDER BY product_id ASC, sort_order ASC, id ASC`
+        );
+
+        const productsWithImages = products.map(product => {
+            const productImages = images
+                .filter(image => image.product_id === product.id)
+                .map(image => image.image_path);
+
+            return {
+                ...product,
+                images: productImages,
+                image_path: productImages[0] || product.image_path || ''
+            };
+        });
+
+        res.json(productsWithImages);
+    } catch (error) {
+        console.error('Fehler beim Laden der Produkte:', error);
+        res.status(500).json({ error: 'Produkte konnten nicht geladen werden.' });
+    } finally {
+        if (connection) await connection.end();
+    }
 });
 
 app.post('/products', checkAdmin, async (req, res) => {
