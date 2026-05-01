@@ -1327,10 +1327,10 @@ app.delete('/cart/items/:id', async (req, res) => {
 
     try {
         connection = await mysql.createConnection(dbConfig);
-        const [result] = await connection.execute(...);
+
         const cartId = await getOrCreateActiveCart(connection, req);
 
-        await connection.execute(
+        const [result] = await connection.execute(
             `DELETE FROM rental_cart_items
              WHERE id = ?
              AND cart_id = ?`,
