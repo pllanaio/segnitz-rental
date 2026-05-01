@@ -277,6 +277,21 @@
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
+                    <div id="modalProductCarouselWrapper" class="mb-3 d-none">
+                        <div id="modalProductCarousel" class="carousel slide" data-bs-ride="carousel">
+                            <div class="carousel-inner" id="modalProductCarouselInner"></div>
+
+                            <button class="carousel-control-prev" type="button" data-bs-target="#modalProductCarousel"
+                                data-bs-slide="prev">
+                                <span class="carousel-control-prev-icon"></span>
+                            </button>
+
+                            <button class="carousel-control-next" type="button" data-bs-target="#modalProductCarousel"
+                                data-bs-slide="next">
+                                <span class="carousel-control-next-icon"></span>
+                            </button>
+                        </div>
+                    </div>
                     <h5 id="modalProductTitle"></h5>
                     <p id="modalProductDescription"></p>
                     <p><strong>Preis:</strong> <span id="modalProductPrice"></span></p>

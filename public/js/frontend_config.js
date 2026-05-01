@@ -316,6 +316,36 @@ function showProductDetails(card) {
     document.getElementById('modalProductPrice').textContent = card.dataset.price;
     document.getElementById('modalProductDeposit').textContent = card.dataset.deposit;
 
+    const carouselWrapper = document.getElementById('modalProductCarouselWrapper');
+    const carouselInner = document.getElementById('modalProductCarouselInner');
+
+    let images = [];
+
+    try {
+        images = JSON.parse(card.dataset.images || '[]');
+    } catch (error) {
+        images = [];
+    }
+
+    carouselInner.innerHTML = '';
+
+    if (images.length > 0) {
+        images.forEach((imagePath, index) => {
+            const item = document.createElement('div');
+            item.className = index === 0 ? 'carousel-item active' : 'carousel-item';
+
+            item.innerHTML = `
+                <img src="${imagePath}" class="d-block w-100 rounded modal-product-image" alt="${card.dataset.title}">
+            `;
+
+            carouselInner.appendChild(item);
+        });
+
+        carouselWrapper.classList.remove('d-none');
+    } else {
+        carouselWrapper.classList.add('d-none');
+    }
+
     const modal = new bootstrap.Modal(document.getElementById('productDetailsModal'));
     modal.show();
 }
@@ -622,8 +652,8 @@ async function loadRentalProducts() {
 function createRentalProductCard(product) {
     const card = document.createElement('div');
     const firstImage = product.images && product.images.length > 0
-    ? product.images[0]
-    : product.image_path;
+        ? product.images[0]
+        : product.image_path;
 
     card.className = 'product-card';
     card.dataset.product = product.product_key;
@@ -635,14 +665,22 @@ function createRentalProductCard(product) {
     card.dataset.images = JSON.stringify(product.images || []);
 
     card.innerHTML = `
-        ${firstImage ? `<img src="${firstImage}" alt="${product.title}">` : ''}
+    ${firstImage ? `<img src="${firstImage}" alt="${product.title}">` : ''}
 
-        <h5>${product.title}</h5>
-        <p>${product.description || ''}</p>
+    <h5 class="mt-2">${product.title}</h5>
+
+    <p class="mb-2">${product.description || ''}</p>
+
+    <div class="d-flex justify-content-between align-items-end mt-auto">
         <button type="button" class="btn btn-outline-primary btn-sm product-details-btn">
             Details anzeigen
         </button>
-    `;
+
+        <span class="fw-bold text-end">
+            ${Number(product.price_per_day).toFixed(2)} € / Tag
+        </span>
+    </div>
+`;
 
     card.addEventListener('click', () => {
         selectProductCard(card);
