@@ -59,50 +59,68 @@
                     </button>
                 </a>
             </aside>
-
             <main class="col-12 col-md-9 col-xl-10 p-4 p-lg-5">
-                <div id="qbox-container_form" class="w-100">
-                    <form class="needs-validation" id="form-wrapper" method="post" name="form-wrapper" novalidate=""
-                        onsubmit="event.preventDefault();">
+    <div id="qbox-container_form" class="w-100">
+        <h4 class="mb-4">Produkte verwalten</h4>
 
-                        <div id="steps-container">
-                            <div class="step d-block">
-                                <h4 class="mb-4">Datenbank bearbeiten</h4>
+        <div id="productMessage" class="alert d-none"></div>
 
-                                <div class="row">
-                                    <div class="col-12 col-lg-6">
-                                        <select name="DBType" id="DBType" class="form-select">
-                                            <option selected disabled hidden>Datenbank auswählen...</option>
-                                            <option value="material">Material</option>
-                                            <option value="monteure">Monteure</option>
-                                        </select>
-                                    </div>
-                                </div>
+        <form id="productForm" class="mb-5">
+            <input type="hidden" id="productId">
 
-                                <br>
-
-                                <div id="inputGroup" style="display: none;" class="input-group col-12 col-lg-6">
-                                    <input type="text" id="db_edit" class="form-control"
-                                        placeholder="Neuen Eintrag hinzufügen" aria-label="Neuen Eintrag hinzufügen">
-                                    <button class="btn btn-success" type="button" id="addButton">
-                                        Hinzufügen
-                                    </button>
-                                </div>
-
-                                <br>
-
-                                <h4>
-                                    Verfügbare Optionen:
-                                    <span id="itemCount">0</span>
-                                </h4>
-
-                                <div id="selectedOptionsContainer"></div>
-                            </div>
-                        </div>
-                    </form>
+            <div class="row g-3">
+                <div class="col-12 col-lg-4">
+                    <label class="form-label" for="productKey">Produkt-Key</label>
+                    <input type="text" class="form-control" id="productKey" placeholder="z.B. bautrockner">
                 </div>
-            </main>
 
+                <div class="col-12 col-lg-8">
+                    <label class="form-label" for="title">Titel</label>
+                    <input type="text" class="form-control" id="title" placeholder="z.B. Bautrockner">
+                </div>
+
+                <div class="col-12">
+                    <label class="form-label" for="description">Beschreibung</label>
+                    <textarea class="form-control" id="description" rows="3"></textarea>
+                </div>
+
+                <div class="col-12 col-lg-4">
+                    <label class="form-label" for="pricePerDay">Preis pro Tag</label>
+                    <input type="number" step="0.01" class="form-control" id="pricePerDay">
+                </div>
+
+                <div class="col-12 col-lg-4">
+                    <label class="form-label" for="deposit">Kaution</label>
+                    <input type="number" step="0.01" class="form-control" id="deposit">
+                </div>
+
+                <div class="col-12 col-lg-4">
+                    <label class="form-label" for="imagePath">Bildpfad</label>
+                    <input type="text" class="form-control" id="imagePath" placeholder="img/products/bautrockner.jpg">
+                </div>
+
+                <div class="col-12">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="isActive" checked>
+                        <label class="form-check-label" for="isActive">Produkt aktiv</label>
+                    </div>
+                </div>
+
+                <div class="col-12">
+                    <button type="submit" class="btn btn-success" id="saveProductBtn">
+                        Produkt speichern
+                    </button>
+                    <button type="button" class="btn btn-secondary d-none" id="cancelEditBtn">
+                        Bearbeiten abbrechen
+                    </button>
+                </div>
+            </div>
+        </form>
+
+        <h5 class="mb-3">Vorhandene Produkte</h5>
+        <div id="productList"></div>
+    </div>
+</main>            
         </div>
     </div>
     <div id="preloader-wrapper">

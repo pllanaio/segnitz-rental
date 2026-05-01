@@ -1,189 +1,191 @@
-document.addEventListener('DOMContentLoaded', function () {
-    var select = document.getElementById("DBType");
-    var selectedOptionsContainer = document.getElementById(
-        "selectedOptionsContainer"
-    );
-    var addButton = document.getElementById("addButton");
-    var inputField = inputGroup.querySelector('input');
-    var form = document.getElementById('form-wrapper');
+let products = [];
 
-    form.addEventListener('submit', function (event) {
-        event.preventDefault(); // Verhindert das Formular-Submit
-        var inputValue = document
-            .querySelector('#inputGroup input')
-            .value
-            .trim();
-        if (inputValue) {
-            addNewItem(inputValue);
-        } else {
-            alert('Bitte geben Sie einen Wert ein!');
-        }
-    });
+document.addEventListener('DOMContentLoaded', () => {
+    const form = document.getElementById('productForm');
+    const cancelEditBtn = document.getElementById('cancelEditBtn');
 
-    select.addEventListener('change', function () {
-        if (this.value) {
-            inputGroup.style.display = 'flex'; // Zeige das Eingabefeld an
-            inputGroup.style.width = '100%'
-        } else {
-            inputGroup.style.display = 'none'; // Verstecke das Eingabefeld
-        }
-        updateSelectedOptions(this.value); // Aktualisiere die Optionen wie zuvor
-    });
+    loadBackendUser();
+    loadProducts();
 
-    addButton.addEventListener('click', function () {
-        var inputValue = inputField
-            .value
-            .trim();
-        if (!inputValue) {
-            alert('Bitte geben Sie einen Wert ein!');
-            return;
-        }
-        addNewItem(inputValue);
-    });
-
-    function addNewItem(item) {
-        var selectedDB = select.value;
-        var endpoint = selectedDB === 'material' ?
-            '/add-material' :
-            '/add-worker';
-        fetch(endpoint, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    name: item
-                })
-            })
-            .then(response => {
-                if (response.ok) {
-                    alert('Eintrag erfolgreich hinzugefügt');
-                    updateSelectedOptions(selectedDB); // Refresh the options
-                    inputField.value = ''; // Clear the input field
-                } else {
-                    alert('Fehler beim Hinzufügen des Eintrags');
-                }
-            })
-            .catch(error => {
-                console.error('Fehler beim Hinzufügen des Eintrags:', error);
-                alert('Fehler beim Hinzufügen des Eintrags');
-            });
-    }
-
-    function updateSelectedOptions(selectedValue) {
-        selectedOptionsContainer.innerHTML = ''; // Clear previous options
-        var itemCountSpan = document.getElementById('itemCount'); // Element für die Anzeige der Anzahl
-
-        if (selectedValue === "material") {
-            fetch('/materials')
-                .then(response => response.json())
-                .then(materialData => {
-                    //console.log('Materialoptionen aus der Datenbank:', materialData);
-                    itemCountSpan.textContent = materialData.length; // Aktualisiert die Anzahl der Einträge
-                    materialData.forEach(material => {
-                        var buttonGroup = createButtonGroup(material);
-                        selectedOptionsContainer.appendChild(buttonGroup);
-                        selectedOptionsContainer.appendChild(document.createElement('br'));
-                    });
-                })
-                .catch(error => {
-                    console.error('Fehler beim Abrufen der Materialdaten:', error);
-                    selectedOptionsContainer.textContent = 'Fehler beim Abrufen der Materialdaten';
-                    itemCountSpan.textContent = '0'; // Zurücksetzen auf 0 bei einem Fehler
-                });
-        } else if (selectedValue === "monteure") {
-            fetch('/workers')
-                .then(response => response.json())
-                .then(workData => {
-                    //console.log('Monteuroptionen aus der Datenbank:', workData);
-                    itemCountSpan.textContent = workData.length; // Aktualisiert die Anzahl der Einträge
-                    workData.forEach(worker => {
-                        var buttonGroup = createButtonGroup(worker);
-                        selectedOptionsContainer.appendChild(buttonGroup);
-                        selectedOptionsContainer.appendChild(document.createElement('br'));
-                    });
-                })
-                .catch(error => {
-                    console.error('Fehler beim Abrufen der Monteurdaten:', error);
-                    selectedOptionsContainer.textContent = 'Fehler beim Abrufen der Monteurdaten';
-                    itemCountSpan.textContent = '0'; // Zurücksetzen auf 0 bei einem Fehler
-                });
-        }
-    }
-
-    function createButtonGroup(item) {
-        var div = document.createElement('div');
-        div.className = 'btn-group d-flex';
-        div.style.width = '100%'; // Setzt die Breite der Button-Group auf 100%
-
-        var button = document.createElement('button');
-        button.className = 'btn btn-primary';
-        button.style.width = '75%'; // Setzt die Breite des Hauptbuttons auf 75%
-        button.textContent = item;
-
-        var deleteButton = document.createElement('button');
-        deleteButton.className = 'btn btn-danger';
-        deleteButton.style.width = '25%'; // Setzt die Breite des Löschbuttons auf 25%
-        deleteButton.textContent = 'Löschen';
-        deleteButton.addEventListener('click', function (event) {
-            event.preventDefault();
-            deleteItem(item);
-        });
-
-        div.appendChild(button);
-        div.appendChild(deleteButton);
-
-        return div;
-    }
-
-    function deleteItem(item) {
-        var selectedValue = select.value;
-        var endpoint = selectedValue === 'material' ?
-            '/delete-material' :
-            '/delete-worker';
-        fetch(endpoint, {
-                method: 'DELETE',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    name: item
-                })
-            })
-            .then(response => {
-                if (response.ok) {
-                    alert('Eintrag erfolgreich gelöscht');
-                    updateSelectedOptions(selectedValue); // Refresh the options
-                } else {
-                    alert('Fehler beim Löschen des Eintrags');
-                }
-            })
-            .catch(error => {
-                console.error('Fehler beim Löschen des Eintrags:', error);
-                alert('Fehler beim Löschen des Eintrags');
-            });
-    }
+    form.addEventListener('submit', saveProduct);
+    cancelEditBtn.addEventListener('click', resetForm);
 });
 
-function logout() {
-    fetch('/logout', {
-            method: 'POST'
-        })
-        .then(response => {
-            if (response.ok) {
-                // Optional: Weiterleitung zur Login-Seite oder Anzeige einer Bestätigung
-                window.location.href = 'index.html';
-            } else {
-                console.error('Fehler beim Logout');
-                alert('Fehler beim Abmelden');
-            }
-        })
-        .catch(error => {
-            console.error('Netzwerkfehler beim Versuch, sich abzumelden:', error);
+async function loadProducts() {
+    const productList = document.getElementById('productList');
+
+    try {
+        const response = await fetch('/products');
+        products = await response.json();
+
+        productList.innerHTML = '';
+
+        if (products.length === 0) {
+            productList.innerHTML = '<div class="alert alert-info">Noch keine Produkte angelegt.</div>';
+            return;
+        }
+
+        products.forEach(product => {
+            productList.appendChild(createProductCard(product));
         });
+    } catch (error) {
+        console.error('Fehler beim Laden der Produkte:', error);
+        showMessage('Produkte konnten nicht geladen werden.', 'danger');
+    }
 }
 
-document.addEventListener("DOMContentLoaded", () => {
+function createProductCard(product) {
+    const card = document.createElement('div');
+    card.className = 'card mb-3';
+
+    card.innerHTML = `
+        <div class="card-body">
+            <div class="row g-3 align-items-center">
+                <div class="col-12 col-md-2">
+                    ${product.image_path ? `<img src="${product.image_path}" class="img-fluid rounded" alt="${product.title}">` : ''}
+                </div>
+
+                <div class="col-12 col-md-6">
+                    <h5 class="mb-1">${product.title}</h5>
+                    <p class="mb-1 text-muted">${product.description || ''}</p>
+                    <small>
+                        Key: ${product.product_key}
+                        |
+                        Status: ${product.is_active ? 'Aktiv' : 'Inaktiv'}
+                    </small>
+                </div>
+
+                <div class="col-12 col-md-2">
+                    <strong>${Number(product.price_per_day).toFixed(2)} € / Tag</strong><br>
+                    <span>Kaution: ${Number(product.deposit).toFixed(2)} €</span>
+                </div>
+
+                <div class="col-12 col-md-2 text-md-end">
+                    <button type="button" class="btn btn-primary btn-sm mb-2 w-100" onclick="editProduct(${product.id})">
+                        Bearbeiten
+                    </button>
+                    <button type="button" class="btn btn-danger btn-sm w-100" onclick="deleteProduct(${product.id})">
+                        Löschen
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+
+    return card;
+}
+
+async function saveProduct(event) {
+    event.preventDefault();
+
+    const productId = document.getElementById('productId').value;
+
+    const payload = {
+        productKey: document.getElementById('productKey').value.trim(),
+        title: document.getElementById('title').value.trim(),
+        description: document.getElementById('description').value.trim(),
+        pricePerDay: Number(document.getElementById('pricePerDay').value),
+        deposit: Number(document.getElementById('deposit').value),
+        imagePath: document.getElementById('imagePath').value.trim(),
+        isActive: document.getElementById('isActive').checked
+    };
+
+    if (!payload.productKey || !payload.title) {
+        showMessage('Produkt-Key und Titel sind Pflichtfelder.', 'warning');
+        return;
+    }
+
+    try {
+        const response = await fetch(productId ? `/products/${productId}` : '/products', {
+            method: productId ? 'PUT' : 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+            showMessage(result.error || 'Produkt konnte nicht gespeichert werden.', 'danger');
+            return;
+        }
+
+        showMessage(result.message || 'Produkt gespeichert.', 'success');
+        resetForm();
+        loadProducts();
+    } catch (error) {
+        console.error('Fehler beim Speichern:', error);
+        showMessage('Fehler beim Speichern des Produkts.', 'danger');
+    }
+}
+
+function editProduct(id) {
+    const product = products.find(item => item.id === id);
+
+    if (!product) {
+        return;
+    }
+
+    document.getElementById('productId').value = product.id;
+    document.getElementById('productKey').value = product.product_key;
+    document.getElementById('productKey').disabled = true;
+    document.getElementById('title').value = product.title;
+    document.getElementById('description').value = product.description || '';
+    document.getElementById('pricePerDay').value = product.price_per_day;
+    document.getElementById('deposit').value = product.deposit;
+    document.getElementById('imagePath').value = product.image_path || '';
+    document.getElementById('isActive').checked = product.is_active === 1;
+
+    document.getElementById('saveProductBtn').textContent = 'Änderungen speichern';
+    document.getElementById('cancelEditBtn').classList.remove('d-none');
+
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+async function deleteProduct(id) {
+    if (!confirm('Produkt wirklich löschen?')) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/products/${id}`, {
+            method: 'DELETE'
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+            showMessage(result.error || 'Produkt konnte nicht gelöscht werden.', 'danger');
+            return;
+        }
+
+        showMessage(result.message || 'Produkt gelöscht.', 'success');
+        loadProducts();
+    } catch (error) {
+        console.error('Fehler beim Löschen:', error);
+        showMessage('Fehler beim Löschen des Produkts.', 'danger');
+    }
+}
+
+function resetForm() {
+    document.getElementById('productForm').reset();
+    document.getElementById('productId').value = '';
+    document.getElementById('productKey').disabled = false;
+    document.getElementById('isActive').checked = true;
+    document.getElementById('saveProductBtn').textContent = 'Produkt speichern';
+    document.getElementById('cancelEditBtn').classList.add('d-none');
+}
+
+function showMessage(message, type) {
+    const box = document.getElementById('productMessage');
+
+    box.className = `alert alert-${type}`;
+    box.textContent = message;
+    box.classList.remove('d-none');
+}
+
+function loadBackendUser() {
     const backendLoginStatus = document.getElementById('backend-login-status');
 
     if (!backendLoginStatus) return;
@@ -197,4 +199,20 @@ document.addEventListener("DOMContentLoaded", () => {
             console.error('Auth-Status Fehler:', err);
             backendLoginStatus.textContent = 'Benutzer konnte nicht geladen werden';
         });
-});
+}
+
+function logout() {
+    fetch('/logout', {
+        method: 'POST'
+    })
+        .then(response => {
+            if (response.ok) {
+                window.location.href = 'index.html';
+            } else {
+                alert('Fehler beim Abmelden');
+            }
+        })
+        .catch(error => {
+            console.error('Netzwerkfehler beim Logout:', error);
+        });
+}
