@@ -15,6 +15,9 @@ let bodyElement = document.querySelector('body');
 let succcessDiv = document.getElementById('success');
 let guestVerificationRequested = false;
 let guestEmailVerified = false;
+let rentalProducts = [];
+let currentProductPage = 1;
+const productsPerPage = 12;
 
 let current_step = 0;
 let stepCount = 5;
@@ -601,22 +604,10 @@ async function loadRentalProducts() {
         const response = await fetch('/products');
         const products = await response.json();
 
-        const activeProducts = products.filter(product => product.is_active === 1);
+        rentalProducts = products.filter(product => product.is_active === 1);
+        currentProductPage = 1;
 
-        productGrid.innerHTML = '';
-
-        if (activeProducts.length === 0) {
-            productGrid.innerHTML = `
-                <div class="alert alert-warning">
-                    Aktuell sind keine Produkte verfügbar.
-                </div>
-            `;
-            return;
-        }
-
-        activeProducts.forEach(product => {
-            productGrid.appendChild(createRentalProductCard(product));
-        });
+        renderProductPage();
 
     } catch (error) {
         console.error('Fehler beim Laden der Produkte:', error);
@@ -663,4 +654,84 @@ function createRentalProductCard(product) {
     }
 
     return card;
+}
+
+function renderProductPage() {
+    const productGrid = document.getElementById('productGrid');
+    const pagination = document.getElementById('productPagination');
+
+    productGrid.innerHTML = '';
+
+    if (rentalProducts.length === 0) {
+        productGrid.innerHTML = `
+            <div class="alert alert-warning">
+                Aktuell sind keine Produkte verfügbar.
+            </div>
+        `;
+        pagination.innerHTML = '';
+        return;
+    }
+
+    const startIndex = (currentProductPage - 1) * productsPerPage;
+    const endIndex = startIndex + productsPerPage;
+    const productsForPage = rentalProducts.slice(startIndex, endIndex);
+
+    productsForPage.forEach(product => {
+        productGrid.appendChild(createRentalProductCard(product));
+    });
+
+    renderProductPagination();
+}
+
+function renderProductPagination() {
+    const pagination = document.getElementById('productPagination');
+    const totalPages = Math.ceil(rentalProducts.length / productsPerPage);
+
+    pagination.innerHTML = '';
+
+    if (totalPages <= 1) {
+        return;
+    }
+
+    const prevBtn = document.createElement('button');
+    prevBtn.type = 'button';
+    prevBtn.className = 'btn btn-outline-primary btn-sm';
+    prevBtn.textContent = 'Zurück';
+    prevBtn.disabled = currentProductPage === 1;
+    prevBtn.addEventListener('click', () => {
+        currentProductPage--;
+        renderProductPage();
+    });
+
+    pagination.appendChild(prevBtn);
+
+    for (let page = 1; page <= totalPages; page++) {
+        const pageBtn = document.createElement('button');
+        pageBtn.type = 'button';
+        pageBtn.className =
+            page === currentProductPage
+                ? 'btn btn-primary btn-sm'
+                : 'btn btn-outline-primary btn-sm';
+
+        pageBtn.textContent = page;
+
+        pageBtn.addEventListener('click', () => {
+            currentProductPage = page;
+            renderProductPage();
+        });
+
+        pagination.appendChild(pageBtn);
+    }
+
+    const nextBtn = document.createElement('button');
+    nextBtn.type = 'button';
+    nextBtn.className = 'btn btn-outline-primary btn-sm';
+    nextBtn.textContent = 'Weiter';
+    nextBtn.disabled = currentProductPage === totalPages;
+    nextBtn.addEventListener('click', () => {
+        currentProductPage++;
+        renderProductPage();
+    });
+
+    pagination.appendChild(nextBtn);
 }
