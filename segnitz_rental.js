@@ -788,7 +788,17 @@ app.post('/products', checkAdmin, async (req, res) => {
             [productKey, title, description, normalizedPricePerDay, normalizedDeposit, imagePath]
         );
 
-        res.status(201).json({ message: 'Produkt erstellt' });
+        const [result] = await connection.execute(
+            `INSERT INTO rental_products 
+    (product_key, title, description, price_per_day, deposit, image_path)
+    VALUES (?, ?, ?, ?, ?, ?)`,
+            [productKey, title, description, normalizedPricePerDay, normalizedDeposit, imagePath]
+        );
+
+        res.status(201).json({
+            message: 'Produkt erstellt',
+            productId: result.insertId
+        });
     } catch (error) {
         console.error('Fehler beim Erstellen des Produkts:', error);
         res.status(500).json({ error: 'Produkt konnte nicht gespeichert werden.' });

@@ -110,7 +110,10 @@ async function saveProduct(event) {
             showMessage(result.error || 'Produkt konnte nicht gespeichert werden.', 'danger');
             return;
         }
+        const savedProductId = productId || result.productId;
 
+        await uploadProductImages(savedProductId);
+        
         showMessage(result.message || 'Produkt gespeichert.', 'success');
         resetForm();
         loadProducts();
