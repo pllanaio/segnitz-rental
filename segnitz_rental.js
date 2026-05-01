@@ -1327,7 +1327,7 @@ app.delete('/cart/items/:id', async (req, res) => {
 
     try {
         connection = await mysql.createConnection(dbConfig);
-
+        const [result] = await connection.execute(...);
         const cartId = await getOrCreateActiveCart(connection, req);
 
         await connection.execute(
@@ -1336,6 +1336,12 @@ app.delete('/cart/items/:id', async (req, res) => {
              AND cart_id = ?`,
             [req.params.id, cartId]
         );
+
+        if (result.affectedRows === 0) {
+            return res.status(404).json({
+                error: 'Warenkorbposition wurde nicht gefunden.'
+            });
+        }
 
         res.json({
             message: 'Warenkorbposition wurde gelöscht.'
