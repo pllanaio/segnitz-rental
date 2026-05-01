@@ -1064,6 +1064,98 @@ async function getOrCreateActiveCart(connection, req) {
     return result.insertId;
 }
 
+app.get('/cart', async (req, res) => {
+    let connection;
+
+    try {
+        connection = await mysql.createConnection(dbConfig);
+        const cartId = await getOrCreateActiveCart(connection, req);
+
+        const [items] = await connection.execute(
+            `SELECT 
+                ci.id AS cart_item_id,
+                ci.product_id,
+                ci.quantity,
+                ci.rental_start,
+                ci.rental_end,
+                ci.price_per_day,
+                ci.deposit,
+                rp.title,
+                rp.product_key
+             FROM cart_items ci
+             JOIN rental_products rp ON rp.id = ci.product_id
+             WHERE ci.cart_id = ?
+             ORDER BY ci.created_at ASC`,
+            [cartId]
+        );
+
+        res.json({
+            cartId,
+            items
+        });
+    } catch (error) {
+        console.error('Fehler beim Laden des Warenkorbs:', error);
+        res.status(500).json({ error: 'Warenkorb konnte nicht geladen werden.' });
+    } finally {
+        if (connection) await connection.end();
+    }
+});
+
+app.post('/cart/items', async (req, res) => {
+    const { productId, rentalStart, rentalEnd, quantity } = req.body;
+
+    if (!productId || !rentalStart || !rentalEnd) {
+        return res.status(400).json({ error: 'Produkt und Mietzeitraum sind erforderlich.' });
+    }
+
+    if (new Date(rentalEnd) < new Date(rentalStart)) {
+        return res.status(400).json({ error: 'Das Mietende darf nicht vor dem Mietbeginn liegen.' });
+    }
+
+    let connection;
+
+    try {
+        connection = await mysql.createConnection(dbConfig);
+        const cartId = await getOrCreateActiveCart(connection, req);
+
+        const [products] = await connection.execute(
+            `SELECT id, price_per_day, deposit 
+             FROM rental_products 
+             WHERE id = ? 
+             AND is_active = 1`,
+            [productId]
+        );
+
+        if (products.length === 0) {
+            return res.status(404).json({ error: 'Produkt nicht gefunden oder nicht aktiv.' });
+        }
+
+        const product = products[0];
+
+        await connection.execute(
+            `INSERT INTO cart_items
+             (cart_id, product_id, quantity, rental_start, rental_end, price_per_day, deposit)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [
+                cartId,
+                productId,
+                quantity || 1,
+                rentalStart,
+                rentalEnd,
+                product.price_per_day,
+                product.deposit
+            ]
+        );
+
+        res.status(201).json({ message: 'Produkt wurde in den Warenkorb gelegt.' });
+    } catch (error) {
+        console.error('Fehler beim Hinzufügen zum Warenkorb:', error);
+        res.status(500).json({ error: 'Produkt konnte nicht in den Warenkorb gelegt werden.' });
+    } finally {
+        if (connection) await connection.end();
+    }
+});
+
 app.listen(3000, () => {
     console.log(
         "*********** Segnitz Rental System ***********"
