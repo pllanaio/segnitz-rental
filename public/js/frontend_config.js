@@ -631,7 +631,7 @@ function createRentalProductCard(product) {
     card.dataset.description = product.description || '';
     card.dataset.price = `${Number(product.price_per_day).toFixed(2)} € / Tag`;
     card.dataset.deposit = `${Number(product.deposit).toFixed(2)} €`;
-    card.dataset.image = product.image_path || '';
+    card.dataset.image = firstImage || '';
     card.dataset.images = JSON.stringify(product.images || []);
 
     card.innerHTML = `
