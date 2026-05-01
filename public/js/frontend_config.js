@@ -711,8 +711,7 @@ function renderProductPage() {
 
     productGrid.innerHTML = '';
 
-    if (rentalProducts.length === 0) {
-        const productsForPage = filteredRentalProducts.slice(startIndex, endIndex);
+    if (filteredRentalProducts.length === 0) {
         productGrid.innerHTML = `
             <div class="alert alert-warning">
                 Aktuell sind keine Produkte verfügbar.
@@ -724,7 +723,7 @@ function renderProductPage() {
 
     const startIndex = (currentProductPage - 1) * productsPerPage;
     const endIndex = startIndex + productsPerPage;
-    const productsForPage = rentalProducts.slice(startIndex, endIndex);
+    const productsForPage = filteredRentalProducts.slice(startIndex, endIndex);
 
     productsForPage.forEach(product => {
         productGrid.appendChild(createRentalProductCard(product));
