@@ -621,6 +621,9 @@ async function loadRentalProducts() {
 
 function createRentalProductCard(product) {
     const card = document.createElement('div');
+    const firstImage = product.images && product.images.length > 0
+    ? product.images[0]
+    : product.image_path;
 
     card.className = 'product-card';
     card.dataset.product = product.product_key;
@@ -629,9 +632,11 @@ function createRentalProductCard(product) {
     card.dataset.price = `${Number(product.price_per_day).toFixed(2)} € / Tag`;
     card.dataset.deposit = `${Number(product.deposit).toFixed(2)} €`;
     card.dataset.image = product.image_path || '';
+    card.dataset.images = JSON.stringify(product.images || []);
 
     card.innerHTML = `
-        ${product.image_path ? `<img src="${product.image_path}" alt="${product.title}">` : ''}
+        ${firstImage ? `<img src="${firstImage}" alt="${product.title}">` : ''}
+
         <h5>${product.title}</h5>
         <p>${product.description || ''}</p>
         <button type="button" class="btn btn-outline-primary btn-sm product-details-btn">
