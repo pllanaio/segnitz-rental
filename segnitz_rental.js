@@ -2070,8 +2070,6 @@ app.delete('/cart/items/:id', async (req, res) => {
 
 cleanupOnStartup();
 
-cleanupOnStartup();
-
 setInterval(async () => {
     let connection;
 
