@@ -35,18 +35,6 @@
         style="z-index: 3000; width: 90%; max-width: 520px;">
     </div>
     <!-- CONTAINER -->
-    <ul class="nav nav-tabs mb-4" id="backendTabs">
-        <li class="nav-item">
-            <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#productsTab" type="button">
-                Produkte
-            </button>
-        </li>
-        <li class="nav-item">
-            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#ordersTab" type="button">
-                Bestellungen
-            </button>
-        </li>
-    </ul>
     <div class="container-fluid min-vh-100 p-0">
         <div class="row g-0 min-vh-100">
 
@@ -56,6 +44,20 @@
                 <h6>Konfiguration</h6>
 
                 <p id="backend-login-status" class="mt-4 small"></p>
+
+                <nav class="nav flex-column mt-4">
+                    <button class="btn btn-outline-light text-start mb-2 active" id="nav-products"
+                        onclick="switchBackendView('products')">
+                        <i class="bi bi-box-seam"></i>
+                        Produkte
+                    </button>
+
+                    <button class="btn btn-outline-light text-start mb-2" id="nav-orders"
+                        onclick="switchBackendView('orders')">
+                        <i class="bi bi-receipt"></i>
+                        Bestellungen
+                    </button>
+                </nav>
 
                 <p class="mt-4 mb-1">Zwergerstraße 2b<br>85579 Neubiberg</p>
                 <a class="text-white" href="mailto:info@segnitzbau.de">info@segnitzbau.de</a>
@@ -74,9 +76,11 @@
                     </button>
                 </a>
             </aside>
+
             <main class="col-12 col-md-9 col-xl-10 p-4 p-lg-5">
                 <div id="qbox-container_form" class="w-100">
-                    <div class="tab-pane fade show active" id="productsTab">
+
+                    <div id="productsView">
                         <h4 class="mb-4">Produkte verwalten</h4>
 
                         <div id="productMessage" class="alert d-none"></div>
@@ -141,27 +145,36 @@
                                     </button>
                                 </div>
                             </div>
-                    </div>
-                    </form>
+                        </form>
 
-                    <div class="d-flex justify-content-between align-items-center mb-3">
-                        <h5 class="mb-0">Vorhandene Produkte</h5>
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <h5 class="mb-0">Vorhandene Produkte</h5>
 
-                        <input type="search" id="backendProductSearchInput" class="form-control w-auto"
-                            placeholder="Produkt suchen...">
+                            <input type="search" id="backendProductSearchInput" class="form-control w-auto"
+                                placeholder="Produkt suchen...">
+                        </div>
+
+                        <div id="productList"></div>
                     </div>
-                    <div id="productList"></div>
-                    <div class="tab-pane fade" id="ordersTab">
+
+                    <div id="ordersView" class="d-none">
                         <div class="d-flex justify-content-between align-items-center mb-3">
                             <h4 class="mb-0">Bestellungen</h4>
+
                             <input type="search" id="orderSearchInput" class="form-control w-auto"
                                 placeholder="Bestellung suchen...">
                         </div>
 
-                        <div id="ordersList"></div>
+                        <div id="ordersList">
+                            <div class="alert alert-info">
+                                Bestellungen werden geladen...
+                            </div>
+                        </div>
                     </div>
+
                 </div>
             </main>
+
         </div>
     </div>
     <div id="preloader-wrapper">
