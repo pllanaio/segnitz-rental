@@ -1654,6 +1654,21 @@ app.get('/admin/orders/:id', checkAdmin, async (req, res) => {
             [req.params.id]
         );
 
+        let finalItems = items;
+
+        if (finalItems.length === 0 && orders[0].confirmation_json) {
+            try {
+                const confirmationJson =
+                    typeof orders[0].confirmation_json === 'string'
+                        ? JSON.parse(orders[0].confirmation_json)
+                        : orders[0].confirmation_json;
+
+                finalItems = confirmationJson.items || confirmationJson.order?.items || [];
+            } catch (jsonError) {
+                console.error('Fehler beim Lesen der confirmation_json:', jsonError);
+            }
+        }
+
         const [images] = await connection.execute(
             `SELECT id, image_path AS imagePath, created_at
              FROM rental_order_return_images
@@ -1664,7 +1679,7 @@ app.get('/admin/orders/:id', checkAdmin, async (req, res) => {
 
         res.json({
             ...orders[0],
-            items,
+            items: finalItems,
             returnImages: images
         });
     } catch (error) {

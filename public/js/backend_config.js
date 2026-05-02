@@ -446,14 +446,88 @@ async function openOrderDetails(orderId) {
         const response = await fetch(`/admin/orders/${orderId}`);
         const order = await response.json();
 
-        console.log(order);
+        if (!response.ok) {
+            showAlert(order.error || 'Bestellung konnte nicht geladen werden.', 'danger');
+            return;
+        }
 
-        showAlert('Details siehe Konsole (nächster Schritt: Modal bauen)', 'info');
+        renderOrderDetails(order);
+
+        const modal = new bootstrap.Modal(document.getElementById('orderDetailsModal'));
+        modal.show();
 
     } catch (error) {
         console.error(error);
         showAlert('Fehler beim Laden der Bestellung.', 'danger');
     }
+}
+
+function renderOrderDetails(order) {
+    const body = document.getElementById('orderDetailsBody');
+
+    const itemsHtml = (order.items || []).map(item => `
+        <tr>
+            <td>${item.title}</td>
+            <td>${item.rentalStart} bis ${item.rentalEnd}</td>
+            <td>${Number(item.pricePerDay || 0).toFixed(2)} €</td>
+            <td>${Number(item.deposit || 0).toFixed(2)} €</td>
+        </tr>
+    `).join('');
+
+    body.innerHTML = `
+        <div class="row g-4">
+            <div class="col-12 col-lg-6">
+                <h5>Bestellung</h5>
+                <p>
+                    <strong>Bestellnummer:</strong> ${order.order_no}<br>
+                    <strong>Status:</strong> ${order.status}<br>
+                    <strong>Zahlungsstatus:</strong> ${order.payment_status || '-'}<br>
+                    <strong>Zahlungsmethode:</strong> ${order.payment_method || '-'}
+                </p>
+            </div>
+
+            <div class="col-12 col-lg-6">
+                <h5>Kunde</h5>
+                <p>
+                    <strong>${order.customer_first_name || ''} ${order.customer_last_name || ''}</strong><br>
+                    ${order.customer_email || ''}<br>
+                    ${order.customer_phone || ''}<br>
+                    ${order.customer_address || ''}<br>
+                    ${order.customer_zip || ''} ${order.customer_city || ''}
+                </p>
+            </div>
+
+            <div class="col-12">
+                <h5>Artikel</h5>
+                <div class="table-responsive">
+                    <table class="table table-sm table-striped">
+                        <thead>
+                            <tr>
+                                <th>Artikel</th>
+                                <th>Mietzeitraum</th>
+                                <th>Preis / Tag</th>
+                                <th>Kaution</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${itemsHtml || '<tr><td colspan="4">Keine Artikel vorhanden.</td></tr>'}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="col-12">
+                <h5>Rückgabe / Kaution</h5>
+                <p>
+                    <strong>Rückgabestatus:</strong> ${order.return_status || 'pending'}<br>
+                    <strong>Beschädigt:</strong> ${order.is_damaged ? 'Ja' : 'Nein'}<br>
+                    <strong>Verspätet:</strong> ${order.is_late ? 'Ja' : 'Nein'}<br>
+                    <strong>Kautionsentscheidung:</strong> ${order.deposit_decision || 'pending'}<br>
+                    <strong>Abzugsgrund:</strong> ${order.deposit_deduction_reason || '-'}
+                </p>
+            </div>
+        </div>
+    `;
 }
 
 function loadBackendUser() {
