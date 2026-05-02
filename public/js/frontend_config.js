@@ -473,6 +473,20 @@ document.addEventListener('DOMContentLoaded', () => {
                 const result = await response.json();
 
                 if (!response.ok) {
+                    if (response.status === 409) {
+                        showAlert(
+                            'Diese E-Mail-Adresse existiert bereits. <a href="/login.html" class="alert-link">Hier klicken, um sich einzuloggen.</a>',
+                            'warning',
+                            8000
+                        );
+                        return;
+                    }
+
+                    showAlert(result.error || 'E-Mail-Verifikation konnte nicht gestartet werden.', 'danger');
+                    return;
+                }
+
+                if (!response.ok) {
                     showAlert(result.error || 'Fehler beim Versenden des Bestätigungslinks.', 'danger');
                     guestOrderBtn.disabled = false;
                     return;
