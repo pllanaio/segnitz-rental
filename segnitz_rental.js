@@ -575,6 +575,20 @@ app.post('/data', async (req, res) => {
 
         connection = await mysql.createConnection(dbConfig);
         await runDatabaseCleanup(connection);
+
+        if (!req.session.user && email) {
+            const [existingUsers] = await connection.execute(
+                'SELECT id FROM users WHERE username = ? LIMIT 1',
+                [email]
+            );
+
+            if (existingUsers.length > 0) {
+                return res.status(409).json({
+                    error: 'Diese E-Mail-Adresse gehört bereits zu einem Konto. Bitte einloggen.'
+                });
+            }
+        }
+
         await connection.beginTransaction();
 
         const userId = await getUserIdByEmail(connection, email);
@@ -885,6 +899,18 @@ app.post('/request-guest-verification', async (req, res) => {
     try {
         const connection = await mysql.createConnection(dbConfig);
         await runDatabaseCleanup(connection);
+
+        const [existingUsers] = await connection.execute(
+            'SELECT id FROM users WHERE username = ? LIMIT 1',
+            [email]
+        );
+
+        if (existingUsers.length > 0) {
+            await connection.end();
+            return res.status(409).json({
+                error: 'Diese E-Mail-Adresse existiert bereits. Bitte einloggen.'
+            });
+        }
 
         const token = createVerificationToken();
         const expires = getVerificationExpiry();
