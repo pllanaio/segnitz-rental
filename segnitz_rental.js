@@ -377,9 +377,9 @@ async function runDatabaseCleanup(connection) {
 
     const duration = Date.now() - start;
 
-    console.log(
+    /*console.log(
         `${new Date().toISOString()} - Cleanup abgeschlossen (${duration}ms)`
-    );
+    );*/
 }
 
 async function getUserIdByEmail(connection, email) {
