@@ -23,6 +23,7 @@ let currentCart = {
     cartId: null,
     items: []
 };
+let productCalendar = null;
 
 let current_step = 0;
 let stepCount = 5;
@@ -373,7 +374,7 @@ async function showProductDetails(card) {
     }
 
     await loadProductAvailability(card.dataset.productId);
-
+    initProductCalendar();
     const modal = new bootstrap.Modal(document.getElementById('productDetailsModal'));
     modal.show();
 }
@@ -415,45 +416,6 @@ function selectedRangeConflicts(startDate, endDate) {
         return startDate <= period.rentalEnd && endDate >= period.rentalStart;
     });
 }
-
-document.addEventListener('DOMContentLoaded', () => {
-    const startInput = document.getElementById('modalRentalStart');
-    const endInput = document.getElementById('modalRentalEnd');
-    const infoBox = document.getElementById('modalRentalInfo');
-
-    if (!startInput || !endInput || !infoBox) return;
-
-    function updateModalRentalInfo() {
-        const startDate = startInput.value;
-        const endDate = endInput.value;
-
-        if (!startDate || !endDate) {
-            infoBox.classList.add('d-none');
-            return;
-        }
-
-        if (new Date(endDate) < new Date(startDate)) {
-            infoBox.classList.remove('d-none', 'alert-info');
-            infoBox.classList.add('alert-danger');
-            infoBox.textContent = 'Das Mietende darf nicht vor dem Mietbeginn liegen.';
-            return;
-        }
-
-        const days = calculateRentalDays(startDate, endDate);
-
-        infoBox.classList.remove('d-none', 'alert-danger');
-        infoBox.classList.add('alert-info');
-        infoBox.textContent = `Ausgewählter Mietzeitraum: ${days} Tag${days === 1 ? '' : 'e'}`;
-    }
-
-    startInput.addEventListener('change', () => {
-        endInput.min = startInput.value;
-        endInput.value = '';
-        updateModalRentalInfo();
-    });
-
-    endInput.addEventListener('change', updateModalRentalInfo);
-});
 
 async function loadUserProfileIntoForm() {
     try {
@@ -1084,3 +1046,55 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 });
+
+function initProductCalendar() {
+    const rangeInput = document.getElementById('modalRentalRange');
+    const startInput = document.getElementById('modalRentalStart');
+    const endInput = document.getElementById('modalRentalEnd');
+    const infoBox = document.getElementById('modalRentalInfo');
+
+    if (!rangeInput || !startInput || !endInput) return;
+
+    if (productCalendar) {
+        productCalendar.destroy();
+    }
+
+    rangeInput.value = '';
+    startInput.value = '';
+    endInput.value = '';
+
+    const blockedRanges = currentBlockedPeriods.map(period => ({
+        from: period.rentalStart.split('T')[0],
+        to: period.rentalEnd.split('T')[0]
+    }));
+
+    productCalendar = flatpickr(rangeInput, {
+        mode: 'range',
+        inline: true,
+        minDate: 'today',
+        dateFormat: 'Y-m-d',
+        locale: 'de',
+        disable: blockedRanges,
+        showMonths: 2,
+
+        onChange: function (selectedDates) {
+            if (selectedDates.length !== 2) {
+                startInput.value = '';
+                endInput.value = '';
+                return;
+            }
+
+            const startDate = productCalendar.formatDate(selectedDates[0], 'Y-m-d');
+            const endDate = productCalendar.formatDate(selectedDates[1], 'Y-m-d');
+
+            startInput.value = startDate;
+            endInput.value = endDate;
+
+            const days = calculateRentalDays(startDate, endDate);
+
+            infoBox.classList.remove('d-none', 'alert-danger');
+            infoBox.classList.add('alert-info');
+            infoBox.textContent = `Ausgewählter Mietzeitraum: ${days} Tag${days === 1 ? '' : 'e'}`;
+        }
+    });
+}
