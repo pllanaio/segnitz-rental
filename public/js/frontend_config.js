@@ -322,7 +322,7 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 
-function showProductDetails(card) {
+async function showProductDetails(card) {
     selectedProductCard = card;
 
     document.getElementById('modalProductId').value = card.dataset.productId;
