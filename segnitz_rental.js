@@ -1577,6 +1577,108 @@ app.delete('/product-images/:id', checkAdmin, async (req, res) => {
     }
 });
 
+app.get('/admin/orders', checkAdmin, async (req, res) => {
+    let connection;
+
+    try {
+        connection = await mysql.createConnection(dbConfig);
+
+        const [orders] = await connection.execute(
+            `SELECT
+                id,
+                order_no,
+                customer_email,
+                customer_first_name,
+                customer_last_name,
+                customer_phone,
+                customer_address,
+                customer_zip,
+                customer_city,
+                status,
+                payment_method,
+                payment_status,
+                return_status,
+                deposit_decision,
+                DATE_FORMAT(reserved_until, '%Y-%m-%d %H:%i:%s') AS reserved_until,
+                DATE_FORMAT(returned_at, '%Y-%m-%d %H:%i:%s') AS returned_at
+             FROM rental_orders
+             ORDER BY id DESC`
+        );
+
+        res.json(orders);
+    } catch (error) {
+        console.error('Fehler beim Laden der Bestellungen:', error);
+        res.status(500).json({
+            error: 'Bestellungen konnten nicht geladen werden.'
+        });
+    } finally {
+        if (connection) {
+            await connection.end();
+        }
+    }
+});
+
+app.get('/admin/orders/:id', checkAdmin, async (req, res) => {
+    let connection;
+
+    try {
+        connection = await mysql.createConnection(dbConfig);
+
+        const [orders] = await connection.execute(
+            `SELECT *
+             FROM rental_orders
+             WHERE id = ?
+             LIMIT 1`,
+            [req.params.id]
+        );
+
+        if (orders.length === 0) {
+            return res.status(404).json({
+                error: 'Bestellung nicht gefunden.'
+            });
+        }
+
+        const [items] = await connection.execute(
+            `SELECT
+                roi.id,
+                roi.product_id AS productId,
+                p.title,
+                DATE_FORMAT(roi.rental_start, '%Y-%m-%d') AS rentalStart,
+                DATE_FORMAT(roi.rental_end, '%Y-%m-%d') AS rentalEnd,
+                roi.price_per_day AS pricePerDay,
+                roi.deposit
+             FROM rental_order_items roi
+             JOIN rental_products p ON p.id = roi.product_id
+             WHERE roi.order_id = ?
+             ORDER BY roi.id ASC`,
+            [req.params.id]
+        );
+
+        const [images] = await connection.execute(
+            `SELECT id, image_path AS imagePath, created_at
+             FROM rental_order_return_images
+             WHERE order_id = ?
+             ORDER BY id DESC`,
+            [req.params.id]
+        );
+
+        res.json({
+            ...orders[0],
+            items,
+            returnImages: images
+        });
+    } catch (error) {
+        console.error('Fehler beim Laden der Bestellung:', error);
+        res.status(500).json({
+            error: 'Bestellung konnte nicht geladen werden.'
+        });
+    } finally {
+        if (connection) {
+            await connection.end();
+        }
+    }
+});
+
 app.get('/cart', async (req, res) => {
     let connection;
 
