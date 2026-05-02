@@ -581,7 +581,6 @@ app.post('/data', async (req, res) => {
         await expireOldReservations(connection);
 
         const userId = await getUserIdByEmail(connection, email);
-        const reservedUntil = new Date(Date.now() + 15 * 60 * 1000);
 
         const cartId = await getOrCreateActiveCart(connection, req);
         const cartItems = await getCartItemsForOrder(connection, cartId);
@@ -621,7 +620,7 @@ app.post('/data', async (req, res) => {
             `INSERT INTO rental_orders
             (order_no, cart_id, user_id, customer_email, customer_first_name, customer_last_name,
             customer_phone, customer_address, customer_zip, customer_city, status, reserved_until, confirmation_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'reserved', ?, ?)`,
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'reserved', DATE_ADD(NOW(), INTERVAL 15 MINUTE), ?)`,
             [
                 orderNo,
                 cartId,
@@ -633,12 +632,19 @@ app.post('/data', async (req, res) => {
                 address,
                 zip,
                 city,
-                reservedUntil,
                 JSON.stringify(orderSummary)
             ]
         );
 
         const orderId = orderResult.insertId;
+        const [orderRows] = await connection.execute(
+            `SELECT DATE_FORMAT(reserved_until, '%Y-%m-%d %H:%i:%s') AS reservedUntil
+             FROM rental_orders
+             WHERE id = ?`,
+            [orderId]
+        );
+
+        const reservedUntil = orderRows[0].reservedUntil;
 
         for (const item of cartItems) {
             await connection.execute(
@@ -669,7 +675,7 @@ app.post('/data', async (req, res) => {
             ...req.body,
             order: {
                 id: orderId,
-                reservedUntil: reservedUntil.toISOString(),
+                reservedUntil,
                 ...orderSummary
             }
         };
