@@ -316,7 +316,7 @@ function getFormValue(formData, fieldName) {
 }
 
 async function expireOldReservations(connection) {
-    await connection.execute(
+    const [deletedItems] = await connection.execute(
         `DELETE roi
          FROM rental_order_items roi
          JOIN rental_orders ro ON ro.id = roi.order_id
@@ -325,35 +325,61 @@ async function expireOldReservations(connection) {
          AND ro.reserved_until < NOW()`
     );
 
-    await connection.execute(
+    const [updatedOrders] = await connection.execute(
         `UPDATE rental_orders
          SET status = 'expired'
          WHERE status = 'reserved'
          AND reserved_until IS NOT NULL
          AND reserved_until < NOW()`
     );
+
+    if (updatedOrders.affectedRows > 0 || deletedItems.affectedRows > 0) {
+        console.log(
+            `${new Date().toISOString()} - Cleanup: ${updatedOrders.affectedRows} Orders expired, ${deletedItems.affectedRows} Order-Items gelöscht`
+        );
+    }
 }
 
 async function deleteExpiredGuestVerifications(connection) {
-    await connection.execute(
+    const [result] = await connection.execute(
         `DELETE FROM guest_verifications
          WHERE expires_at IS NOT NULL
          AND expires_at < NOW()`
     );
+
+    if (result.affectedRows > 0) {
+        console.log(
+            `${new Date().toISOString()} - Cleanup: ${result.affectedRows} Guest-Verifications gelöscht`
+        );
+    }
 }
 
 async function deleteOldActiveCarts(connection) {
-    await connection.execute(
+    const [result] = await connection.execute(
         `DELETE FROM rental_carts
          WHERE status = 'active'
          AND updated_at < NOW() - INTERVAL 24 HOUR`
     );
+
+    if (result.affectedRows > 0) {
+        console.log(
+            `${new Date().toISOString()} - Cleanup: ${result.affectedRows} alte Carts gelöscht`
+        );
+    }
 }
 
 async function runDatabaseCleanup(connection) {
+    const start = Date.now();
+
     await expireOldReservations(connection);
     await deleteExpiredGuestVerifications(connection);
     await deleteOldActiveCarts(connection);
+
+    const duration = Date.now() - start;
+
+    console.log(
+        `${new Date().toISOString()} - Cleanup abgeschlossen (${duration}ms)`
+    );
 }
 
 async function getUserIdByEmail(connection, email) {
@@ -2015,7 +2041,9 @@ app.delete('/cart/items/:id', async (req, res) => {
 
             delete req.session.cartKey;
 
-            console.log(`Cart ${cartId} wurde gelöscht (leer).`);
+            console.log(
+                `${new Date().toISOString()} - Warenkorb ${cartId} wurde gelöscht.`
+            )
         } else {
             await connection.execute(
                 `UPDATE rental_carts
@@ -2042,15 +2070,16 @@ app.delete('/cart/items/:id', async (req, res) => {
 
 cleanupOnStartup();
 
+cleanupOnStartup();
+
 setInterval(async () => {
     let connection;
 
     try {
         connection = await mysql.createConnection(dbConfig);
         await runDatabaseCleanup(connection);
-        console.log(`${new Date().toISOString()} - periodischer Datenbank-Cleanup ausgeführt`);
     } catch (error) {
-        console.error('Fehler beim periodischen Datenbank-Cleanup:', error);
+        console.error(`${new Date().toISOString()} - Fehler beim periodischen Datenbank-Cleanup:`, error);
     } finally {
         if (connection) {
             await connection.end();
@@ -2059,8 +2088,6 @@ setInterval(async () => {
 }, 60 * 1000);
 
 app.listen(3000, () => {
-    console.log(
-        "*********** Segnitz Rental System ***********"
-    )
+    console.log("*********** Segnitz Rental System ***********");
     console.log("Server läuft auf Port 3000");
 });
