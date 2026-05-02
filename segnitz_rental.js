@@ -131,6 +131,102 @@ async function getOrCreateActiveCart(connection, req) {
     return result.insertId;
 }
 
+async function mergeGuestCartIntoUserCart(connection, req, userEmail) {
+    const sessionKey = req.session.cartKey;
+
+    if (!sessionKey || !userEmail) {
+        return;
+    }
+
+    const [guestCarts] = await connection.execute(
+        `SELECT id
+         FROM rental_carts
+         WHERE status = 'active'
+         AND session_id = ?
+         AND user_email IS NULL
+         ORDER BY updated_at DESC, id DESC
+         LIMIT 1`,
+        [sessionKey]
+    );
+
+    if (guestCarts.length === 0) {
+        return;
+    }
+
+    const guestCartId = guestCarts[0].id;
+
+    const [userCarts] = await connection.execute(
+        `SELECT id
+         FROM rental_carts
+         WHERE status = 'active'
+         AND user_email = ?
+         ORDER BY updated_at DESC, id DESC
+         LIMIT 1`,
+        [userEmail]
+    );
+
+    if (userCarts.length === 0) {
+        await connection.execute(
+            `UPDATE rental_carts
+             SET user_email = ?, updated_at = NOW()
+             WHERE id = ?`,
+            [userEmail, guestCartId]
+        );
+        return;
+    }
+
+    const userCartId = userCarts[0].id;
+
+    if (userCartId === guestCartId) {
+        return;
+    }
+
+    const [guestItems] = await connection.execute(
+        `SELECT product_id, rental_start, rental_end, quantity
+         FROM rental_cart_items
+         WHERE cart_id = ?`,
+        [guestCartId]
+    );
+
+    for (const item of guestItems) {
+        const conflict = await checkCartItemConflict(
+            connection,
+            userCartId,
+            item.product_id,
+            item.rental_start,
+            item.rental_end
+        );
+
+        if (!conflict) {
+            await connection.execute(
+                `INSERT INTO rental_cart_items
+                 (cart_id, product_id, rental_start, rental_end, quantity)
+                 VALUES (?, ?, ?, ?, ?)`,
+                [
+                    userCartId,
+                    item.product_id,
+                    item.rental_start,
+                    item.rental_end,
+                    item.quantity || 1
+                ]
+            );
+        }
+    }
+
+    await connection.execute(
+        `DELETE FROM rental_carts
+         WHERE id = ?`,
+        [guestCartId]
+    );
+
+    await connection.execute(
+        `UPDATE rental_carts
+         SET updated_at = NOW()
+         WHERE id = ?`,
+        [userCartId]
+    );
+}
+
 async function checkProductAvailability(connection, productId, rentalStart, rentalEnd, excludeCartItemId = null) {
     const [orderConflicts] = await connection.execute(
         `SELECT roi.id
@@ -405,7 +501,7 @@ app.post('/login', async (req, res) => {
                 req.session.user = username;
                 req.session.role = rows[0].role;
                 req.session.createdAt = Date.now();
-
+                await mergeGuestCartIntoUserCart(connection, req, username);
                 res.status(200).send("Login erfolgreich!");
 
                 console.log(
@@ -1684,17 +1780,6 @@ app.put('/cart/items/:id', async (req, res) => {
                 error: 'Das Produkt ist im ausgewählten Zeitraum nicht verfügbar.'
             });
         }
-
-        const [rows] = await connection.execute(
-            `SELECT cart_id FROM rental_cart_items WHERE id = ?`,
-            [itemId]
-        );
-
-        if (rows.length === 0) {
-            return res.status(404).json({ error: 'Item nicht gefunden' });
-        }
-
-        const cartId = rows[0].cart_id;
 
         await connection.execute(
             `UPDATE rental_cart_items
