@@ -19,6 +19,10 @@ let rentalProducts = [];
 let currentProductPage = 1;
 const productsPerPage = 12;
 let filteredRentalProducts = [];
+let currentCart = {
+    cartId: null,
+    items: []
+};
 
 let current_step = 0;
 let stepCount = 5;
@@ -57,10 +61,12 @@ nextBtn.addEventListener('click', async () => {
     let isValid = true;
     switch (current_step) {
         case 0:
-            isValid = validateProductStep();
+            isValid = await validateProductStep();
             break;
         case 1:
-            isValid = validateRentalPeriodStep();
+            await loadCart();
+            renderCartReview();
+            isValid = validateCartReviewStep();
             break;
         case 2:
             isValid = validateCustomerDataStep();
@@ -288,10 +294,24 @@ document.addEventListener("DOMContentLoaded", () => {
     const selectProductFromModalBtn = document.getElementById('selectProductFromModal');
 
     if (selectProductFromModalBtn) {
-        selectProductFromModalBtn.addEventListener('click', () => {
+        selectProductFromModalBtn.addEventListener('click', async () => {
             if (!selectedProductCard) return;
 
-            selectProductCard(selectedProductCard);
+            const productId = selectedProductCard.dataset.productId;
+            const rentalStart = document.getElementById('modalRentalStart').value;
+            const rentalEnd = document.getElementById('modalRentalEnd').value;
+
+            if (!rentalStart || !rentalEnd) {
+                alert('Bitte wählen Sie Mietbeginn und Mietende aus.');
+                return;
+            }
+
+            if (new Date(rentalEnd) < new Date(rentalStart)) {
+                alert('Das Mietende darf nicht vor dem Mietbeginn liegen.');
+                return;
+            }
+
+            await addProductToCart(productId, rentalStart, rentalEnd);
 
             const modal = bootstrap.Modal.getInstance(modalElement);
             if (modal) {
@@ -301,21 +321,26 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 });
 
-function selectProductCard(card) {
-    document
-        .querySelectorAll('.product-card')
-        .forEach(c => c.classList.remove('selected'));
-
-    card.classList.add('selected');
-
-    document.getElementById('RentalProduct').value = card.dataset.product;
-}
 
 function showProductDetails(card) {
+    selectedProductCard = card;
+
+    document.getElementById('modalProductId').value = card.dataset.productId;
     document.getElementById('modalProductTitle').textContent = card.dataset.title;
     document.getElementById('modalProductDescription').textContent = card.dataset.description;
     document.getElementById('modalProductPrice').textContent = card.dataset.price;
     document.getElementById('modalProductDeposit').textContent = card.dataset.deposit;
+
+    const startInput = document.getElementById('modalRentalStart');
+    const endInput = document.getElementById('modalRentalEnd');
+    const infoBox = document.getElementById('modalRentalInfo');
+
+    const today = new Date().toISOString().split('T')[0];
+    startInput.value = '';
+    endInput.value = '';
+    startInput.min = today;
+    endInput.min = today;
+    infoBox.classList.add('d-none');
 
     const carouselWrapper = document.getElementById('modalProductCarouselWrapper');
     const carouselInner = document.getElementById('modalProductCarouselInner');
@@ -347,52 +372,76 @@ function showProductDetails(card) {
         carouselWrapper.classList.add('d-none');
     }
 
+    await loadProductAvailability(card.dataset.productId);
+
     const modal = new bootstrap.Modal(document.getElementById('productDetailsModal'));
     modal.show();
 }
 
+let currentBlockedPeriods = [];
+
+async function loadProductAvailability(productId) {
+    try {
+        const response = await fetch(`/products/${productId}/availability`);
+        currentBlockedPeriods = await response.json();
+
+        renderBlockedPeriodsInfo();
+    } catch (error) {
+        console.error('Fehler beim Laden der Verfügbarkeit:', error);
+        currentBlockedPeriods = [];
+    }
+}
+
+function renderBlockedPeriodsInfo() {
+    const infoBox = document.getElementById('modalRentalInfo');
+
+    if (!infoBox || currentBlockedPeriods.length === 0) {
+        return;
+    }
+
+    infoBox.classList.remove('d-none', 'alert-danger');
+    infoBox.classList.add('alert-info');
+
+    infoBox.innerHTML = `
+        <strong>Bereits reservierte Zeiträume:</strong><br>
+        ${currentBlockedPeriods.map(period => {
+        return `${period.rentalStart} bis ${period.rentalEnd}`;
+    }).join('<br>')}
+    `;
+}
+
+function selectedRangeConflicts(startDate, endDate) {
+    return currentBlockedPeriods.some(period => {
+        return startDate <= period.rentalEnd && endDate >= period.rentalStart;
+    });
+}
+
 document.addEventListener('DOMContentLoaded', () => {
-    const startInput = document.getElementById('RentalStartDate');
-    const endInput = document.getElementById('RentalEndDate');
-    const infoBox = document.getElementById('rentalDurationInfo');
+    const startInput = document.getElementById('modalRentalStart');
+    const endInput = document.getElementById('modalRentalEnd');
+    const infoBox = document.getElementById('modalRentalInfo');
 
     if (!startInput || !endInput || !infoBox) return;
 
-    const today = new Date().toISOString().split('T')[0];
-    startInput.min = today;
-    endInput.min = today;
-
-    function updateRentalDurationInfo() {
+    function updateModalRentalInfo() {
         const startDate = startInput.value;
         const endDate = endInput.value;
 
         if (!startDate || !endDate) {
             infoBox.classList.add('d-none');
-            startInput.addEventListener('change', () => {
-                endInput.min = startInput.value;
-                endInput.value = '';
-
-                infoBox.classList.add('d-none');
-
-                updateRentalDurationInfo();
-            });
             return;
         }
 
-        const start = new Date(startDate);
-        const end = new Date(endDate);
-
-        if (end < start) {
-            infoBox.classList.remove('d-none');
-            infoBox.classList.remove('alert-info');
+        if (new Date(endDate) < new Date(startDate)) {
+            infoBox.classList.remove('d-none', 'alert-info');
             infoBox.classList.add('alert-danger');
             infoBox.textContent = 'Das Mietende darf nicht vor dem Mietbeginn liegen.';
             return;
         }
 
-        const days = Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1;
-        infoBox.classList.remove('d-none');
-        infoBox.classList.remove('alert-danger');
+        const days = calculateRentalDays(startDate, endDate);
+
+        infoBox.classList.remove('d-none', 'alert-danger');
         infoBox.classList.add('alert-info');
         infoBox.textContent = `Ausgewählter Mietzeitraum: ${days} Tag${days === 1 ? '' : 'e'}`;
     }
@@ -400,10 +449,10 @@ document.addEventListener('DOMContentLoaded', () => {
     startInput.addEventListener('change', () => {
         endInput.min = startInput.value;
         endInput.value = '';
-        updateRentalDurationInfo();
+        updateModalRentalInfo();
     });
 
-    endInput.addEventListener('change', updateRentalDurationInfo);
+    endInput.addEventListener('change', updateModalRentalInfo);
 });
 
 async function loadUserProfileIntoForm() {
@@ -541,28 +590,20 @@ function validateCustomerRequiredFields() {
     return true;
 }
 
-function validateProductStep() {
-    const selectedProduct = document.getElementById('RentalProduct').value;
+async function validateProductStep() {
+    await loadCart();
 
-    if (!selectedProduct) {
-        alert('Bitte wählen Sie ein Produkt aus.');
+    if (!currentCart.items || currentCart.items.length === 0) {
+        alert('Bitte legen Sie mindestens ein Produkt in den Warenkorb.');
         return false;
     }
 
     return true;
 }
 
-function validateRentalPeriodStep() {
-    const startDate = document.getElementById('RentalStartDate').value;
-    const endDate = document.getElementById('RentalEndDate').value;
-
-    if (!startDate || !endDate) {
-        alert('Bitte wählen Sie Mietbeginn und Mietende aus.');
-        return false;
-    }
-
-    if (new Date(endDate) < new Date(startDate)) {
-        alert('Das Mietende darf nicht vor dem Mietbeginn liegen.');
+function validateCartReviewStep() {
+    if (!currentCart.items || currentCart.items.length === 0) {
+        alert('Ihr Warenkorb ist leer.');
         return false;
     }
 
@@ -661,6 +702,7 @@ function createRentalProductCard(product) {
 
     card.className = 'product-card';
     card.dataset.product = product.product_key;
+    card.dataset.productId = product.id;
     card.dataset.title = product.title;
     card.dataset.description = product.description || '';
     card.dataset.price = `${Number(product.price_per_day).toFixed(2)} € / Tag`;
@@ -689,7 +731,7 @@ function createRentalProductCard(product) {
 `;
 
     card.addEventListener('click', () => {
-        selectProductCard(card);
+        showProductDetails(card);
     });
 
     const detailsButton = card.querySelector('.product-details-btn');
@@ -784,6 +826,232 @@ function renderProductPagination() {
 
     pagination.appendChild(nextBtn);
 }
+
+function calculateRentalDays(startDate, endDate) {
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+
+    return Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1;
+}
+
+function formatCurrency(value) {
+    return `${Number(value || 0).toFixed(2).replace('.', ',')} €`;
+}
+
+async function loadCart() {
+    try {
+        const response = await fetch('/cart');
+        const cart = await response.json();
+
+        if (!response.ok) {
+            throw new Error(cart.error || 'Warenkorb konnte nicht geladen werden.');
+        }
+
+        currentCart = cart;
+        renderCart();
+        renderCartReview();
+
+        return cart;
+    } catch (error) {
+        console.error('Fehler beim Laden des Warenkorbs:', error);
+        currentCart = {
+            cartId: null,
+            items: []
+        };
+        renderCart();
+        renderCartReview();
+    }
+}
+
+async function addProductToCart(productId, rentalStart, rentalEnd) {
+    try {
+        const response = await fetch('/cart/items', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                productId,
+                rentalStart,
+                rentalEnd
+            })
+        });
+
+        if (selectedRangeConflicts(rentalStart, rentalEnd)) {
+            alert('Dieses Produkt ist im ausgewählten Zeitraum bereits reserviert.');
+            return;
+        }
+
+        const result = await response.json();
+
+        if (!response.ok) {
+            alert(result.error || 'Produkt konnte nicht zum Warenkorb hinzugefügt werden.');
+            return;
+        }
+
+        await loadCart();
+        alert('Produkt wurde zum Warenkorb hinzugefügt.');
+    } catch (error) {
+        console.error('Fehler beim Hinzufügen zum Warenkorb:', error);
+        alert('Produkt konnte nicht zum Warenkorb hinzugefügt werden.');
+    }
+}
+
+async function deleteCartItem(itemId) {
+    try {
+        const response = await fetch(`/cart/items/${itemId}`, {
+            method: 'DELETE'
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+            alert(result.error || 'Warenkorbposition konnte nicht gelöscht werden.');
+            return;
+        }
+
+        await loadCart();
+    } catch (error) {
+        console.error('Fehler beim Löschen der Warenkorbposition:', error);
+        alert('Warenkorbposition konnte nicht gelöscht werden.');
+    }
+}
+
+function calculateCartTotals(items) {
+    return items.reduce((totals, item) => {
+        const days = calculateRentalDays(item.rentalStart, item.rentalEnd);
+        const pricePerDay = Number(item.pricePerDay || 0);
+        const deposit = Number(item.deposit || 0);
+
+        totals.rentalTotal += days * pricePerDay;
+        totals.depositTotal += deposit;
+
+        return totals;
+    }, {
+        rentalTotal: 0,
+        depositTotal: 0
+    });
+}
+
+function renderCart() {
+    const cartItems = document.getElementById('cartItems');
+    const cartItemCount = document.getElementById('cartItemCount');
+    const cartSummary = document.getElementById('cartSummary');
+    const cartRentalTotal = document.getElementById('cartRentalTotal');
+    const cartDepositTotal = document.getElementById('cartDepositTotal');
+
+    if (!cartItems) return;
+
+    const items = currentCart.items || [];
+
+    if (cartItemCount) {
+        cartItemCount.textContent = `${items.length} Produkt${items.length === 1 ? '' : 'e'}`;
+    }
+
+    if (items.length === 0) {
+        cartItems.innerHTML = `
+            <div class="alert alert-info mb-0">
+                Ihr Warenkorb ist leer.
+            </div>
+        `;
+
+        if (cartSummary) {
+            cartSummary.classList.add('d-none');
+        }
+
+        return;
+    }
+
+    cartItems.innerHTML = items.map(item => {
+        const days = calculateRentalDays(item.rentalStart, item.rentalEnd);
+        const lineTotal = days * Number(item.pricePerDay || 0);
+
+        return `
+            <div class="border rounded p-3 mb-2">
+                <div class="d-flex justify-content-between gap-3">
+                    <div>
+                        <strong>${item.title}</strong><br>
+                        <span class="small text-muted">
+                            ${item.rentalStart} bis ${item.rentalEnd} · ${days} Tag${days === 1 ? '' : 'e'}
+                        </span><br>
+                        <span>${formatCurrency(item.pricePerDay)} / Tag</span><br>
+                        <span>Kaution: ${formatCurrency(item.deposit)}</span>
+                    </div>
+
+                    <div class="text-end">
+                        <strong>${formatCurrency(lineTotal)}</strong><br>
+                        <button type="button" class="btn btn-sm btn-outline-danger mt-2"
+                            onclick="deleteCartItem(${item.id})">
+                            Entfernen
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    const totals = calculateCartTotals(items);
+
+    if (cartSummary) {
+        cartSummary.classList.remove('d-none');
+    }
+
+    if (cartRentalTotal) {
+        cartRentalTotal.textContent = formatCurrency(totals.rentalTotal);
+    }
+
+    if (cartDepositTotal) {
+        cartDepositTotal.textContent = formatCurrency(totals.depositTotal);
+    }
+}
+
+function renderCartReview() {
+    const cartReviewItems = document.getElementById('cartReviewItems');
+    const cartReviewRentalTotal = document.getElementById('cartReviewRentalTotal');
+    const cartReviewDepositTotal = document.getElementById('cartReviewDepositTotal');
+
+    if (!cartReviewItems) return;
+
+    const items = currentCart.items || [];
+
+    if (items.length === 0) {
+        cartReviewItems.innerHTML = `
+            <div class="alert alert-warning">
+                Ihr Warenkorb ist leer.
+            </div>
+        `;
+        return;
+    }
+
+    cartReviewItems.innerHTML = items.map(item => {
+        const days = calculateRentalDays(item.rentalStart, item.rentalEnd);
+        const lineTotal = days * Number(item.pricePerDay || 0);
+
+        return `
+            <div class="border rounded p-3 mb-2">
+                <strong>${item.title}</strong><br>
+                Mietzeitraum: ${item.rentalStart} bis ${item.rentalEnd}<br>
+                Dauer: ${days} Tag${days === 1 ? '' : 'e'}<br>
+                Miete: ${formatCurrency(lineTotal)}<br>
+                Kaution: ${formatCurrency(item.deposit)}
+            </div>
+        `;
+    }).join('');
+
+    const totals = calculateCartTotals(items);
+
+    if (cartReviewRentalTotal) {
+        cartReviewRentalTotal.textContent = formatCurrency(totals.rentalTotal);
+    }
+
+    if (cartReviewDepositTotal) {
+        cartReviewDepositTotal.textContent = formatCurrency(totals.depositTotal);
+    }
+}
+
+window.deleteCartItem = deleteCartItem;
+
+document.addEventListener('DOMContentLoaded', loadCart);
 
 document.addEventListener('DOMContentLoaded', () => {
     const searchInput = document.getElementById('productSearchInput');

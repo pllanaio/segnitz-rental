@@ -65,13 +65,6 @@ async function getOrCreateActiveCart(connection, req) {
 
         return existingCart[0].id;
     }
-
-    const [result] = await connection.execute(
-        `INSERT INTO rental_carts (session_id, user_email)
-         VALUES (?, ?)`,
-        [sessionKey, userEmail]
-    );
-
     return result.insertId;
 }
 
@@ -93,6 +86,103 @@ async function checkProductAvailability(connection, productId, rentalStart, rent
     }
 
     return true;
+}
+
+function getFormValue(formData, fieldName) {
+    const element = formData
+        .flatMap(step => step.elements)
+        .find(el => el.name === fieldName);
+
+    return element ? element.value : null;
+}
+
+async function generateOrderNo(connection) {
+    const year = new Date().getFullYear();
+
+    const [rows] = await connection.execute(
+        `SELECT order_no
+         FROM rental_orders
+         WHERE order_no LIKE ?
+         ORDER BY order_no DESC
+         LIMIT 1`,
+        [`R${year}%`]
+    );
+
+    let nextNumber = 1;
+
+    if (rows.length > 0 && rows[0].order_no) {
+        nextNumber = Number(rows[0].order_no.slice(5)) + 1;
+    }
+
+    return `R${year}${String(nextNumber).padStart(5, '0')}`;
+}
+
+async function getCartItemsForOrder(connection, cartId) {
+    const [items] = await connection.execute(
+        `SELECT 
+            ci.id,
+            ci.product_id AS productId,
+            ci.rental_start AS rentalStart,
+            ci.rental_end AS rentalEnd,
+            ci.quantity,
+            p.product_key AS productKey,
+            p.title,
+            p.price_per_day AS pricePerDay,
+            p.deposit
+         FROM rental_cart_items ci
+         JOIN rental_products p ON p.id = ci.product_id
+         WHERE ci.cart_id = ?
+         ORDER BY ci.id ASC`,
+        [cartId]
+    );
+
+    return items;
+}
+
+function calculateRentalDays(startDate, endDate) {
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+
+    return Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1;
+}
+
+function buildOrderSummary(orderNo, cartItems) {
+    let rentalTotal = 0;
+    let depositTotal = 0;
+
+    const items = cartItems.map(item => {
+        const days = calculateRentalDays(item.rentalStart, item.rentalEnd);
+        const lineRentalTotal = days * Number(item.pricePerDay || 0) * Number(item.quantity || 1);
+        const lineDepositTotal = Number(item.deposit || 0) * Number(item.quantity || 1);
+
+        rentalTotal += lineRentalTotal;
+        depositTotal += lineDepositTotal;
+
+        return {
+            productId: item.productId,
+            productKey: item.productKey,
+            title: item.title,
+            rentalStart: item.rentalStart,
+            rentalEnd: item.rentalEnd,
+            days,
+            quantity: item.quantity,
+            pricePerDay: Number(item.pricePerDay || 0),
+            deposit: Number(item.deposit || 0),
+            rentalTotal: lineRentalTotal,
+            depositTotal: lineDepositTotal
+        };
+    });
+
+    return {
+        orderNo,
+        status: 'reserved',
+        items,
+        totals: {
+            rentalTotal,
+            depositTotal,
+            grandTotalBeforeDepositReturn: rentalTotal + depositTotal
+        }
+    };
 }
 
 const productImageStorage = multer.diskStorage({
@@ -381,54 +471,156 @@ async function sendEmailWithPDF(recipients, pdfFilePath, pdfFilename) {
 }
 
 app.post('/data', async (req, res) => {
+    let connection;
+
     try {
         const formData = req.body.form;
 
-        const emailElement = formData
-            .flatMap(step => step.elements)
-            .find(el => el.name === "email" || el.name === "CustomerEmail");
+        const email =
+            getFormValue(formData, 'CustomerEmail') ||
+            getFormValue(formData, 'email');
 
-        const email = emailElement ? emailElement.value : null;
+        const firstName = getFormValue(formData, 'FirstName');
+        const lastName = getFormValue(formData, 'LastName');
+        const phone = getFormValue(formData, 'CustomerPhone');
+        const address = getFormValue(formData, 'CustomerAddress');
+        const zip = getFormValue(formData, 'CustomerZip');
+        const city = getFormValue(formData, 'CustomerCity');
+
+        connection = await mysql.createConnection(dbConfig);
+        await connection.beginTransaction();
+
+        const cartId = await getOrCreateActiveCart(connection, req);
+        const cartItems = await getCartItemsForOrder(connection, cartId);
+
+        if (cartItems.length === 0) {
+            await connection.rollback();
+            return res.status(400).json({
+                error: 'Der Warenkorb ist leer.'
+            });
+        }
+
+        for (const item of cartItems) {
+            const available = await checkProductAvailability(
+                connection,
+                item.productId,
+                item.rentalStart,
+                item.rentalEnd
+            );
+
+            if (!available) {
+                await connection.rollback();
+                return res.status(409).json({
+                    error: `Das Produkt "${item.title}" ist im gewählten Zeitraum nicht mehr verfügbar.`
+                });
+            }
+        }
+
+        const orderNo = await generateOrderNo(connection);
+        const orderSummary = buildOrderSummary(orderNo, cartItems);
+
+        const [orderResult] = await connection.execute(
+            `INSERT INTO rental_orders
+             (order_no, cart_id, customer_email, customer_first_name, customer_last_name,
+              customer_phone, customer_address, customer_zip, customer_city, status, confirmation_json)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'reserved', ?)`,
+            [
+                orderNo,
+                cartId,
+                email,
+                firstName,
+                lastName,
+                phone,
+                address,
+                zip,
+                city,
+                JSON.stringify(orderSummary)
+            ]
+        );
+
+        const orderId = orderResult.insertId;
+
+        for (const item of cartItems) {
+            await connection.execute(
+                `INSERT INTO rental_order_items
+                 (order_id, product_id, rental_start, rental_end, price_per_day, deposit)
+                 VALUES (?, ?, ?, ?, ?, ?)`,
+                [
+                    orderId,
+                    item.productId,
+                    item.rentalStart,
+                    item.rentalEnd,
+                    item.pricePerDay,
+                    item.deposit
+                ]
+            );
+        }
+
+        await connection.execute(
+            `UPDATE rental_carts
+             SET status = 'ordered'
+             WHERE id = ?`,
+            [cartId]
+        );
+
+        const enrichedPayload = {
+            ...req.body,
+            order: {
+                id: orderId,
+                ...orderSummary
+            }
+        };
+
+        await connection.commit();
 
         const timestamp = new Date().getTime();
-        const pdfFilename = `Mietauftrag_${timestamp}.pdf`;
+        const pdfFilename = `Mietauftrag_${orderNo}_${timestamp}.pdf`;
         const pdfFilepath = path.join(__dirname, 'public', 'pdf', pdfFilename);
         const templatePdfPath = path.join(__dirname, 'public', 'pdf', 'template.pdf');
         const activeUser = req.session.user || 'Gast';
 
         await fsp.writeFile(
-            path.join(__dirname, 'public', 'json', `data_${timestamp}.json`),
-            JSON.stringify(req.body, null, 2)
-        );
-        console.log(
-            `${new Date().toISOString()} - Dateigenerierung: JSON-Datei vom Benutzer ${activeUser} erfolgreich generiert und gespeichert`
+            path.join(__dirname, 'public', 'json', `order_${orderNo}_${timestamp}.json`),
+            JSON.stringify(enrichedPayload, null, 2)
         );
 
-        await generatePDF(req.body, templatePdfPath, pdfFilepath);
         console.log(
-            `${new Date().toISOString()} - Dateigenerierung: PDF-Datei erfolgreich vom Benutzer ${activeUser} generiert und gespeichert`
+            `${new Date().toISOString()} - Bestellung: Reservierung ${orderNo} vom Benutzer ${activeUser} gespeichert`
         );
+
+        await generatePDF(enrichedPayload, templatePdfPath, pdfFilepath);
 
         if (email) {
             try {
                 await sendEmailWithPDF([email], pdfFilepath, pdfFilename);
-
-                console.log(
-                    `${new Date().toISOString()} - Mailversand: PDF erfolgreich an ${email} versendet`
-                );
             } catch (mailError) {
                 console.error('Fehler beim Mailversand:', mailError);
             }
         }
 
         res.json({
+            orderId,
+            orderNo,
+            status: 'reserved',
             pdfUrl: `/pdf-download/${pdfFilename}`
         });
     } catch (err) {
-        console.error('Fehler:', err);
-        res
-            .status(500)
-            .send('Fehler beim Verarbeiten der Anfrage');
+        if (connection) {
+            try {
+                await connection.rollback();
+            } catch (rollbackError) {
+                console.error('Rollback fehlgeschlagen:', rollbackError);
+            }
+        }
+
+        console.error('Fehler beim Reservieren der Bestellung:', err);
+        res.status(500).json({
+            error: 'Fehler beim Reservieren der Bestellung.'
+        });
+    } finally {
+        if (connection) {
+            await connection.end();
+        }
     }
 });
 
