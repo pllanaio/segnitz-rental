@@ -131,6 +131,41 @@ async function getOrCreateActiveCart(connection, req) {
     return result.insertId;
 }
 
+async function getActiveCart(connection, req) {
+    const userEmail = req.session.user || null;
+
+    if (userEmail) {
+        const [rows] = await connection.execute(
+            `SELECT id
+             FROM rental_carts
+             WHERE status = 'active'
+             AND user_email = ?
+             ORDER BY updated_at DESC, id DESC
+             LIMIT 1`,
+            [userEmail]
+        );
+
+        return rows.length > 0 ? rows[0].id : null;
+    }
+
+    if (!req.session.cartKey) {
+        return null;
+    }
+
+    const [rows] = await connection.execute(
+        `SELECT id
+         FROM rental_carts
+         WHERE status = 'active'
+         AND session_id = ?
+         AND user_email IS NULL
+         ORDER BY updated_at DESC, id DESC
+         LIMIT 1`,
+        [req.session.cartKey]
+    );
+
+    return rows.length > 0 ? rows[0].id : null;
+}
+
 async function mergeGuestCartIntoUserCart(connection, req, userEmail) {
     const sessionKey = req.session.cartKey;
 
@@ -738,7 +773,14 @@ app.post('/data', async (req, res) => {
 
         const userId = await getUserIdByEmail(connection, email);
 
-        const cartId = await getOrCreateActiveCart(connection, req);
+        const cartId = await getActiveCart(connection, req);
+
+        if (!cartId) {
+            return res.json({
+                cartId: null,
+                items: []
+            });
+        }
         const cartItems = await getCartItemsForOrder(connection, cartId);
 
         if (cartItems.length === 0) {
