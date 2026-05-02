@@ -1993,12 +1993,31 @@ app.delete('/cart/items/:id', async (req, res) => {
             });
         }
 
-        await connection.execute(
-            `UPDATE rental_carts
-             SET updated_at = NOW()
-             WHERE id = ?`,
+        const [remainingItems] = await connection.execute(
+            `SELECT COUNT(*) AS count
+             FROM rental_cart_items
+             WHERE cart_id = ?`,
             [cartId]
         );
+
+        if (remainingItems[0].count === 0) {
+            await connection.execute(
+                `DELETE FROM rental_carts
+                 WHERE id = ?`,
+                [cartId]
+            );
+
+            delete req.session.cartKey;
+
+            console.log(`Cart ${cartId} wurde gelöscht (leer).`);
+        } else {
+            await connection.execute(
+                `UPDATE rental_carts
+                 SET updated_at = NOW()
+                 WHERE id = ?`,
+                [cartId]
+            );
+        }
 
         res.json({
             message: 'Warenkorbposition wurde gelöscht.'
