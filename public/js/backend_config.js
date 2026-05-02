@@ -5,6 +5,7 @@ let orders = [];
 document.addEventListener('DOMContentLoaded', () => {
     const form = document.getElementById('productForm');
     const cancelEditBtn = document.getElementById('cancelEditBtn');
+    const orderSearchInput = document.getElementById('orderSearchInput');
 
     loadBackendUser();
     loadProducts();
@@ -33,6 +34,12 @@ document.addEventListener('DOMContentLoaded', () => {
             });
 
             renderBackendProductList();
+        });
+    }
+
+    if (orderSearchInput) {
+        orderSearchInput.addEventListener('input', () => {
+            renderOrders();
         });
     }
 });
@@ -409,24 +416,49 @@ async function loadOrders() {
 
 function renderOrders() {
     const container = document.getElementById('ordersList');
+    const searchInput = document.getElementById('orderSearchInput');
+    const query = searchInput ? searchInput.value.trim().toLowerCase() : '';
+
     container.innerHTML = '';
 
-    if (orders.length === 0) {
-        container.innerHTML = '<div class="alert alert-info">Keine Bestellungen vorhanden.</div>';
+    const visibleOrders = orders.filter(order => {
+        return [
+            order.order_no,
+            order.customer_email,
+            order.customer_first_name,
+            order.customer_last_name,
+            order.customer_phone,
+            order.customer_city,
+            order.status,
+            order.payment_status,
+            order.payment_method,
+            order.return_status,
+            order.deposit_decision
+        ]
+            .join(' ')
+            .toLowerCase()
+            .includes(query);
+    });
+
+    if (visibleOrders.length === 0) {
+        container.innerHTML = '<div class="alert alert-info">Keine Bestellungen gefunden.</div>';
         return;
     }
 
-    orders.forEach(order => {
+    visibleOrders.forEach(order => {
         const card = document.createElement('div');
         card.className = 'card mb-3';
 
         card.innerHTML = `
             <div class="card-body">
-                <div class="d-flex justify-content-between align-items-center">
+                <div class="d-flex justify-content-between align-items-center gap-3">
                     <div>
-                        <h5>${order.order_no}</h5>
-                        <small>${order.customer_email}</small><br>
-                        <small>Status: ${order.status}</small>
+                        <h5 class="mb-1">${order.order_no}</h5>
+                        <div>${order.customer_first_name || ''} ${order.customer_last_name || ''}</div>
+                        <small>${order.customer_email || ''}</small><br>
+                        ${getStatusBadge(order.status)}
+                        ${getPaymentBadge(order.payment_status)}
+                        ${getReturnBadge(order.return_status)}
                     </div>
 
                     <button class="btn btn-primary btn-sm"
@@ -639,6 +671,44 @@ function switchBackendView(view) {
 
         loadOrders(); // wichtig
     }
+}
+
+function getStatusBadge(status) {
+    const map = {
+        reserved: 'warning',
+        expired: 'secondary',
+        paid: 'info',
+        confirmed: 'primary',
+        active: 'success',
+        returned: 'success',
+        cancelled: 'danger'
+    };
+
+    return `<span class="badge bg-${map[status] || 'secondary'} me-1">${status || '-'}</span>`;
+}
+
+function getPaymentBadge(status) {
+    const map = {
+        paid: 'success',
+        unpaid: 'warning',
+        pending: 'warning',
+        failed: 'danger',
+        refunded: 'secondary'
+    };
+
+    return `<span class="badge bg-${map[status] || 'secondary'} me-1">Zahlung: ${status || '-'}</span>`;
+}
+
+function getReturnBadge(status) {
+    const map = {
+        pending: 'secondary',
+        returned_ok: 'success',
+        returned_late: 'warning',
+        returned_damaged: 'danger',
+        returned_late_damaged: 'danger'
+    };
+
+    return `<span class="badge bg-${map[status] || 'secondary'}">Rückgabe: ${status || 'pending'}</span>`;
 }
 
 function logout() {

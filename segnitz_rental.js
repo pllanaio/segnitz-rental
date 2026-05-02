@@ -862,6 +862,12 @@ app.post('/data', async (req, res) => {
 
         delete req.session.cartKey;
 
+        await connection.execute(
+            `DELETE FROM guest_verifications
+             WHERE email = ?`,
+            [email]
+        );
+
         const enrichedPayload = {
             ...req.body,
             order: {
