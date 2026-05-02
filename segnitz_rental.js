@@ -71,17 +71,19 @@ async function getOrCreateActiveCart(connection, req) {
          VALUES (?, ?)`,
         [sessionKey, userEmail]
     );
-    
+
     return result.insertId;
 }
 
 async function checkProductAvailability(connection, productId, rentalStart, rentalEnd, excludeCartItemId = null) {
+    await expireOldReservations(connection);
     const [orderConflicts] = await connection.execute(
         `SELECT roi.id
          FROM rental_order_items roi
          JOIN rental_orders ro ON ro.id = roi.order_id
          WHERE roi.product_id = ?
-         AND ro.status NOT IN ('cancelled', 'returned')
+         AND ro.status IN ('reserved', 'paid', 'confirmed')
+         AND (ro.status != 'reserved' OR ro.reserved_until > NOW())
          AND roi.rental_start <= ?
          AND roi.rental_end >= ?
          LIMIT 1`,
@@ -101,6 +103,27 @@ function getFormValue(formData, fieldName) {
         .find(el => el.name === fieldName);
 
     return element ? element.value : null;
+}
+
+async function expireOldReservations(connection) {
+    await connection.execute(
+        `UPDATE rental_orders
+         SET status = 'expired'
+         WHERE status = 'reserved'
+         AND reserved_until IS NOT NULL
+         AND reserved_until < NOW()`
+    );
+}
+
+async function getUserIdByEmail(connection, email) {
+    if (!email) return null;
+
+    const [rows] = await connection.execute(
+        `SELECT id FROM users WHERE username = ? LIMIT 1`,
+        [email]
+    );
+
+    return rows.length > 0 ? rows[0].id : null;
 }
 
 async function generateOrderNo(connection) {
@@ -497,6 +520,11 @@ app.post('/data', async (req, res) => {
         connection = await mysql.createConnection(dbConfig);
         await connection.beginTransaction();
 
+        await expireOldReservations(connection);
+
+        const userId = await getUserIdByEmail(connection, email);
+        const reservedUntil = new Date(Date.now() + 15 * 60 * 1000);
+
         const cartId = await getOrCreateActiveCart(connection, req);
         const cartItems = await getCartItemsForOrder(connection, cartId);
 
@@ -515,6 +543,11 @@ app.post('/data', async (req, res) => {
                 item.rentalEnd
             );
 
+            console.log(
+                `${new Date().toISOString()} - Availability check: Produkt "${item.title}" (${item.productId}) von ${item.rentalStart} bis ${item.rentalEnd}: ${available ? 'frei' : 'blockiert'}`
+            );
+
+
             if (!available) {
                 await connection.rollback();
                 return res.status(409).json({
@@ -528,12 +561,13 @@ app.post('/data', async (req, res) => {
 
         const [orderResult] = await connection.execute(
             `INSERT INTO rental_orders
-             (order_no, cart_id, customer_email, customer_first_name, customer_last_name,
-              customer_phone, customer_address, customer_zip, customer_city, status, confirmation_json)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'reserved', ?)`,
+            (order_no, cart_id, user_id, customer_email, customer_first_name, customer_last_name,
+            customer_phone, customer_address, customer_zip, customer_city, status, reserved_until, confirmation_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'reserved', ?, ?)`,
             [
                 orderNo,
                 cartId,
+                userId,
                 email,
                 firstName,
                 lastName,
@@ -541,6 +575,7 @@ app.post('/data', async (req, res) => {
                 address,
                 zip,
                 city,
+                reservedUntil,
                 JSON.stringify(orderSummary)
             ]
         );
@@ -570,10 +605,13 @@ app.post('/data', async (req, res) => {
             [cartId]
         );
 
+        delete req.session.cartKey;
+
         const enrichedPayload = {
             ...req.body,
             order: {
                 id: orderId,
+                reservedUntil: reservedUntil,
                 ...orderSummary
             }
         };
@@ -1053,6 +1091,7 @@ app.get('/products/:id/availability', async (req, res) => {
 
     try {
         connection = await mysql.createConnection(dbConfig);
+        await expireOldReservations(connection);
 
         const [blockedPeriods] = await connection.execute(
             `SELECT 
@@ -1061,7 +1100,8 @@ app.get('/products/:id/availability', async (req, res) => {
              FROM rental_order_items roi
              JOIN rental_orders ro ON ro.id = roi.order_id
              WHERE roi.product_id = ?
-             AND ro.status NOT IN ('cancelled', 'returned')
+             AND ro.status IN ('reserved', 'paid', 'confirmed')
+             AND (ro.status != 'reserved' OR ro.reserved_until > NOW())
              ORDER BY roi.rental_start ASC`,
             [req.params.id]
         );
