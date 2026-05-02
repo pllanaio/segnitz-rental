@@ -826,6 +826,11 @@ async function loadCart() {
 }
 
 async function addProductToCart(productId, rentalStart, rentalEnd) {
+    if (selectedRangeConflicts(rentalStart, rentalEnd)) {
+        alert('Dieses Produkt ist im ausgewählten Zeitraum bereits reserviert.');
+        return;
+    }
+
     try {
         const response = await fetch('/cart/items', {
             method: 'POST',
@@ -838,11 +843,6 @@ async function addProductToCart(productId, rentalStart, rentalEnd) {
                 rentalEnd
             })
         });
-
-        if (selectedRangeConflicts(rentalStart, rentalEnd)) {
-            alert('Dieses Produkt ist im ausgewählten Zeitraum bereits reserviert.');
-            return;
-        }
 
         const result = await response.json();
 
