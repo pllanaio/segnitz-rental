@@ -176,8 +176,8 @@ async function getCartItemsForOrder(connection, cartId) {
         `SELECT 
             ci.id,
             ci.product_id AS productId,
-            ci.rental_start AS rentalStart,
-            ci.rental_end AS rentalEnd,
+            DATE_FORMAT(ci.rental_start, '%Y-%m-%d') AS rentalStart,
+            DATE_FORMAT(ci.rental_end, '%Y-%m-%d') AS rentalEnd,
             ci.quantity,
             p.product_key AS productKey,
             p.title,
@@ -1408,8 +1408,8 @@ app.get('/cart', async (req, res) => {
             `SELECT 
                 ci.id,
                 ci.product_id AS productId,
-                ci.rental_start AS rentalStart,
-                ci.rental_end AS rentalEnd,
+                DATE_FORMAT(ci.rental_start, '%Y-%m-%d') AS rentalStart,
+                DATE_FORMAT(ci.rental_end, '%Y-%m-%d') AS rentalEnd,
                 ci.quantity,
                 p.product_key AS productKey,
                 p.title,
