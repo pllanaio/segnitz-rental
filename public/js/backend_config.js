@@ -439,7 +439,7 @@ function logout() {
             if (response.ok) {
                 window.location.href = 'index.html';
             } else {
-                alert('Fehler beim Abmelden');
+                showAlert('Fehler beim Abmelden', 'danger');
             }
         })
         .catch(error => {

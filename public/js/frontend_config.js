@@ -42,6 +42,31 @@ if (current_step == 0) {
         .add('d-inline-block');
 }
 
+function showAlert(message, type = 'info', timeout = 4000) {
+    const container = document.getElementById('globalAlertContainer');
+    if (!container) return;
+
+    const alert = document.createElement('div');
+
+    alert.className = `alert alert-${type} alert-dismissible fade show shadow`;
+    alert.role = 'alert';
+
+    alert.innerHTML = `
+        ${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    `;
+
+    container.appendChild(alert);
+
+    if (timeout) {
+        setTimeout(() => {
+            alert.classList.remove('show');
+            alert.classList.add('hide');
+            setTimeout(() => alert.remove(), 300);
+        }, timeout);
+    }
+}
+
 function submitSignature() {
     var dataURL = signaturePad.toDataURL();
     //Konsolenausgabe zur Sendungsüberprüfung des Bildes
@@ -827,7 +852,7 @@ async function loadCart() {
 
 async function addProductToCart(productId, rentalStart, rentalEnd) {
     if (selectedRangeConflicts(rentalStart, rentalEnd)) {
-        alert('Dieses Produkt ist im ausgewählten Zeitraum bereits reserviert.');
+        showAlert('Dieses Produkt ist im ausgewählten Zeitraum bereits reserviert.', 'danger');
         return;
     }
 
@@ -838,7 +863,7 @@ async function addProductToCart(productId, rentalStart, rentalEnd) {
     });
 
     if (cartConflict) {
-        alert('Dieses Produkt befindet sich bereits im Warenkorb.');
+        showAlert('Dieses Produkt befindet sich bereits im Warenkorb.', 'danger');
         return;
     }
 
@@ -858,15 +883,15 @@ async function addProductToCart(productId, rentalStart, rentalEnd) {
         const result = await response.json();
 
         if (!response.ok) {
-            alert(result.error || 'Produkt konnte nicht zum Warenkorb hinzugefügt werden.');
+            showAlert(result.error || 'Produkt konnte nicht zum Warenkorb hinzugefügt werden.', 'danger');
             return;
         }
 
         await loadCart();
-        alert('Produkt wurde zum Warenkorb hinzugefügt.');
+        showAlert('Produkt wurde zum Warenkorb hinzugefügt.', 'success');
     } catch (error) {
         console.error('Fehler beim Hinzufügen zum Warenkorb:', error);
-        alert('Produkt konnte nicht zum Warenkorb hinzugefügt werden.');
+        showAlert('Produkt konnte nicht zum Warenkorb hinzugefügt werden.', 'danger');
     }
 }
 
@@ -879,14 +904,14 @@ async function deleteCartItem(itemId) {
         const result = await response.json();
 
         if (!response.ok) {
-            alert(result.error || 'Warenkorbposition konnte nicht gelöscht werden.');
+            showAlert(result.error || 'Warenkorbposition konnte nicht gelöscht werden.', 'danger');
             return;
         }
 
         await loadCart();
     } catch (error) {
         console.error('Fehler beim Löschen der Warenkorbposition:', error);
-        alert('Warenkorbposition konnte nicht gelöscht werden.');
+        showAlert('Warenkorbposition konnte nicht gelöscht werden.', 'danger');
     }
 }
 

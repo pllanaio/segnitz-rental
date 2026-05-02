@@ -26,6 +26,6 @@ async function handleLogin(event) {
     if (response.ok) {
         window.location.href = '/index.html';
     } else {
-        alert('Fehler bei der Anmeldung');
+        showAlert('Fehler bei der Anmeldung', 'danger');
     }
 }
