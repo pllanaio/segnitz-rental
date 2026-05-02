@@ -831,6 +831,17 @@ async function addProductToCart(productId, rentalStart, rentalEnd) {
         return;
     }
 
+    const cartConflict = (currentCart.items || []).some(item => {
+        return String(item.productId) === String(productId)
+            && rentalStart <= item.rentalEnd
+            && rentalEnd >= item.rentalStart;
+    });
+
+    if (cartConflict) {
+        alert('Dieses Produkt befindet sich für diesen Zeitraum bereits im Warenkorb.');
+        return;
+    }
+
     try {
         const response = await fetch('/cart/items', {
             method: 'POST',
@@ -1052,6 +1063,7 @@ function initProductCalendar() {
     const startInput = document.getElementById('modalRentalStart');
     const endInput = document.getElementById('modalRentalEnd');
     const infoBox = document.getElementById('modalRentalInfo');
+    const calendarContainer = document.getElementById('modalCalendarContainer');
 
     if (!rangeInput || !startInput || !endInput) return;
 
@@ -1063,6 +1075,10 @@ function initProductCalendar() {
     startInput.value = '';
     endInput.value = '';
 
+    if (calendarContainer) {
+        calendarContainer.innerHTML = '';
+    }
+
     const blockedRanges = currentBlockedPeriods.map(period => ({
         from: period.rentalStart.split('T')[0],
         to: period.rentalEnd.split('T')[0]
@@ -1071,11 +1087,13 @@ function initProductCalendar() {
     productCalendar = flatpickr(rangeInput, {
         mode: 'range',
         inline: true,
+        appendTo: calendarContainer,
         minDate: 'today',
         dateFormat: 'Y-m-d',
         locale: 'de',
         disable: blockedRanges,
-        showMonths: 2,
+        showMonths: 1,
+        allowInput: false,
 
         onChange: function (selectedDates) {
             if (selectedDates.length !== 2) {

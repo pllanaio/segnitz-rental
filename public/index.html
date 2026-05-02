@@ -346,16 +346,17 @@
                     <input type="hidden" id="modalProductId">
 
                     <div class="row g-3">
-                        <input type="text" class="form-control" id="modalRentalRange"
-                            placeholder="Mietzeitraum auswählen">
-                        <div class="col-12 col-lg-6">
-                            <label class="form-label" for="modalRentalStart">Mietbeginn</label>
-                            <input type="hidden" id="modalRentalStart">
+                        <div class="col-12">
+                            <label class="form-label" for="modalRentalRange">Mietzeitraum auswählen</label>
+                            <input type="text" class="form-control" id="modalRentalRange"
+                                placeholder="Mietzeitraum auswählen" readonly>
                         </div>
 
-                        <div class="col-12 col-lg-6">
-                            <label class="form-label" for="modalRentalEnd">Mietende</label>
-                            <input type="hidden" id="modalRentalEnd">
+                        <input type="hidden" id="modalRentalStart">
+                        <input type="hidden" id="modalRentalEnd">
+
+                        <div class="col-12">
+                            <div id="modalCalendarContainer"></div>
                         </div>
 
                         <div class="col-12">
