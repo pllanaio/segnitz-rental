@@ -773,14 +773,8 @@ app.post('/data', async (req, res) => {
 
         const userId = await getUserIdByEmail(connection, email);
 
-        const cartId = await getActiveCart(connection, req);
+        const cartId = await getOrCreateActiveCart(connection, req);
 
-        if (!cartId) {
-            return res.json({
-                cartId: null,
-                items: []
-            });
-        }
         const cartItems = await getCartItemsForOrder(connection, cartId);
 
         if (cartItems.length === 0) {
@@ -1742,7 +1736,14 @@ app.get('/cart', async (req, res) => {
     try {
         connection = await mysql.createConnection(dbConfig);
         await runDatabaseCleanup(connection);
-        const cartId = await getOrCreateActiveCart(connection, req);
+        const cartId = await getActiveCart(connection, req);
+
+        if (!cartId) {
+            return res.json({
+                cartId: null,
+                items: []
+            });
+        }
 
         const [items] = await connection.execute(
             `SELECT 
