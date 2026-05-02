@@ -139,6 +139,28 @@ async function expireOldReservations(connection) {
     );
 }
 
+async function deleteExpiredGuestVerifications(connection) {
+    await connection.execute(
+        `DELETE FROM guest_verifications
+         WHERE expires_at IS NOT NULL
+         AND expires_at < NOW()`
+    );
+}
+
+async function deleteOldActiveCarts(connection) {
+    await connection.execute(
+        `DELETE FROM rental_carts
+         WHERE status = 'active'
+         AND updated_at < NOW() - INTERVAL 24 HOUR`
+    );
+}
+
+async function runDatabaseCleanup(connection) {
+    await expireOldReservations(connection);
+    await deleteExpiredGuestVerifications(connection);
+    await deleteOldActiveCarts(connection);
+}
+
 async function getUserIdByEmail(connection, email) {
     if (!email) return null;
 
@@ -304,12 +326,7 @@ app.post('/login', async (req, res) => {
         password
     } = req.body;
     try {
-        const connection = await mysql.createConnection({
-            host: process.env.DB_HOST,
-            user: process.env.DB_USER,
-            password: process.env.DB_PW,
-            database: process.env.DB_NAME
-        });
+        const connection = await mysql.createConnection(dbConfig);
         // Hole das Passwort des Benutzers aus der Datenbank
         const [rows] = await connection.execute(
             'SELECT password, role FROM users WHERE username = ?',
@@ -542,6 +559,7 @@ app.post('/data', async (req, res) => {
         const city = getFormValue(formData, 'CustomerCity');
 
         connection = await mysql.createConnection(dbConfig);
+        await runDatabaseCleanup(connection);
         await connection.beginTransaction();
 
         await expireOldReservations(connection);
@@ -775,13 +793,7 @@ app.post('/register-customer', async (req, res) => {
     }
 
     try {
-        const connection = await mysql.createConnection({
-            host: process.env.DB_HOST,
-            port: Number(process.env.DB_PORT),
-            user: process.env.DB_USER,
-            password: process.env.DB_PW,
-            database: process.env.DB_NAME
-        });
+        const connection = await mysql.createConnection(dbConfig);
 
         const [existingUsers] = await connection.execute(
             'SELECT id FROM users WHERE username = ?',
@@ -853,13 +865,8 @@ app.post('/request-guest-verification', async (req, res) => {
     }
 
     try {
-        const connection = await mysql.createConnection({
-            host: process.env.DB_HOST,
-            port: Number(process.env.DB_PORT),
-            user: process.env.DB_USER,
-            password: process.env.DB_PW,
-            database: process.env.DB_NAME
-        });
+        const connection = await mysql.createConnection(dbConfig);
+        await runDatabaseCleanup(connection);
 
         const token = createVerificationToken();
         const expires = getVerificationExpiry();
@@ -900,13 +907,8 @@ app.get('/verify-email', async (req, res) => {
     }
 
     try {
-        const connection = await mysql.createConnection({
-            host: process.env.DB_HOST,
-            port: Number(process.env.DB_PORT),
-            user: process.env.DB_USER,
-            password: process.env.DB_PW,
-            database: process.env.DB_NAME
-        });
+        const connection = await mysql.createConnection(dbConfig);
+        await runDatabaseCleanup(connection);
 
         const [users] = await connection.execute(
             `SELECT id, username 
@@ -971,13 +973,8 @@ app.post('/check-email-verification', async (req, res) => {
     }
 
     try {
-        const connection = await mysql.createConnection({
-            host: process.env.DB_HOST,
-            port: Number(process.env.DB_PORT),
-            user: process.env.DB_USER,
-            password: process.env.DB_PW,
-            database: process.env.DB_NAME
-        });
+        const connection = await mysql.createConnection(dbConfig);
+        await runDatabaseCleanup(connection);
 
         const [users] = await connection.execute(
             'SELECT email_verified FROM users WHERE username = ?',
@@ -1029,13 +1026,7 @@ app.get('/my-profile', async (req, res) => {
     }
 
     try {
-        const connection = await mysql.createConnection({
-            host: process.env.DB_HOST,
-            port: Number(process.env.DB_PORT),
-            user: process.env.DB_USER,
-            password: process.env.DB_PW,
-            database: process.env.DB_NAME
-        });
+        const connection = await mysql.createConnection(dbConfig);
 
         const [rows] = await connection.execute(
             `SELECT 
@@ -1115,6 +1106,7 @@ app.get('/products/:id/availability', async (req, res) => {
 
     try {
         connection = await mysql.createConnection(dbConfig);
+        await runDatabaseCleanup(connection);
         await expireOldReservations(connection);
 
         const [blockedPeriods] = await connection.execute(
@@ -1402,6 +1394,7 @@ app.get('/cart', async (req, res) => {
 
     try {
         connection = await mysql.createConnection(dbConfig);
+        await runDatabaseCleanup(connection);
         const cartId = await getOrCreateActiveCart(connection, req);
 
         const [items] = await connection.execute(
@@ -1459,6 +1452,7 @@ app.post('/cart/items', async (req, res) => {
 
     try {
         connection = await mysql.createConnection(dbConfig);
+        await runDatabaseCleanup(connection);
 
         const [products] = await connection.execute(
             `SELECT id
