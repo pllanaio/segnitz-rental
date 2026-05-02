@@ -660,8 +660,7 @@ app.post('/data', async (req, res) => {
         }
 
         await connection.execute(
-            `UPDATE rental_carts
-             SET status = 'ordered'
+            `DELETE FROM rental_carts
              WHERE id = ?`,
             [cartId]
         );
