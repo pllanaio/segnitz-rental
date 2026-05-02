@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="css/bootstrap.min.css">
     <link rel="stylesheet" href="css/style.css">
     <link rel="stylesheet" href="css/bootstrap-icons-1.11.3/font/bootstrap-icons.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
     <!-- FONT -->
     <link rel="stylesheet" href="css/fonts.css">
     <!--FAVICON-->
@@ -296,6 +297,9 @@
         <div class="preloader-section section-left"></div>
         <div class="preloader-section section-right"></div>
     </div>
+    <!-- Flatpickr -->
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/de.js"></script>
     <!-- General Functionalities -->
     <script type="text/javascript" src="js/frontend_config.js"></script>
     <!--Bootstrap-->
@@ -342,14 +346,15 @@
                     <input type="hidden" id="modalProductId">
 
                     <div class="row g-3">
+                        <input type="text" class="form-control" id="modalRentalRange" placeholder="Mietzeitraum auswählen">
                         <div class="col-12 col-lg-6">
                             <label class="form-label" for="modalRentalStart">Mietbeginn</label>
-                            <input type="date" class="form-control" id="modalRentalStart">
+                            <input type="hidden" id="modalRentalStart">
                         </div>
 
                         <div class="col-12 col-lg-6">
                             <label class="form-label" for="modalRentalEnd">Mietende</label>
-                            <input type="date" class="form-control" id="modalRentalEnd">
+                            <input type="hidden" id="modalRentalEnd">
                         </div>
 
                         <div class="col-12">
