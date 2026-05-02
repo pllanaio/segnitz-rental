@@ -92,7 +92,6 @@ async function getOrCreateActiveCart(connection, req) {
 }
 
 async function checkProductAvailability(connection, productId, rentalStart, rentalEnd, excludeCartItemId = null) {
-    await expireOldReservations(connection);
     const [orderConflicts] = await connection.execute(
         `SELECT roi.id
          FROM rental_order_items roi
@@ -577,8 +576,6 @@ app.post('/data', async (req, res) => {
         connection = await mysql.createConnection(dbConfig);
         await runDatabaseCleanup(connection);
         await connection.beginTransaction();
-
-        await expireOldReservations(connection);
 
         const userId = await getUserIdByEmail(connection, email);
 
@@ -1128,7 +1125,7 @@ app.get('/products/:id/availability', async (req, res) => {
 
     try {
         connection = await mysql.createConnection(dbConfig);
-        await expireOldReservations(connection);
+        await runDatabaseCleanup(connection);
 
         const [blockedPeriods] = await connection.execute(
             `SELECT 
