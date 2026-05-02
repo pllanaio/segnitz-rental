@@ -185,38 +185,112 @@ prevBtn.addEventListener('click', () => {
             .add('d-none');
     }
     progress((100 / stepCount) * current_step);
+
 });
 
-submitBtn.addEventListener('click', (event) => {
-    let signatureValid = validateSignatureStep();
+function serializeFormToStepJson() {
+    const steps = Array.from(document.querySelectorAll('#steps-container .step'));
+
+    return steps.map((stepElement, index) => {
+        const fields = Array.from(
+            stepElement.querySelectorAll('input, select, textarea')
+        );
+
+        return {
+            step: index + 1,
+            elements: fields
+                .filter(field => field.name)
+                .map(field => {
+                    const element = {
+                        name: field.name,
+                        value: field.type === 'checkbox'
+                            ? (field.checked ? 'on' : '')
+                            : field.value
+                    };
+
+                    if (field.type === 'checkbox') {
+                        element.checked = field.checked;
+                    }
+
+                    return element;
+                })
+        };
+    });
+}
+
+submitBtn.addEventListener('click', async (event) => {
+    event.preventDefault();
+
+    submitSignature();
+
+    const signatureValid = validateSignatureStep();
 
     if (!signatureValid) {
-        event.preventDefault();
-    } else {
+        return;
+    }
 
-        preloader
-            .classList
-            .add('d-block');
+    const formData = serializeFormToStepJson();
 
-        const timer = ms => new Promise(res => setTimeout(res, ms));
+    try {
+        preloader.classList.add('d-block');
+        submitBtn.disabled = true;
 
-        timer(0)
-            .then(() => {
-                bodyElement.classList.add('loaded');
+        const response = await fetch('/data', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                form: formData
             })
-            .then(() => {
-                step[stepCount].classList.remove('d-block');
-                step[stepCount].classList.add('d-none');
+        });
 
-                prevBtn.classList.remove('d-inline-block');
-                prevBtn.classList.add('d-none');
+        const result = await response.json();
 
-                submitBtn.classList.remove('d-inline-block');
-                submitBtn.classList.add('d-none');
+        if (!response.ok) {
+            preloader.classList.remove('d-block');
+            bodyElement.classList.remove('loaded');
+            submitBtn.disabled = false;
 
-                succcessDiv.classList.remove('d-none');
-                succcessDiv.classList.add('d-block');
-            });
+            if (response.status === 409) {
+                showAlert(
+                    `${result.error} <a href="/login.html" class="alert-link">Hier klicken, um sich einzuloggen.</a>`,
+                    'warning',
+                    8000
+                );
+                return;
+            }
+
+            showAlert(result.error || 'Bestellung konnte nicht abgeschlossen werden.', 'danger');
+            return;
+        }
+
+        bodyElement.classList.add('loaded');
+
+        step[stepCount].classList.remove('d-block');
+        step[stepCount].classList.add('d-none');
+
+        prevBtn.classList.remove('d-inline-block');
+        prevBtn.classList.add('d-none');
+
+        submitBtn.classList.remove('d-inline-block');
+        submitBtn.classList.add('d-none');
+
+        succcessDiv.classList.remove('d-none');
+        succcessDiv.classList.add('d-block');
+
+        if (result.pdfUrl) {
+            window.open(result.pdfUrl, '_blank');
+        }
+
+    } catch (error) {
+        console.error('Fehler beim Absenden der Bestellung:', error);
+
+        preloader.classList.remove('d-block');
+        bodyElement.classList.remove('loaded');
+        submitBtn.disabled = false;
+
+        showAlert('Bestellung konnte nicht abgeschlossen werden.', 'danger');
     }
 });
 
