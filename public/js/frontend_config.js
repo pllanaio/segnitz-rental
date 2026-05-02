@@ -838,7 +838,7 @@ async function addProductToCart(productId, rentalStart, rentalEnd) {
     });
 
     if (cartConflict) {
-        alert('Dieses Produkt befindet sich für diesen Zeitraum bereits im Warenkorb.');
+        alert('Dieses Produkt befindet sich bereits im Warenkorb.');
         return;
     }
 
