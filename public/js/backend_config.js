@@ -13,27 +13,27 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const backendSearchInput = document.getElementById('backendProductSearchInput');
 
-if (backendSearchInput) {
-    backendSearchInput.addEventListener('input', () => {
-        const query = backendSearchInput.value.trim().toLowerCase();
+    if (backendSearchInput) {
+        backendSearchInput.addEventListener('input', () => {
+            const query = backendSearchInput.value.trim().toLowerCase();
 
-        filteredProducts = products.filter(product => {
-            return [
-                product.title,
-                product.description,
-                product.product_key,
-                product.price_per_day,
-                product.deposit,
-                product.is_active ? 'aktiv' : 'inaktiv'
-            ]
-                .join(' ')
-                .toLowerCase()
-                .includes(query);
+            filteredProducts = products.filter(product => {
+                return [
+                    product.title,
+                    product.description,
+                    product.product_key,
+                    product.price_per_day,
+                    product.deposit,
+                    product.is_active ? 'aktiv' : 'inaktiv'
+                ]
+                    .join(' ')
+                    .toLowerCase()
+                    .includes(query);
+            });
+
+            renderBackendProductList();
         });
-
-        renderBackendProductList();
-    });
-}
+    }
 });
 
 async function loadProducts() {
@@ -48,7 +48,7 @@ async function loadProducts() {
 
     } catch (error) {
         console.error('Fehler beim Laden der Produkte:', error);
-        showMessage('Produkte konnten nicht geladen werden.', 'danger');
+        showAlert('Produkte konnten nicht geladen werden.', 'danger');
     }
 }
 
@@ -124,7 +124,7 @@ async function saveProduct(event) {
     };
 
     if (!payload.productKey || !payload.title) {
-        showMessage('Produkt-Key und Titel sind Pflichtfelder.', 'warning');
+        showAlert('Produkt-Key und Titel sind Pflichtfelder.', 'warning');
         return;
     }
 
@@ -140,14 +140,14 @@ async function saveProduct(event) {
         const result = await response.json();
 
         if (!response.ok) {
-            showMessage(result.error || 'Produkt konnte nicht gespeichert werden.', 'danger');
+            showAlert(result.error || 'Produkt konnte nicht gespeichert werden.', 'danger');
             return;
         }
         const savedProductId = productId || result.productId;
 
         await uploadProductImages(savedProductId);
 
-        showMessage(result.message || 'Produkt gespeichert.', 'success');
+        showAlert(result.message || 'Produkt gespeichert.', 'success');
 
         await loadProducts();
 
@@ -160,7 +160,7 @@ async function saveProduct(event) {
         document.getElementById('productImages').value = '';
     } catch (error) {
         console.error('Fehler beim Speichern:', error);
-        showMessage('Fehler beim Speichern des Produkts.', 'danger');
+        showAlert('Fehler beim Speichern des Produkts.', 'danger');
     }
 }
 
@@ -298,24 +298,28 @@ async function saveImageOrder(productId) {
         const result = await response.json();
 
         if (!response.ok) {
-            showMessage(result.error || 'Bildreihenfolge konnte nicht gespeichert werden.', 'danger');
+            showAlert(result.error || 'Bildreihenfolge konnte nicht gespeichert werden.', 'danger');
             return;
         }
 
-        showMessage('Bildreihenfolge gespeichert.', 'success');
+        showAlert('Bildreihenfolge gespeichert.', 'success');
         await loadProducts();
 
     } catch (error) {
         console.error('Fehler beim Speichern der Bildreihenfolge:', error);
-        showMessage('Fehler beim Speichern der Bildreihenfolge.', 'danger');
+        showAlert('Fehler beim Speichern der Bildreihenfolge.', 'danger');
     }
 }
 
 async function deleteProductImage(imageId, productId) {
-    if (!confirm('Bild wirklich löschen?')) {
+    const confirmed = await showConfirm(
+        'Möchten Sie dieses Bild wirklich löschen?',
+        'Bild löschen'
+    );
+
+    if (!confirmed) {
         return;
     }
-
     try {
         const response = await fetch(`/product-images/${imageId}`, {
             method: 'DELETE'
@@ -324,11 +328,11 @@ async function deleteProductImage(imageId, productId) {
         const result = await response.json();
 
         if (!response.ok) {
-            showMessage(result.error || 'Bild konnte nicht gelöscht werden.', 'danger');
+            showAlert(result.error || 'Bild konnte nicht gelöscht werden.', 'danger');
             return;
         }
 
-        showMessage(result.message || 'Bild gelöscht.', 'success');
+        showAlert(result.message || 'Bild gelöscht.', 'success');
 
         await loadProducts();
 
@@ -338,12 +342,17 @@ async function deleteProductImage(imageId, productId) {
         }
     } catch (error) {
         console.error('Fehler beim Löschen des Bildes:', error);
-        showMessage('Fehler beim Löschen des Bildes.', 'danger');
+        showAlert('Fehler beim Löschen des Bildes.', 'danger');
     }
 }
 
 async function deleteProduct(id) {
-    if (!confirm('Produkt wirklich löschen?')) {
+    const confirmed = await showConfirm(
+        'Möchten Sie dieses Produkt wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.',
+        'Produkt löschen'
+    );
+
+    if (!confirmed) {
         return;
     }
 
@@ -355,15 +364,15 @@ async function deleteProduct(id) {
         const result = await response.json();
 
         if (!response.ok) {
-            showMessage(result.error || 'Produkt konnte nicht gelöscht werden.', 'danger');
+            showAlert(result.error || 'Produkt konnte nicht gelöscht werden.', 'danger');
             return;
         }
 
-        showMessage(result.message || 'Produkt gelöscht.', 'success');
+        showAlert(result.message || 'Produkt gelöscht.', 'success');
         loadProducts();
     } catch (error) {
         console.error('Fehler beim Löschen:', error);
-        showMessage('Fehler beim Löschen des Produkts.', 'danger');
+        showAlert('Fehler beim Löschen des Produkts.', 'danger');
     }
 }
 
@@ -376,14 +385,6 @@ function resetForm() {
     document.getElementById('cancelEditBtn').classList.add('d-none');
     document.getElementById('existingImagesWrapper').classList.add('d-none');
     document.getElementById('existingImages').innerHTML = '';
-}
-
-function showMessage(message, type) {
-    const box = document.getElementById('productMessage');
-
-    box.className = `alert alert-${type}`;
-    box.textContent = message;
-    box.classList.remove('d-none');
 }
 
 function loadBackendUser() {
@@ -429,6 +430,46 @@ async function uploadProductImages(productId) {
     if (!response.ok) {
         throw new Error(result.error || 'Bilder konnten nicht hochgeladen werden.');
     }
+}
+
+function showConfirm(message, title = 'Aktion bestätigen') {
+    return new Promise(resolve => {
+        const modalElement = document.getElementById('confirmModal');
+        const titleElement = document.getElementById('confirmModalTitle');
+        const bodyElement = document.getElementById('confirmModalBody');
+        const confirmBtn = document.getElementById('confirmModalConfirmBtn');
+
+        if (!modalElement || !titleElement || !bodyElement || !confirmBtn) {
+            resolve(false);
+            return;
+        }
+
+        titleElement.textContent = title;
+        bodyElement.textContent = message;
+
+        const modal = new bootstrap.Modal(modalElement);
+
+        const cleanup = () => {
+            confirmBtn.removeEventListener('click', onConfirm);
+            modalElement.removeEventListener('hidden.bs.modal', onCancel);
+        };
+
+        const onConfirm = () => {
+            cleanup();
+            modal.hide();
+            resolve(true);
+        };
+
+        const onCancel = () => {
+            cleanup();
+            resolve(false);
+        };
+
+        confirmBtn.addEventListener('click', onConfirm);
+        modalElement.addEventListener('hidden.bs.modal', onCancel, { once: true });
+
+        modal.show();
+    });
 }
 
 function logout() {

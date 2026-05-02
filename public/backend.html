@@ -31,6 +31,9 @@
 </head>
 
 <body>
+    <div id="globalAlertContainer" class="position-fixed top-0 start-50 translate-middle-x mt-3"
+        style="z-index: 3000; width: 90%; max-width: 520px;">
+    </div>
     <!-- CONTAINER -->
     <div class="container-fluid min-vh-100 p-0">
         <div class="row g-0 min-vh-100">
@@ -141,14 +144,38 @@
         <div class="preloader-section section-left"></div>
         <div class="preloader-section section-right"></div>
     </div>
+
+    <div class="modal fade" id="confirmModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="confirmModalTitle">Aktion bestätigen</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+
+                <div class="modal-body" id="confirmModalBody">
+                    Möchten Sie diese Aktion wirklich ausführen?
+                </div>
+
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                        Abbrechen
+                    </button>
+                    <button type="button" class="btn btn-danger" id="confirmModalConfirmBtn">
+                        Bestätigen
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!--Bootstrap-->
     <script type="text/javascript" src="js/bootstrap.bundle.min.js"></script>
-    <!-- Static App Form Collection Script -->
-    <script type="text/javascript" src="js/static-forms.js"></script>
-    <!--Popper-->
-    <script type="text/javascript" src="js/popper.min.js"></script>
-    <!-- JavaScript to populate dropdown options -->
+    <!-- Javascript to handle Alerts -->
+    <script type="text/javascript" src="js/alerts.js"></script>
+    <!-- General Functionalities -->
     <script type="text/javascript" src="js/backend_config.js"></script>
+
 </body>
 
 </html>
