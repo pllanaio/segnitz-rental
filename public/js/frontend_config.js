@@ -42,31 +42,6 @@ if (current_step == 0) {
         .add('d-inline-block');
 }
 
-function showAlert(message, type = 'info', timeout = 4000) {
-    const container = document.getElementById('globalAlertContainer');
-    if (!container) return;
-
-    const alert = document.createElement('div');
-
-    alert.className = `alert alert-${type} alert-dismissible fade show shadow`;
-    alert.role = 'alert';
-
-    alert.innerHTML = `
-        ${message}
-        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-    `;
-
-    container.appendChild(alert);
-
-    if (timeout) {
-        setTimeout(() => {
-            alert.classList.remove('show');
-            alert.classList.add('hide');
-            setTimeout(() => alert.remove(), 300);
-        }, timeout);
-    }
-}
-
 function submitSignature() {
     var dataURL = signaturePad.toDataURL();
     //Konsolenausgabe zur Sendungsüberprüfung des Bildes
@@ -255,11 +230,12 @@ function logout() {
                 window.location.href = '/index.html';
             } else {
                 console.error('Fehler beim Logout');
-                alert('Fehler beim Abmelden');
+                showAlert('Fehler beim Abmelden', 'danger');
             }
         })
         .catch(error => {
             console.error('Netzwerkfehler beim Versuch, sich abzumelden:', error);
+            showAlert('Netzwerkfehler', 'danger');
         });
 }
 
@@ -328,12 +304,12 @@ document.addEventListener("DOMContentLoaded", () => {
             const rentalEnd = document.getElementById('modalRentalEnd').value;
 
             if (!rentalStart || !rentalEnd) {
-                alert('Bitte wählen Sie Mietbeginn und Mietende aus.');
+                showAlert('Bitte wählen Sie Mietbeginn und Mietende aus.', 'warning');
                 return;
             }
 
             if (new Date(rentalEnd) < new Date(rentalStart)) {
-                alert('Das Mietende darf nicht vor dem Mietbeginn liegen.');
+                showAlert('Das Mietende darf nicht vor dem Mietbeginn liegen.', 'warning');
                 return;
             }
 
@@ -475,7 +451,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const email = document.getElementById('CustomerEmail').value.trim();
 
             if (!email) {
-                alert('Bitte geben Sie zuerst Ihre E-Mail-Adresse ein.');
+                showAlert('Bitte geben Sie zuerst Ihre E-Mail-Adresse ein.', 'warning');
                 return;
             }
 
@@ -497,7 +473,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const result = await response.json();
 
                 if (!response.ok) {
-                    alert(result.error || 'Fehler beim Versenden des Bestätigungslinks.');
+                    showAlert(result.error || 'Fehler beim Versenden des Bestätigungslinks.', 'danger');
                     guestOrderBtn.disabled = false;
                     return;
                 }
@@ -509,11 +485,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     guestVerificationInfo.classList.remove('d-none');
                 }
 
-                alert('Bestätigungslink wurde versendet.');
+                showAlert('Bestätigungslink wurde versendet.', 'success');
 
             } catch (error) {
                 console.error('Fehler bei Gast-Verifikation:', error);
-                alert('Fehler beim Versenden des Bestätigungslinks.');
+                showAlert('Fehler beim Versenden des Bestätigungslinks.', 'danger');
                 guestOrderBtn.disabled = false;
             }
         });
@@ -524,7 +500,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const email = document.getElementById('CustomerEmail').value.trim();
 
             if (!email) {
-                alert('Bitte geben Sie Ihre E-Mail-Adresse ein.');
+                showAlert('Bitte geben Sie Ihre E-Mail-Adresse ein.', 'warning');
                 return;
             }
 
@@ -541,14 +517,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 if (result.verified) {
                     guestEmailVerified = true;
-                    alert('E-Mail wurde erfolgreich bestätigt. Sie können fortfahren.');
+                    showAlert('E-Mail wurde erfolgreich bestätigt. Sie können fortfahren.', 'success');
                 } else {
-                    alert('E-Mail wurde noch nicht bestätigt.');
+                    showAlert('E-Mail wurde noch nicht bestätigt.', 'warning');
                 }
 
             } catch (error) {
                 console.error('Fehler beim Prüfen der Gast-Verifikation:', error);
-                alert('Fehler beim Prüfen der Verifikation.');
+                showAlert('Fehler beim Prüfen der Verifikation.', 'danger');
             }
         });
     }
@@ -569,7 +545,7 @@ function validateCustomerRequiredFields() {
         const field = document.getElementById(fieldId);
 
         if (!field || !field.value.trim()) {
-            alert('Bitte füllen Sie alle persönlichen Daten aus.');
+            showAlert('Bitte füllen Sie alle persönlichen Daten aus.', 'warning');
             return false;
         }
     }
@@ -581,7 +557,7 @@ async function validateProductStep() {
     await loadCart();
 
     if (!currentCart.items || currentCart.items.length === 0) {
-        alert('Bitte legen Sie mindestens ein Produkt in den Warenkorb.');
+        showAlert('Bitte legen Sie mindestens ein Produkt in den Warenkorb.', 'warning');
         return false;
     }
 
@@ -590,7 +566,7 @@ async function validateProductStep() {
 
 function validateCartReviewStep() {
     if (!currentCart.items || currentCart.items.length === 0) {
-        alert('Ihr Warenkorb ist leer.');
+        showAlert('Ihr Warenkorb ist leer.', 'warning');
         return false;
     }
 
@@ -611,12 +587,12 @@ function validateCustomerDataStep() {
     }
 
     if (!guestVerificationRequested) {
-        alert('Bitte wählen Sie "Als Gast bestellen", um Ihre E-Mail-Adresse zu bestätigen.');
+        showAlert('Bitte wählen Sie "Als Gast bestellen", um Ihre E-Mail-Adresse zu bestätigen.', 'warning');
         return false;
     }
 
     if (!guestEmailVerified) {
-        alert('Bitte bestätigen Sie zuerst Ihre E-Mail-Adresse und klicken Sie anschließend auf "Verifikation prüfen".');
+        showAlert('Bitte bestätigen Sie zuerst Ihre E-Mail-Adresse und klicken Sie anschließend auf "Verifikation prüfen".', 'warning');
         return false;
     }
 
@@ -635,17 +611,17 @@ function validateSignatureStep() {
     let isValid = true;
 
     if (signaturePad.isEmpty()) {
-        alert('Bitte leisten Sie Ihre Unterschrift.');
+        showAlert('Bitte leisten Sie Ihre Unterschrift.', 'warning');
         isValid = false;
     }
 
     if (!document.getElementById('agbs').checked) {
-        alert('Bitte stimmen Sie den Allgemeinen Geschäftsbedingungen zu.');
+        showAlert('Bitte stimmen Sie den Allgemeinen Geschäftsbedingungen zu.', 'warning');
         isValid = false;
     }
 
     if (!document.getElementById('dsgvo').checked) {
-        alert('Bitte stimmen Sie der Datenschutzerklärung zu.');
+        showAlert('Bitte stimmen Sie der Datenschutzerklärung zu.', 'warning');
         isValid = false;
     }
 
