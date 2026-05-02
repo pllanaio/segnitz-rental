@@ -97,6 +97,30 @@ async function checkProductAvailability(connection, productId, rentalStart, rent
     return true;
 }
 
+async function checkCartItemConflict(connection, cartId, productId, rentalStart, rentalEnd, excludeCartItemId = null) {
+    let sql = `
+        SELECT id
+        FROM rental_cart_items
+        WHERE cart_id = ?
+        AND product_id = ?
+        AND rental_start <= ?
+        AND rental_end >= ?
+    `;
+
+    const params = [cartId, productId, rentalEnd, rentalStart];
+
+    if (excludeCartItemId) {
+        sql += ` AND id != ?`;
+        params.push(excludeCartItemId);
+    }
+
+    sql += ` LIMIT 1`;
+
+    const [conflicts] = await connection.execute(sql, params);
+
+    return conflicts.length > 0;
+}
+
 function getFormValue(formData, fieldName) {
     const element = formData
         .flatMap(step => step.elements)
@@ -1095,14 +1119,14 @@ app.get('/products/:id/availability', async (req, res) => {
 
         const [blockedPeriods] = await connection.execute(
             `SELECT 
-                roi.rental_start AS rentalStart,
-                roi.rental_end AS rentalEnd
-             FROM rental_order_items roi
-             JOIN rental_orders ro ON ro.id = roi.order_id
-             WHERE roi.product_id = ?
-             AND ro.status IN ('reserved', 'paid', 'confirmed')
-             AND (ro.status != 'reserved' OR ro.reserved_until > NOW())
-             ORDER BY roi.rental_start ASC`,
+                DATE_FORMAT(roi.rental_start, '%Y-%m-%d') AS rentalStart,
+                DATE_FORMAT(roi.rental_end, '%Y-%m-%d') AS rentalEnd
+            FROM rental_order_items roi
+            JOIN rental_orders ro ON ro.id = roi.order_id
+            WHERE roi.product_id = ?
+            AND ro.status IN ('reserved', 'paid', 'confirmed')
+            AND (ro.status != 'reserved' OR ro.reserved_until > NOW())
+            ORDER BY roi.rental_start ASC`,
             [req.params.id]
         );
 
@@ -1465,6 +1489,20 @@ app.post('/cart/items', async (req, res) => {
 
         const cartId = await getOrCreateActiveCart(connection, req);
 
+        const cartConflict = await checkCartItemConflict(
+            connection,
+            cartId,
+            productId,
+            rentalStart,
+            rentalEnd
+        );
+
+        if (cartConflict) {
+            return res.status(409).json({
+                error: 'Dieses Produkt befindet sich für diesen Zeitraum bereits im Warenkorb.'
+            });
+        }
+
         const [result] = await connection.execute(
             `INSERT INTO rental_cart_items
              (cart_id, product_id, rental_start, rental_end, quantity)
@@ -1521,6 +1559,21 @@ app.put('/cart/items/:id', async (req, res) => {
         if (items.length === 0) {
             return res.status(404).json({
                 error: 'Warenkorbposition wurde nicht gefunden.'
+            });
+        }
+
+        const cartConflict = await checkCartItemConflict(
+            connection,
+            cartId,
+            items[0].product_id,
+            rentalStart,
+            rentalEnd,
+            req.params.id
+        );
+
+        if (cartConflict) {
+            return res.status(409).json({
+                error: 'Dieses Produkt befindet sich für diesen Zeitraum bereits im Warenkorb.'
             });
         }
 
