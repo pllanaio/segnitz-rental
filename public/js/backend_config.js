@@ -1,5 +1,6 @@
 let products = [];
 let filteredProducts = [];
+let orders = [];
 
 document.addEventListener('DOMContentLoaded', () => {
     const form = document.getElementById('productForm');
@@ -387,6 +388,74 @@ function resetForm() {
     document.getElementById('existingImages').innerHTML = '';
 }
 
+async function loadOrders() {
+    try {
+        const response = await fetch('/admin/orders');
+        const result = await response.json();
+
+        if (!response.ok) {
+            showAlert(result.error || 'Bestellungen konnten nicht geladen werden.', 'danger');
+            return;
+        }
+
+        orders = result;
+        renderOrders();
+
+    } catch (error) {
+        console.error('Fehler beim Laden der Bestellungen:', error);
+        showAlert('Bestellungen konnten nicht geladen werden.', 'danger');
+    }
+}
+
+function renderOrders() {
+    const container = document.getElementById('ordersList');
+    container.innerHTML = '';
+
+    if (orders.length === 0) {
+        container.innerHTML = '<div class="alert alert-info">Keine Bestellungen vorhanden.</div>';
+        return;
+    }
+
+    orders.forEach(order => {
+        const card = document.createElement('div');
+        card.className = 'card mb-3';
+
+        card.innerHTML = `
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h5>${order.order_no}</h5>
+                        <small>${order.customer_email}</small><br>
+                        <small>Status: ${order.status}</small>
+                    </div>
+
+                    <button class="btn btn-primary btn-sm"
+                        onclick="openOrderDetails(${order.id})">
+                        Details
+                    </button>
+                </div>
+            </div>
+        `;
+
+        container.appendChild(card);
+    });
+}
+
+async function openOrderDetails(orderId) {
+    try {
+        const response = await fetch(`/admin/orders/${orderId}`);
+        const order = await response.json();
+
+        console.log(order);
+
+        showAlert('Details siehe Konsole (nächster Schritt: Modal bauen)', 'info');
+
+    } catch (error) {
+        console.error(error);
+        showAlert('Fehler beim Laden der Bestellung.', 'danger');
+    }
+}
+
 function loadBackendUser() {
     const backendLoginStatus = document.getElementById('backend-login-status');
 
@@ -470,6 +539,32 @@ function showConfirm(message, title = 'Aktion bestätigen') {
 
         modal.show();
     });
+}
+
+function switchBackendView(view) {
+    const productsView = document.getElementById('productsView');
+    const ordersView = document.getElementById('ordersView');
+
+    const navProducts = document.getElementById('nav-products');
+    const navOrders = document.getElementById('nav-orders');
+
+    if (view === 'products') {
+        productsView.classList.remove('d-none');
+        ordersView.classList.add('d-none');
+
+        navProducts.classList.add('active');
+        navOrders.classList.remove('active');
+    }
+
+    if (view === 'orders') {
+        productsView.classList.add('d-none');
+        ordersView.classList.remove('d-none');
+
+        navProducts.classList.remove('active');
+        navOrders.classList.add('active');
+
+        loadOrders(); // wichtig
+    }
 }
 
 function logout() {
