@@ -146,6 +146,15 @@ function getFormValue(formData, fieldName) {
 
 async function expireOldReservations(connection) {
     await connection.execute(
+        `DELETE roi
+         FROM rental_order_items roi
+         JOIN rental_orders ro ON ro.id = roi.order_id
+         WHERE ro.status = 'reserved'
+         AND ro.reserved_until IS NOT NULL
+         AND ro.reserved_until < NOW()`
+    );
+
+    await connection.execute(
         `UPDATE rental_orders
          SET status = 'expired'
          WHERE status = 'reserved'
