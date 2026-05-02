@@ -1632,6 +1632,7 @@ app.delete('/cart/items/:id', async (req, res) => {
 
     try {
         connection = await mysql.createConnection(dbConfig);
+        await runDatabaseCleanup(connection);
 
         const cartId = await getOrCreateActiveCart(connection, req);
 
