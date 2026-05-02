@@ -175,7 +175,7 @@ async function deleteOldActiveCarts(connection) {
     await connection.execute(
         `DELETE FROM rental_carts
          WHERE status = 'active'
-         AND updated_at < NOW() - INTERVAL 24 HOUR`
+         AND updated_at < NOW() - INTERVAL 15 MINUTE`
     );
 }
 
