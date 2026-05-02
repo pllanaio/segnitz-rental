@@ -65,6 +65,13 @@ async function getOrCreateActiveCart(connection, req) {
 
         return existingCart[0].id;
     }
+
+    const [result] = await connection.execute(
+        `INSERT INTO rental_carts (session_id, user_email)
+         VALUES (?, ?)`,
+        [sessionKey, userEmail]
+    );
+    
     return result.insertId;
 }
 
