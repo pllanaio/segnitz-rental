@@ -30,6 +30,22 @@ const dbConfig = {
 };
 const multer = require('multer');
 
+async function cleanupOnStartup() {
+    let connection;
+
+    try {
+        connection = await mysql.createConnection(dbConfig);
+        await runDatabaseCleanup(connection);
+        console.log(`${new Date().toISOString()} - Datenbank-Cleanup beim Serverstart ausgeführt`);
+    } catch (error) {
+        console.error('Fehler beim Datenbank-Cleanup beim Serverstart:', error);
+    } finally {
+        if (connection) {
+            await connection.end();
+        }
+    }
+}
+
 function getCartSessionKey(req) {
     if (!req.session.cartKey) {
         req.session.cartKey = crypto.randomUUID();
@@ -1643,6 +1659,8 @@ app.delete('/cart/items/:id', async (req, res) => {
         }
     }
 });
+
+cleanupOnStartup();
 
 app.listen(3000, () => {
     console.log(
