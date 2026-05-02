@@ -611,7 +611,7 @@ app.post('/data', async (req, res) => {
             ...req.body,
             order: {
                 id: orderId,
-                reservedUntil: reservedUntil,
+                reservedUntil: reservedUntil.toISOString(),
                 ...orderSummary
             }
         };
