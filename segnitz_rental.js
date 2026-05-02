@@ -55,37 +55,77 @@ function getCartSessionKey(req) {
 }
 
 async function getOrCreateActiveCart(connection, req) {
-    const sessionKey = getCartSessionKey(req);
     const userEmail = req.session.user || null;
 
-    const [existingCart] = await connection.execute(
+    if (userEmail) {
+        const [existingUserCart] = await connection.execute(
+            `SELECT id
+             FROM rental_carts
+             WHERE status = 'active'
+             AND user_email = ?
+             ORDER BY updated_at DESC, id DESC
+             LIMIT 1`,
+            [userEmail]
+        );
+
+        if (existingUserCart.length > 0) {
+            return existingUserCart[0].id;
+        }
+
+        const sessionKey = getCartSessionKey(req);
+
+        const [guestCart] = await connection.execute(
+            `SELECT id
+             FROM rental_carts
+             WHERE status = 'active'
+             AND session_id = ?
+             AND user_email IS NULL
+             ORDER BY updated_at DESC, id DESC
+             LIMIT 1`,
+            [sessionKey]
+        );
+
+        if (guestCart.length > 0) {
+            await connection.execute(
+                `UPDATE rental_carts
+                 SET user_email = ?, updated_at = NOW()
+                 WHERE id = ?`,
+                [userEmail, guestCart[0].id]
+            );
+
+            return guestCart[0].id;
+        }
+
+        const [result] = await connection.execute(
+            `INSERT INTO rental_carts (session_id, user_email, status)
+             VALUES (?, ?, 'active')`,
+            [sessionKey, userEmail]
+        );
+
+        return result.insertId;
+    }
+
+    const sessionKey = getCartSessionKey(req);
+
+    const [existingGuestCart] = await connection.execute(
         `SELECT id
          FROM rental_carts
          WHERE status = 'active'
-         AND (session_id = ? OR user_email = ?)
-         ORDER BY id DESC
+         AND session_id = ?
+         AND user_email IS NULL
+         ORDER BY updated_at DESC, id DESC
          LIMIT 1`,
-        [sessionKey, userEmail]
+        [sessionKey]
     );
 
-    if (existingCart.length > 0) {
-        if (userEmail) {
-            await connection.execute(
-                `UPDATE rental_carts
-             SET user_email = ?
-             WHERE id = ?
-             AND user_email IS NULL`,
-                [userEmail, existingCart[0].id]
-            );
-        }
-
-        return existingCart[0].id;
+    if (existingGuestCart.length > 0) {
+        return existingGuestCart[0].id;
     }
 
     const [result] = await connection.execute(
-        `INSERT INTO rental_carts (session_id, user_email)
-         VALUES (?, ?)`,
-        [sessionKey, userEmail]
+        `INSERT INTO rental_carts (session_id, user_email, status)
+         VALUES (?, NULL, 'active')`,
+        [sessionKey]
     );
 
     return result.insertId;
@@ -175,7 +215,7 @@ async function deleteOldActiveCarts(connection) {
     await connection.execute(
         `DELETE FROM rental_carts
          WHERE status = 'active'
-         AND updated_at < NOW() - INTERVAL 15 MINUTE`
+         AND updated_at < NOW() - INTERVAL 24 HOUR`
     );
 }
 
@@ -1556,6 +1596,13 @@ app.post('/cart/items', async (req, res) => {
             [cartId, productId, rentalStart, rentalEnd]
         );
 
+        await connection.execute(
+            `UPDATE rental_carts
+             SET updated_at = NOW()
+             WHERE id = ?`,
+            [cartId]
+        );
+
         res.status(201).json({
             message: 'Produkt wurde zum Warenkorb hinzugefügt.',
             itemId: result.insertId
@@ -1638,12 +1685,30 @@ app.put('/cart/items/:id', async (req, res) => {
             });
         }
 
+        const [rows] = await connection.execute(
+            `SELECT cart_id FROM rental_cart_items WHERE id = ?`,
+            [itemId]
+        );
+
+        if (rows.length === 0) {
+            return res.status(404).json({ error: 'Item nicht gefunden' });
+        }
+
+        const cartId = rows[0].cart_id;
+
         await connection.execute(
             `UPDATE rental_cart_items
              SET rental_start = ?, rental_end = ?
              WHERE id = ?
              AND cart_id = ?`,
             [rentalStart, rentalEnd, req.params.id, cartId]
+        );
+
+        await connection.execute(
+            `UPDATE rental_carts
+             SET updated_at = NOW()
+             WHERE id = ?`,
+            [cartId]
         );
 
         res.json({
@@ -1682,6 +1747,13 @@ app.delete('/cart/items/:id', async (req, res) => {
                 error: 'Warenkorbposition wurde nicht gefunden.'
             });
         }
+
+        await connection.execute(
+            `UPDATE rental_carts
+             SET updated_at = NOW()
+             WHERE id = ?`,
+            [cartId]
+        );
 
         res.json({
             message: 'Warenkorbposition wurde gelöscht.'
