@@ -1128,7 +1128,6 @@ app.get('/products/:id/availability', async (req, res) => {
 
     try {
         connection = await mysql.createConnection(dbConfig);
-        await runDatabaseCleanup(connection);
         await expireOldReservations(connection);
 
         const [blockedPeriods] = await connection.execute(
@@ -1561,6 +1560,7 @@ app.put('/cart/items/:id', async (req, res) => {
 
     try {
         connection = await mysql.createConnection(dbConfig);
+        await runDatabaseCleanup(connection);
 
         const cartId = await getOrCreateActiveCart(connection, req);
 
@@ -1667,6 +1667,22 @@ app.delete('/cart/items/:id', async (req, res) => {
 });
 
 cleanupOnStartup();
+
+setInterval(async () => {
+    let connection;
+
+    try {
+        connection = await mysql.createConnection(dbConfig);
+        await runDatabaseCleanup(connection);
+        console.log(`${new Date().toISOString()} - periodischer Datenbank-Cleanup ausgeführt`);
+    } catch (error) {
+        console.error('Fehler beim periodischen Datenbank-Cleanup:', error);
+    } finally {
+        if (connection) {
+            await connection.end();
+        }
+    }
+}, 60 * 1000);
 
 app.listen(3000, () => {
     console.log(
