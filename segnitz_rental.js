@@ -3038,15 +3038,37 @@ app.get('/products/bestsellers', async (req, res) => {
     try {
         connection = await mysql.createConnection(dbConfig);
 
-        const [rows] = await connection.execute(`
+        const [products] = await connection.execute(`
             SELECT *
             FROM rental_products
             WHERE is_active = 1
+            AND COALESCE(times_ordered, 0) > 0
             ORDER BY times_ordered DESC
             LIMIT 6
         `);
 
-        res.json(rows);
+        const [images] = await connection.execute(
+            `SELECT id, product_id, image_path, sort_order
+             FROM rental_product_images
+             ORDER BY product_id ASC, sort_order ASC, id ASC`
+        );
+
+        const productsWithImages = products.map(product => {
+            const productImages = images
+                .filter(image => image.product_id === product.id)
+                .map(image => ({
+                    id: image.id,
+                    path: image.image_path
+                }));
+
+            return {
+                ...product,
+                images: productImages,
+                image_path: productImages[0]?.path || product.image_path || ''
+            };
+        });
+
+        res.json(productsWithImages);
 
     } catch (error) {
         console.error('Fehler beim Laden der Bestseller:', error);
@@ -3055,7 +3077,6 @@ app.get('/products/bestsellers', async (req, res) => {
         if (connection) await connection.end();
     }
 });
-
 cleanupOnStartup();
 
 setInterval(async () => {

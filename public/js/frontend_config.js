@@ -28,6 +28,7 @@ let cartEditCalendar = null;
 let selectedCategory = 'all';
 let current_step = 0;
 let stepCount = 5;
+let bestsellerProducts = [];
 
 
 step[current_step]
@@ -1436,6 +1437,7 @@ function selectCategoryFilter(category) {
     applyProductFilters();
     renderCategoryFilters();
     updateProductSectionTitle();
+    renderBestsellers();
 }
 
 function applyProductFilters() {
@@ -1479,27 +1481,55 @@ function updateProductSectionTitle() {
 
 async function loadBestsellers() {
     const grid = document.getElementById('bestsellerGrid');
+    const section = document.getElementById('bestsellerSection');
+
     if (!grid) return;
 
     try {
         const response = await fetch('/products/bestsellers');
         const products = await response.json();
 
-        if (!products.length) {
-            grid.innerHTML = '<div class="text-white">Noch keine Bestseller vorhanden.</div>';
-            return;
+        if (!response.ok) {
+            throw new Error(products.error || 'Bestseller konnten nicht geladen werden.');
         }
 
-        grid.innerHTML = '';
+        const visibleProducts = products.filter(product => Number(product.times_ordered || 0) > 0);
 
-        products.forEach(product => {
-            const card = createRentalProductCard(product);
-            grid.appendChild(card);
-        });
+        bestsellerProducts = visibleProducts;
+
+        renderBestsellers();
 
     } catch (error) {
         console.error('Fehler beim Laden der Bestseller:', error);
+        grid.innerHTML = `
+            <div class="alert alert-warning w-100">
+                Bestseller konnten nicht geladen werden.
+            </div>
+        `;
     }
 }
-
 document.addEventListener('DOMContentLoaded', loadBestsellers);
+
+function renderBestsellers() {
+    const grid = document.getElementById('bestsellerGrid');
+    const section = document.getElementById('bestsellerSection');
+
+    if (!grid || !section) return;
+
+    const visibleBestsellers = bestsellerProducts.filter(product => {
+        return selectedCategory === 'all' || product.category === selectedCategory;
+    });
+
+    if (visibleBestsellers.length === 0) {
+        section.classList.add('d-none');
+        return;
+    }
+
+    grid.innerHTML = '';
+
+    visibleBestsellers.forEach(product => {
+        grid.appendChild(createRentalProductCard(product));
+    });
+
+    section.classList.remove('d-none');
+}
