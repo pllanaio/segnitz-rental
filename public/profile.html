@@ -27,11 +27,36 @@
 
         <div id="profileError" class="alert alert-danger d-none mt-3"></div>
 
+        <hr>
+
+        <h5>Meine Bestellungen</h5>
+        <div id="myOrdersList">
+            <div class="alert alert-info">Bestellungen werden geladen...</div>
+        </div>
+
         <a href="/index.html" class="btn btn-primary mt-4">
             Zurück zur Startseite
         </a>
     </div>
 
+    <div class="modal fade" id="myOrderDetailsModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Bestelldetails</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+
+            <div class="modal-body" id="myOrderDetailsBody"></div>
+
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                    Schließen
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
     <script src="js/profile_config.js"></script>
 </body>
 
