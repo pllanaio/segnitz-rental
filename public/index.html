@@ -379,6 +379,44 @@
             </div>
         </div>
     </div>
+
+    <div class="modal fade" id="cartItemEditModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Mietzeitraum ändern</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+
+                <div class="modal-body">
+                    <input type="hidden" id="editCartItemId">
+                    <input type="hidden" id="editCartProductId">
+
+                    <p class="mb-2">
+                        <strong id="editCartItemTitle"></strong>
+                    </p>
+
+                    <label class="form-label" for="editCartRentalRange">Neuer Mietzeitraum</label>
+                    <input type="text" class="form-control" id="editCartRentalRange" readonly>
+
+                    <input type="hidden" id="editCartRentalStart">
+                    <input type="hidden" id="editCartRentalEnd">
+
+                    <div id="editCartRentalInfo" class="alert alert-info d-none mt-3 mb-0"></div>
+                </div>
+
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                        Abbrechen
+                    </button>
+                    <button type="button" class="btn btn-primary" onclick="saveCartItemRentalPeriod()">
+                        Speichern
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
 </body>
 
 </html>

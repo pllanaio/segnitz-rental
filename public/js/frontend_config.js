@@ -24,6 +24,7 @@ let currentCart = {
     items: []
 };
 let productCalendar = null;
+let cartEditCalendar = null;
 
 let current_step = 0;
 let stepCount = 5;
@@ -979,6 +980,33 @@ async function deleteCartItem(itemId) {
     }
 }
 
+async function clearCart() {
+    const confirmed = confirm('Möchten Sie den Warenkorb wirklich leeren?');
+
+    if (!confirmed) {
+        return;
+    }
+
+    try {
+        const response = await fetch('/cart', {
+            method: 'DELETE'
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+            showAlert(result.error || 'Warenkorb konnte nicht geleert werden.', 'danger');
+            return;
+        }
+
+        await loadCart();
+        showAlert(result.message || 'Warenkorb wurde geleert.', 'success');
+    } catch (error) {
+        console.error('Fehler beim Leeren des Warenkorbs:', error);
+        showAlert('Warenkorb konnte nicht geleert werden.', 'danger');
+    }
+}
+
 function calculateCartTotals(items) {
     return items.reduce((totals, item) => {
         const days = calculateRentalDays(item.rentalStart, item.rentalEnd);
@@ -1024,7 +1052,15 @@ function renderCart() {
         return;
     }
 
-    cartItems.innerHTML = items.map(item => {
+    const clearCartButtonHtml = `
+    <div class="d-flex justify-content-end mb-3">
+        <button type="button" class="btn btn-outline-danger btn-sm" onclick="clearCart()">
+            Warenkorb leeren
+        </button>
+    </div>
+`;
+
+    cartItems.innerHTML = clearCartButtonHtml + items.map(item => {
         const days = calculateRentalDays(item.rentalStart, item.rentalEnd);
         const lineTotal = days * Number(item.pricePerDay || 0);
 
@@ -1041,6 +1077,11 @@ function renderCart() {
                     </div>
 
                     <div class="text-end">
+                        <button type="button" class="btn btn-sm btn-outline-primary mt-2 me-2"
+                            onclick="openCartItemEditModal(${item.id})">
+                            Zeitraum ändern
+                        </button>
+
                         <strong>${formatCurrency(lineTotal)}</strong><br>
                         <button type="button" class="btn btn-sm btn-outline-danger mt-2"
                             onclick="deleteCartItem(${item.id})">
@@ -1204,4 +1245,98 @@ function initProductCalendar() {
             infoBox.textContent = `Ausgewählter Mietzeitraum: ${days} Tag${days === 1 ? '' : 'e'}`;
         }
     });
+}
+
+async function openCartItemEditModal(itemId) {
+    const item = currentCart.items.find(cartItem => cartItem.id === itemId);
+
+    if (!item) {
+        showAlert('Warenkorbposition wurde nicht gefunden.', 'danger');
+        return;
+    }
+
+    document.getElementById('editCartItemId').value = item.id;
+    document.getElementById('editCartProductId').value = item.productId;
+    document.getElementById('editCartItemTitle').textContent = item.title;
+    document.getElementById('editCartRentalStart').value = item.rentalStart;
+    document.getElementById('editCartRentalEnd').value = item.rentalEnd;
+    document.getElementById('editCartRentalRange').value = `${item.rentalStart} bis ${item.rentalEnd}`;
+
+    await loadProductAvailability(item.productId);
+
+    if (cartEditCalendar) {
+        cartEditCalendar.destroy();
+    }
+
+    cartEditCalendar = flatpickr('#editCartRentalRange', {
+        mode: 'range',
+        dateFormat: 'Y-m-d',
+        locale: 'de',
+        minDate: 'today',
+        defaultDate: [item.rentalStart, item.rentalEnd],
+        disable: currentBlockedPeriods.map(period => ({
+            from: period.rentalStart,
+            to: period.rentalEnd
+        })),
+        onChange: function (selectedDates) {
+            if (selectedDates.length === 2) {
+                const start = flatpickr.formatDate(selectedDates[0], 'Y-m-d');
+                const end = flatpickr.formatDate(selectedDates[1], 'Y-m-d');
+
+                document.getElementById('editCartRentalStart').value = start;
+                document.getElementById('editCartRentalEnd').value = end;
+            }
+        }
+    });
+
+    const modal = new bootstrap.Modal(document.getElementById('cartItemEditModal'));
+    modal.show();
+}
+
+async function saveCartItemRentalPeriod() {
+    const itemId = document.getElementById('editCartItemId').value;
+    const rentalStart = document.getElementById('editCartRentalStart').value;
+    const rentalEnd = document.getElementById('editCartRentalEnd').value;
+
+    if (!rentalStart || !rentalEnd) {
+        showAlert('Bitte wählen Sie einen Mietzeitraum aus.', 'warning');
+        return;
+    }
+
+    if (new Date(rentalEnd) < new Date(rentalStart)) {
+        showAlert('Das Mietende darf nicht vor dem Mietbeginn liegen.', 'warning');
+        return;
+    }
+
+    try {
+        const response = await fetch(`/cart/items/${itemId}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                rentalStart,
+                rentalEnd
+            })
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+            showAlert(result.error || 'Mietzeitraum konnte nicht geändert werden.', 'danger');
+            return;
+        }
+
+        const modal = bootstrap.Modal.getInstance(document.getElementById('cartItemEditModal'));
+
+        if (modal) {
+            modal.hide();
+        }
+
+        await loadCart();
+        showAlert('Mietzeitraum wurde aktualisiert.', 'success');
+    } catch (error) {
+        console.error('Fehler beim Aktualisieren des Mietzeitraums:', error);
+        showAlert('Mietzeitraum konnte nicht geändert werden.', 'danger');
+    }
 }

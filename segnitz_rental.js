@@ -2068,6 +2068,47 @@ app.delete('/cart/items/:id', async (req, res) => {
     }
 });
 
+app.delete('/cart', async (req, res) => {
+    let connection;
+
+    try {
+        connection = await mysql.createConnection(dbConfig);
+        await runDatabaseCleanup(connection);
+
+        const cartId = await getActiveCart(connection, req);
+
+        if (!cartId) {
+            return res.json({
+                message: 'Warenkorb ist bereits leer.'
+            });
+        }
+
+        await connection.execute(
+            `DELETE FROM rental_carts WHERE id = ?`,
+            [cartId]
+        );
+
+        delete req.session.cartKey;
+
+        console.log(
+            `${new Date().toISOString()} - Warenkorb ${cartId} wurde vollständig geleert.`
+        );
+
+        res.json({
+            message: 'Warenkorb wurde geleert.'
+        });
+    } catch (error) {
+        console.error('Fehler beim Leeren des Warenkorbs:', error);
+        res.status(500).json({
+            error: 'Warenkorb konnte nicht geleert werden.'
+        });
+    } finally {
+        if (connection) {
+            await connection.end();
+        }
+    }
+});
+
 cleanupOnStartup();
 
 setInterval(async () => {
