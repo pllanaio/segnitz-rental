@@ -1165,6 +1165,39 @@ async function sendPasswordChangedEmail(email) {
     });
 }
 
+async function sendPasswordResetEmail(email, resetUrl) {
+    const transporter = nodemailer.createTransport({
+        host: process.env.SMTP_HOST,
+        port: Number(process.env.SMTP_PORT),
+        secure: true,
+        auth: {
+            user: process.env.SMTP_USER,
+            pass: process.env.SMTP_PASS
+        }
+    });
+
+    await transporter.sendMail({
+        from: `"Segnitz Rental" <${process.env.SMTP_USER}>`,
+        to: email,
+        subject: 'Passwort zurücksetzen',
+        text: `Sie können Ihr Passwort über folgenden Link zurücksetzen: ${resetUrl}
+
+Der Link ist 30 Minuten gültig.
+
+Falls Sie diese Anfrage nicht gestellt haben, ignorieren Sie diese E-Mail.`,
+        html: `
+            <p>Sie haben das Zurücksetzen Ihres Passworts angefordert.</p>
+            <p>
+                <a href="${resetUrl}">
+                    Passwort zurücksetzen
+                </a>
+            </p>
+            <p>Der Link ist 30 Minuten gültig.</p>
+            <p>Falls Sie diese Anfrage nicht gestellt haben, ignorieren Sie diese E-Mail.</p>
+        `
+    });
+}
+
 app.post('/register-customer', async (req, res) => {
     const {
         firstName,
@@ -2770,11 +2803,17 @@ app.post('/password-reset-request', async (req, res) => {
             [token, expires, email.toLowerCase()]
         );
 
-        // 👉 HIER später Mail senden
         const resetUrl = `${process.env.BASE_URL}/login.html?resetToken=${token}`;
-        console.log(`Reset-Link: ${resetUrl}`);
+
+        try {
+            await sendPasswordResetEmail(email.toLowerCase(), resetUrl);
+        } catch (mailError) {
+            console.error('Fehler beim Versand der Passwort-Reset-Mail:', mailError);
+            return res.status(500).send('Reset-Link konnte nicht versendet werden.');
+        }
 
         return res.status(200).send('Wenn die E-Mail existiert, wurde ein Link versendet.');
+
     } catch (err) {
         console.error(err);
         return res.status(500).send('Fehler beim Anfordern des Reset-Links.');
