@@ -115,6 +115,9 @@ function renderMyOrderDetails(order) {
         </tr>
     `).join('');
 
+    const status = String(order.status || '').trim().toLowerCase();
+    const canShowReturnSection = status !== 'cancelled';
+
     const imagesHtml = (order.returnImages || []).length === 0
         ? '<div class="text-muted">Keine Rückgabefotos vorhanden.</div>'
         : `<div class="row g-2">
@@ -176,24 +179,26 @@ function renderMyOrderDetails(order) {
                 </div>
             </div>
 
-            <div class="col-12">
-                <h5>Rückgabe / Kaution</h5>
-                <p>
-                    <strong>Beschädigt:</strong> ${order.is_damaged ? 'Ja' : 'Nein'}<br>
-                    <strong>Beschreibung Schaden:</strong> ${order.damage_description || '-'}<br>
-                    <strong>Verspätet:</strong> ${order.is_late ? 'Ja' : 'Nein'}<br>
-                    <strong>Beschreibung Verspätung:</strong> ${order.late_description || '-'}<br>
-                    <strong>Kautionsentscheidung:</strong> ${order.deposit_decision || 'pending'}<br>
-                    <strong>Rückzahlung:</strong> ${order.deposit_refund_amount || '-'} €<br>
-                    <strong>Abzug:</strong> ${order.deposit_deduction_amount || '-'} €<br>
-                    <strong>Grund für Abzug:</strong> ${order.deposit_deduction_reason || '-'}
-                </p>
-            </div>
+${canShowReturnSection ? `
+    <div class="col-12">
+        <h5>Rückgabe / Kaution</h5>
+        <p>
+            <strong>Beschädigt:</strong> ${order.is_damaged ? 'Ja' : 'Nein'}<br>
+            <strong>Beschreibung Schaden:</strong> ${order.damage_description || '-'}<br>
+            <strong>Verspätet:</strong> ${order.is_late ? 'Ja' : 'Nein'}<br>
+            <strong>Beschreibung Verspätung:</strong> ${order.late_description || '-'}<br>
+            <strong>Kautionsentscheidung:</strong> ${order.deposit_decision || 'pending'}<br>
+            <strong>Rückzahlung:</strong> ${order.deposit_refund_amount || '-'} €<br>
+            <strong>Abzug:</strong> ${order.deposit_deduction_amount || '-'} €<br>
+            <strong>Grund für Abzug:</strong> ${order.deposit_deduction_reason || '-'}
+        </p>
+    </div>
 
-            <div class="col-12">
-                <h5>Rückgabefotos</h5>
-                ${imagesHtml}
-            </div>
+    <div class="col-12">
+        <h5>Rückgabefotos</h5>
+        ${imagesHtml}
+    </div>
+` : ''}
         </div>
     `;
 }
