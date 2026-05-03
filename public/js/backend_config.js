@@ -507,6 +507,7 @@ function renderOrderDetails(order) {
     `).join('');
 
     const status = String(order.status || '').trim().toLowerCase();
+    const canShowReturnSection = status !== 'cancelled';
 
     const cancelHtml = canCancelOrder(order) ? `
         <div class="col-12">
@@ -583,45 +584,47 @@ function renderOrderDetails(order) {
 
             ${cancelHtml}
 
-            ${status !== 'cancelled' ? `
-            <div class="col-12">
-                <hr>
-                <h5>Rückgabe / Kaution bearbeiten</h5>
-                <p>
-                    <strong>Zuletzt bearbeitet von:</strong> ${order.return_processed_by_username || '-'}<br>
-                    <strong>Bearbeitet am:</strong> ${order.return_case_processed_at || '-'}
-                </p>
+            ${canShowReturnSection ? `
+    <div class="col-12">
+        <hr>
+        <h5>Rückgabe / Kaution bearbeiten</h5>
 
-                <div class="row g-3">
-                    <div class="col-12 col-md-4">
-                        <label class="form-label">Rückgabestatus</label>
-                        <select class="form-select" id="returnStatus">
-                            <option value="returned_ok" ${order.return_status === 'returned_ok' ? 'selected' : ''}>Ordnungsgemäß</option>
-                            <option value="returned_late" ${order.return_status === 'returned_late' ? 'selected' : ''}>Verspätet</option>
-                            <option value="returned_damaged" ${order.return_status === 'returned_damaged' ? 'selected' : ''}>Beschädigt</option>
-                            <option value="returned_late_damaged" ${order.return_status === 'returned_late_damaged' ? 'selected' : ''}>Verspätet + beschädigt</option>
-                        </select>
-                    </div>
+        <p>
+            <strong>Zuletzt bearbeitet von:</strong> ${order.return_processed_by_username || '-'}<br>
+            <strong>Bearbeitet am:</strong> ${order.return_case_processed_at || '-'}
+        </p>
 
-                    <div class="col-12 col-md-4">
-                        <label class="form-label">Kautionsentscheidung</label>
-                        <select class="form-select" id="depositDecision">
-                            <option value="full_refund" ${order.deposit_decision === 'full_refund' ? 'selected' : ''}>Vollständig</option>
-                            <option value="partial_refund" ${order.deposit_decision === 'partial_refund' ? 'selected' : ''}>Teilweise</option>
-                            <option value="no_refund" ${order.deposit_decision === 'no_refund' ? 'selected' : ''}>Keine</option>
-                            <option value="pending" ${!order.deposit_decision || order.deposit_decision === 'pending' ? 'selected' : ''}>Offen</option>
-                        </select>
-                    </div>
-
-                    <div class="col-12">
-                        <button type="button" class="btn btn-success"
-                            onclick="saveOrderReturn(${order.id})">
-                            Rückgabe speichern
-                        </button>
-                    </div>
-                </div>
+        <div class="row g-3">
+            <div class="col-12 col-md-4">
+                <label class="form-label">Rückgabestatus</label>
+                <select class="form-select" id="returnStatus">
+                    <option value="returned_ok" ${order.return_status === 'returned_ok' ? 'selected' : ''}>Ordnungsgemäß</option>
+                    <option value="returned_late" ${order.return_status === 'returned_late' ? 'selected' : ''}>Verspätet</option>
+                    <option value="returned_damaged" ${order.return_status === 'returned_damaged' ? 'selected' : ''}>Beschädigt</option>
+                    <option value="returned_late_damaged" ${order.return_status === 'returned_late_damaged' ? 'selected' : ''}>Verspätet + beschädigt</option>
+                </select>
             </div>
-            ` : ''}
+
+            <div class="col-12 col-md-4">
+                <label class="form-label">Kautionsentscheidung</label>
+                <select class="form-select" id="depositDecision">
+                    <option value="full_refund" ${order.deposit_decision === 'full_refund' ? 'selected' : ''}>Vollständig</option>
+                    <option value="partial_refund" ${order.deposit_decision === 'partial_refund' ? 'selected' : ''}>Teilweise</option>
+                    <option value="no_refund" ${order.deposit_decision === 'no_refund' ? 'selected' : ''}>Keine</option>
+                    <option value="pending" ${!order.deposit_decision || order.deposit_decision === 'pending' ? 'selected' : ''}>Offen</option>
+                </select>
+            </div>
+
+            <div class="col-12">
+                <button type="button" class="btn btn-success"
+                    onclick="saveOrderReturn(${order.id})">
+                    Rückgabe speichern
+                </button>
+            </div>
+        </div>
+    </div>
+` : ''}
+
         </div>
     `;
 }
