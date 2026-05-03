@@ -856,6 +856,7 @@ function switchBackendView(view) {
     if (view === 'orders') {
         document.getElementById('ordersView')?.classList.remove('d-none');
         document.getElementById('nav-orders')?.classList.add('active');
+        loadOrders();
     }
 
     if (view === 'opening-hours') {
