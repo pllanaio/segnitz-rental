@@ -1022,8 +1022,8 @@ async function sendVerificationEmail(email, token) {
     const verificationUrl = `${process.env.BASE_URL}/verify-email?token=${token}`;
 
     const transporter = nodemailer.createTransport({
-        host: 'mail.your-server.de',
-        port: 465,
+        host: process.env.SMTP_HOST,
+        port: process.env.SMTP_PORT,
         secure: true,
         auth: {
             user: process.env.SMTP_USER,
@@ -1040,6 +1040,29 @@ async function sendVerificationEmail(email, token) {
             <p>Bitte bestätigen Sie Ihre E-Mail-Adresse.</p>
             <p><a href="${verificationUrl}">E-Mail-Adresse bestätigen</a></p>
             <p>Der Link ist 24 Stunden gültig.</p>
+        `
+    });
+}
+
+async function sendPasswordChangedEmail(email) {
+    const transporter = nodemailer.createTransport({
+        host: process.env.SMTP_HOST,
+        port: process.env.SMTP_PORT,
+        secure: true,
+        auth: {
+            user: process.env.SMTP_USER,
+            pass: process.env.SMTP_PASS
+        }
+    });
+
+    await transporter.sendMail({
+        from: `"Segnitz Rental" <${process.env.SMTP_USER}>`,
+        to: email,
+        subject: 'Ihr Passwort wurde geändert',
+        text: 'Ihr Passwort für Ihr Segnitz Rental Kundenkonto wurde erfolgreich geändert.',
+        html: `
+            <p>Ihr Passwort für Ihr Segnitz Rental Kundenkonto wurde erfolgreich geändert.</p>
+            <p>Falls Sie diese Änderung nicht selbst vorgenommen haben, kontaktieren Sie uns bitte umgehend.</p>
         `
     });
 }
@@ -1340,6 +1363,104 @@ app.get('/my-profile', async (req, res) => {
         res.status(500).json({
             error: 'Fehler beim Laden des Benutzerprofils'
         });
+    }
+});
+
+app.put('/my-profile', async (req, res) => {
+    if (!req.session.user) {
+        return res.status(401).json({ error: 'Nicht angemeldet.' });
+    }
+
+    const { firstName, lastName, phone, address, zip, city } = req.body;
+
+    if (!firstName || !lastName || !phone || !address || !zip || !city) {
+        return res.status(400).json({ error: 'Pflichtfelder fehlen.' });
+    }
+
+    let connection;
+
+    try {
+        connection = await mysql.createConnection(dbConfig);
+
+        await connection.execute(
+            `UPDATE users
+             SET first_name = ?,
+                 last_name = ?,
+                 phone = ?,
+                 address = ?,
+                 zip = ?,
+                 city = ?
+             WHERE username = ?`,
+            [firstName, lastName, phone, address, zip, city, req.session.user]
+        );
+
+        res.json({ message: 'Profildaten wurden aktualisiert.' });
+    } catch (error) {
+        console.error('Fehler beim Aktualisieren des Profils:', error);
+        res.status(500).json({ error: 'Profildaten konnten nicht aktualisiert werden.' });
+    } finally {
+        if (connection) await connection.end();
+    }
+});
+
+app.put('/my-profile/password', async (req, res) => {
+    if (!req.session.user) {
+        return res.status(401).json({ error: 'Nicht angemeldet.' });
+    }
+
+    const { currentPassword, newPassword, newPasswordConfirm } = req.body;
+
+    if (!currentPassword || !newPassword || !newPasswordConfirm) {
+        return res.status(400).json({ error: 'Bitte alle Passwortfelder ausfüllen.' });
+    }
+
+    if (newPassword !== newPasswordConfirm) {
+        return res.status(400).json({ error: 'Die neuen Passwörter stimmen nicht überein.' });
+    }
+
+    if (newPassword.length < 8) {
+        return res.status(400).json({ error: 'Das neue Passwort muss mindestens 8 Zeichen lang sein.' });
+    }
+
+    let connection;
+
+    try {
+        connection = await mysql.createConnection(dbConfig);
+
+        const [users] = await connection.execute(
+            `SELECT password FROM users WHERE username = ? LIMIT 1`,
+            [req.session.user]
+        );
+
+        if (users.length === 0) {
+            return res.status(404).json({ error: 'Benutzer nicht gefunden.' });
+        }
+
+        const passwordValid = await bcrypt.compare(currentPassword, users[0].password);
+
+        if (!passwordValid) {
+            return res.status(401).json({ error: 'Das aktuelle Passwort ist falsch.' });
+        }
+
+        const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+        await connection.execute(
+            `UPDATE users SET password = ? WHERE username = ?`,
+            [hashedPassword, req.session.user]
+        );
+
+        try {
+            await sendPasswordChangedEmail(req.session.user);
+        } catch (mailError) {
+            console.error('Passwort wurde geändert, aber Mailversand fehlgeschlagen:', mailError);
+        }
+
+        res.json({ message: 'Passwort wurde geändert. Eine Bestätigungs-E-Mail wurde versendet.' });
+    } catch (error) {
+        console.error('Fehler beim Ändern des Passworts:', error);
+        res.status(500).json({ error: 'Passwort konnte nicht geändert werden.' });
+    } finally {
+        if (connection) await connection.end();
     }
 });
 
@@ -2447,3 +2568,4 @@ app.listen(3000, () => {
     console.log("*********** Segnitz Rental System ***********");
     console.log("Server läuft auf Port 3000");
 });
+

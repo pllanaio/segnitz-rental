@@ -11,15 +11,15 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         const user = await response.json();
 
-        document.getElementById('customerNo').textContent = user.customerNo || '-';
-        document.getElementById('name').textContent = `${user.firstName || ''} ${user.lastName || ''}`.trim();
-        document.getElementById('email').textContent = user.email || '-';
-        document.getElementById('phone').textContent = user.phone || '-';
-        document.getElementById('address').textContent =
-            `${user.address || ''}, ${user.zip || ''} ${user.city || ''}`.trim();
-
-        document.getElementById('verified').textContent =
-            user.emailVerified === 1 ? 'Ja' : 'Nein';
+        document.getElementById('customerNo').value = user.customerNo || '-';
+        document.getElementById('email').value = user.email || '-';
+        document.getElementById('profileFirstName').value = user.firstName || '';
+        document.getElementById('profileLastName').value = user.lastName || '';
+        document.getElementById('profilePhone').value = user.phone || '';
+        document.getElementById('profileAddress').value = user.address || '';
+        document.getElementById('profileZip').value = user.zip || '';
+        document.getElementById('profileCity').value = user.city || '';
+        document.getElementById('verified').value = user.emailVerified === 1 ? 'Ja' : 'Nein';
 
         document.getElementById('profileBox').classList.remove('d-none');
 
@@ -277,3 +277,80 @@ function switchProfileView(view) {
         document.getElementById('nav-orders').classList.add('active');
     }
 }
+
+document.getElementById('profileForm')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+
+    console.log('Profildaten speichern ausgelöst');
+
+    const payload = {
+        firstName: document.getElementById('profileFirstName').value.trim(),
+        lastName: document.getElementById('profileLastName').value.trim(),
+        phone: document.getElementById('profilePhone').value.trim(),
+        address: document.getElementById('profileAddress').value.trim(),
+        zip: document.getElementById('profileZip').value.trim(),
+        city: document.getElementById('profileCity').value.trim()
+    };
+
+    try {
+        const response = await fetch('/my-profile', {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+            showAlert(result.error || 'Profildaten konnten nicht gespeichert werden.', 'danger');
+            return;
+        }
+
+        showAlert(result.message || 'Profildaten wurden gespeichert.', 'success');
+        console.log('Profildaten gespeichert:', result);
+
+    } catch (error) {
+        console.error('Fehler beim Speichern der Profildaten:', error);
+        showAlert('Profildaten konnten nicht gespeichert werden.', 'danger');
+    }
+});
+
+document.getElementById('passwordForm')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+
+    console.log('Passwortänderung ausgelöst');
+
+    const payload = {
+        currentPassword: document.getElementById('currentPassword').value,
+        newPassword: document.getElementById('newPassword').value,
+        newPasswordConfirm: document.getElementById('newPasswordConfirm').value
+    };
+
+    try {
+        const response = await fetch('/my-profile/password', {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+            showAlert(result.error || 'Passwort konnte nicht geändert werden.', 'danger');
+            return;
+        }
+
+        document.getElementById('passwordForm').reset();
+
+        showAlert(result.message || 'Passwort wurde geändert.', 'success');
+        console.log('Passwort geändert:', result);
+
+    } catch (error) {
+        console.error('Fehler beim Ändern des Passworts:', error);
+        showAlert('Passwort konnte nicht geändert werden.', 'danger');
+    }
+});
