@@ -1405,18 +1405,27 @@ function renderCategoryFilters() {
             .filter(Boolean)
     )].sort();
 
+    const countForCategory = category => {
+        if (category === 'all') return rentalProducts.length;
+        return rentalProducts.filter(product => product.category === category).length;
+    };
+
     container.innerHTML = `
         <button type="button"
             class="btn btn-sm text-start category-btn ${selectedCategory === 'all' ? 'active' : ''}"
             onclick="selectCategoryFilter('all')">
+            <i class="bi bi-grid"></i>
             Alle Produkte
+            <span class="float-end">${countForCategory('all')}</span>
         </button>
 
         ${categories.map(category => `
             <button type="button"
                 class="btn btn-sm text-start category-btn ${selectedCategory === category ? 'active' : ''}"
                 onclick="selectCategoryFilter('${category.replace(/'/g, "\\'")}')">
+                <i class="bi bi-tag"></i>
                 ${category}
+                <span class="float-end">${countForCategory(category)}</span>
             </button>
         `).join('')}
     `;
