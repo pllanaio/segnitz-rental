@@ -354,3 +354,22 @@ document.getElementById('passwordForm')?.addEventListener('submit', async (event
         showAlert('Passwort konnte nicht geändert werden.', 'danger');
     }
 });
+
+function logout() {
+    fetch('/logout', {
+        method: 'POST'
+    })
+        .then(response => {
+            if (response.ok) {
+                // Optional: Weiterleitung zur Login-Seite oder Anzeige einer Bestätigung
+                window.location.href = '/index.html';
+            } else {
+                console.error('Fehler beim Logout');
+                showAlert('Fehler beim Abmelden', 'danger');
+            }
+        })
+        .catch(error => {
+            console.error('Netzwerkfehler beim Versuch, sich abzumelden:', error);
+            showAlert('Netzwerkfehler', 'danger');
+        });
+}
