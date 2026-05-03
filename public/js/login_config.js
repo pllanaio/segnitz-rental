@@ -53,23 +53,6 @@ async function handleLogin(event) {
     }
 }
 
-document.getElementById('forgotPasswordLink')?.addEventListener('click', async (e) => {
-    e.preventDefault();
-
-    const email = prompt('Bitte geben Sie Ihre E-Mail-Adresse ein:');
-
-    if (!email) return;
-
-    const response = await fetch('/password-reset-request', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email })
-    });
-
-    const text = await response.text();
-    showAlert(text, 'info');
-});
-
 document.addEventListener('DOMContentLoaded', () => {
     initPasswordResetModal();
 });

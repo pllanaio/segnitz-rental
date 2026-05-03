@@ -2771,7 +2771,8 @@ app.post('/password-reset-request', async (req, res) => {
         );
 
         // 👉 HIER später Mail senden
-        console.log(`Reset-Link: http://localhost:3000/reset-password.html?token=${token}`);
+        const resetUrl = `${process.env.BASE_URL}/login.html?resetToken=${token}`;
+        console.log(`Reset-Link: ${resetUrl}`);
 
         return res.status(200).send('Wenn die E-Mail existiert, wurde ein Link versendet.');
     } catch (err) {
