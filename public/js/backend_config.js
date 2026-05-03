@@ -128,6 +128,7 @@ async function saveProduct(event) {
         pricePerDay: Number(document.getElementById('pricePerDay').value),
         deposit: Number(document.getElementById('deposit').value),
         imagePath: '',
+        category: document.getElementById('category').value.trim(),
         isActive: document.getElementById('isActive').checked
     };
 
@@ -186,6 +187,7 @@ function editProduct(id) {
     document.getElementById('description').value = product.description || '';
     document.getElementById('pricePerDay').value = product.price_per_day;
     document.getElementById('deposit').value = product.deposit;
+    document.getElementById('category').value = product.category || '';
     document.getElementById('isActive').checked = product.is_active === 1;
     renderExistingImages(product);
 
