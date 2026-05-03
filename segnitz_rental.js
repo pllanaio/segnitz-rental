@@ -2738,6 +2738,96 @@ app.delete('/cart', async (req, res) => {
     }
 });
 
+app.post('/password-reset-request', async (req, res) => {
+    const { email } = req.body;
+
+    if (!email) {
+        return res.status(400).send('E-Mail erforderlich.');
+    }
+
+    let connection;
+
+    try {
+        connection = await mysql.createConnection(dbConfig);
+
+        const [rows] = await connection.execute(
+            'SELECT id FROM users WHERE username = ? LIMIT 1',
+            [email.toLowerCase()]
+        );
+
+        if (rows.length === 0) {
+            // Wichtig: Keine Info leaken
+            return res.status(200).send('Wenn die E-Mail existiert, wurde ein Link versendet.');
+        }
+
+        const token = crypto.randomBytes(32).toString('hex');
+        const expires = new Date(Date.now() + 1000 * 60 * 30); // 30 min
+
+        await connection.execute(
+            `UPDATE users
+             SET reset_token = ?, reset_token_expires = ?
+             WHERE username = ?`,
+            [token, expires, email.toLowerCase()]
+        );
+
+        // 👉 HIER später Mail senden
+        console.log(`Reset-Link: http://localhost:3000/reset-password.html?token=${token}`);
+
+        return res.status(200).send('Wenn die E-Mail existiert, wurde ein Link versendet.');
+    } catch (err) {
+        console.error(err);
+        return res.status(500).send('Fehler beim Anfordern des Reset-Links.');
+    } finally {
+        if (connection) await connection.end();
+    }
+});
+
+app.post('/password-reset', async (req, res) => {
+    const { token, password } = req.body;
+
+    if (!token || !password) {
+        return res.status(400).send('Ungültige Anfrage.');
+    }
+
+    let connection;
+
+    try {
+        connection = await mysql.createConnection(dbConfig);
+
+        const [rows] = await connection.execute(
+            `SELECT id, reset_token_expires
+             FROM users
+             WHERE reset_token = ?
+             LIMIT 1`,
+            [token]
+        );
+
+        if (rows.length === 0) {
+            return res.status(400).send('Ungültiger oder abgelaufener Token.');
+        }
+
+        if (new Date(rows[0].reset_token_expires) < new Date()) {
+            return res.status(400).send('Token abgelaufen.');
+        }
+
+        const hashedPassword = await bcrypt.hash(password, 10);
+
+        await connection.execute(
+            `UPDATE users
+             SET password = ?, reset_token = NULL, reset_token_expires = NULL
+             WHERE id = ?`,
+            [hashedPassword, rows[0].id]
+        );
+
+        return res.status(200).send('Passwort erfolgreich geändert.');
+    } catch (err) {
+        console.error(err);
+        return res.status(500).send('Fehler beim Zurücksetzen.');
+    } finally {
+        if (connection) await connection.end();
+    }
+});
+
 cleanupOnStartup();
 
 setInterval(async () => {
