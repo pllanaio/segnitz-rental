@@ -1851,7 +1851,7 @@ app.get('/products/:id/availability', async (req, res) => {
 });
 
 app.post('/products', checkAdmin, async (req, res) => {
-    const { productKey, title, description, pricePerDay, deposit, imagePath } = req.body;
+    const { productKey, title, description, pricePerDay, deposit, imagePath, category } = req.body;
 
     const normalizedPricePerDay = Number(String(pricePerDay).replace(',', '.'));
     const normalizedDeposit = Number(String(deposit).replace(',', '.'));
@@ -1880,9 +1880,17 @@ app.post('/products', checkAdmin, async (req, res) => {
 
         const [result] = await connection.execute(
             `INSERT INTO rental_products 
-    (product_key, title, description, price_per_day, deposit, image_path)
-    VALUES (?, ?, ?, ?, ?, ?)`,
-            [productKey, title, description, normalizedPricePerDay, normalizedDeposit, imagePath]
+             (product_key, title, description, price_per_day, deposit, image_path, category)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [
+                productKey,
+                title,
+                description,
+                normalizedPricePerDay,
+                normalizedDeposit,
+                imagePath || '',
+                category || null
+            ]
         );
 
         res.status(201).json({
@@ -1893,14 +1901,12 @@ app.post('/products', checkAdmin, async (req, res) => {
         console.error('Fehler beim Erstellen des Produkts:', error);
         res.status(500).json({ error: 'Produkt konnte nicht gespeichert werden.' });
     } finally {
-        if (connection) {
-            await connection.end();
-        }
+        if (connection) await connection.end();
     }
 });
 
 app.put('/products/:id', checkAdmin, async (req, res) => {
-    const { title, description, pricePerDay, deposit, imagePath, isActive } = req.body;
+    const { title, description, pricePerDay, deposit, imagePath, isActive, category } = req.body;
 
     const normalizedPricePerDay = Number(String(pricePerDay).replace(',', '.'));
     const normalizedDeposit = Number(String(deposit).replace(',', '.'));
@@ -1929,9 +1935,24 @@ app.put('/products/:id', checkAdmin, async (req, res) => {
 
         await connection.execute(
             `UPDATE rental_products
-             SET title = ?, description = ?, price_per_day = ?, deposit = ?, image_path = ?, is_active = ?
+             SET title = ?,
+                 description = ?,
+                 price_per_day = ?,
+                 deposit = ?,
+                 image_path = ?,
+                 is_active = ?,
+                 category = ?
              WHERE id = ?`,
-            [title, description, normalizedPricePerDay, normalizedDeposit, imagePath, isActive ? 1 : 0, req.params.id]
+            [
+                title,
+                description,
+                normalizedPricePerDay,
+                normalizedDeposit,
+                imagePath || '',
+                isActive ? 1 : 0,
+                category || null,
+                req.params.id
+            ]
         );
 
         res.json({ message: 'Produkt aktualisiert' });
@@ -1939,9 +1960,7 @@ app.put('/products/:id', checkAdmin, async (req, res) => {
         console.error('Fehler beim Aktualisieren des Produkts:', error);
         res.status(500).json({ error: 'Produkt konnte nicht aktualisiert werden.' });
     } finally {
-        if (connection) {
-            await connection.end();
-        }
+        if (connection) await connection.end();
     }
 });
 
