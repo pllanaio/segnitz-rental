@@ -150,8 +150,10 @@ async function submitPasswordReset(event) {
         return;
     }
 
-    if (password.length < 8) {
-        showAlert('Das Passwort muss mindestens 8 Zeichen lang sein.', 'warning');
+    const passwordPolicyRegex = /^(?=.*[0-9])(?=.*[^A-Za-z0-9]).{8,}$/;
+
+    if (!passwordPolicyRegex.test(password)) {
+        showAlert('Das Passwort muss mindestens 8 Zeichen, eine Zahl und ein Sonderzeichen enthalten.', 'warning');
         return;
     }
 

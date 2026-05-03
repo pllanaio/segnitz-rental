@@ -1216,6 +1216,14 @@ app.post('/register-customer', async (req, res) => {
         });
     }
 
+    const passwordPolicyRegex = /^(?=.*[0-9])(?=.*[^A-Za-z0-9]).{8,}$/;
+
+    if (!passwordPolicyRegex.test(password)) {
+        return res.status(400).json({
+            error: 'Das Passwort muss mindestens 8 Zeichen, eine Zahl und ein Sonderzeichen enthalten.'
+        });
+    }
+
     try {
         const connection = await mysql.createConnection(dbConfig);
 
@@ -1564,8 +1572,12 @@ app.put('/my-profile/password', async (req, res) => {
         return res.status(400).json({ error: 'Die neuen Passwörter stimmen nicht überein.' });
     }
 
-    if (newPassword.length < 8) {
-        return res.status(400).json({ error: 'Das neue Passwort muss mindestens 8 Zeichen lang sein.' });
+    const passwordPolicyRegex = /^(?=.*[0-9])(?=.*[^A-Za-z0-9]).{8,}$/;
+
+    if (!passwordPolicyRegex.test(newPassword)) {
+        return res.status(400).json({
+            error: 'Das neue Passwort muss mindestens 8 Zeichen, eine Zahl und ein Sonderzeichen enthalten.'
+        });
     }
 
     let connection;
@@ -2829,6 +2841,12 @@ app.post('/password-reset', async (req, res) => {
         return res.status(400).send('Ungültige Anfrage.');
     }
 
+    const passwordPolicyRegex = /^(?=.*[0-9])(?=.*[^A-Za-z0-9]).{8,}$/;
+
+    if (!passwordPolicyRegex.test(password)) {
+        return res.status(400).send('Das Passwort muss mindestens 8 Zeichen, eine Zahl und ein Sonderzeichen enthalten.');
+    }
+
     let connection;
 
     try {
@@ -2889,4 +2907,3 @@ app.listen(3000, () => {
     console.log("*********** Segnitz Rental System ***********");
     console.log("Server läuft auf Port 3000");
 });
-
