@@ -549,17 +549,124 @@ function renderOrderDetails(order) {
             </div>
 
             <div class="col-12">
-                <h5>Rückgabe / Kaution</h5>
-                <p>
-                    <strong>Rückgabestatus:</strong> ${order.return_status || 'pending'}<br>
-                    <strong>Beschädigt:</strong> ${order.is_damaged ? 'Ja' : 'Nein'}<br>
-                    <strong>Verspätet:</strong> ${order.is_late ? 'Ja' : 'Nein'}<br>
-                    <strong>Kautionsentscheidung:</strong> ${order.deposit_decision || 'pending'}<br>
-                    <strong>Abzugsgrund:</strong> ${order.deposit_deduction_reason || '-'}
-                </p>
+    <hr>
+    <h5>Rückgabe / Kaution bearbeiten</h5>
+
+    <div class="row g-3">
+        <div class="col-12 col-md-4">
+            <label class="form-label">Rückgabestatus</label>
+            <select class="form-select" id="returnStatus">
+                <option value="returned_ok" ${order.return_status === 'returned_ok' ? 'selected' : ''}>Ordnungsgemäß zurückgegeben</option>
+                <option value="returned_late" ${order.return_status === 'returned_late' ? 'selected' : ''}>Verspätet zurückgegeben</option>
+                <option value="returned_damaged" ${order.return_status === 'returned_damaged' ? 'selected' : ''}>Beschädigt zurückgegeben</option>
+                <option value="returned_late_damaged" ${order.return_status === 'returned_late_damaged' ? 'selected' : ''}>Verspätet und beschädigt</option>
+            </select>
+        </div>
+
+        <div class="col-12 col-md-4">
+            <label class="form-label">Kautionsentscheidung</label>
+            <select class="form-select" id="depositDecision">
+                <option value="full_refund" ${order.deposit_decision === 'full_refund' ? 'selected' : ''}>Vollständig zurückzahlen</option>
+                <option value="partial_refund" ${order.deposit_decision === 'partial_refund' ? 'selected' : ''}>Teilweise zurückzahlen</option>
+                <option value="no_refund" ${order.deposit_decision === 'no_refund' ? 'selected' : ''}>Nicht zurückzahlen</option>
+                <option value="pending" ${!order.deposit_decision || order.deposit_decision === 'pending' ? 'selected' : ''}>Noch offen</option>
+            </select>
+        </div>
+
+        <div class="col-12 col-md-4">
+            <label class="form-label">Rückzahlungsbetrag</label>
+            <input type="number" step="0.01" min="0" class="form-control" id="depositRefundAmount"
+                value="${order.deposit_refund_amount || ''}">
+        </div>
+
+        <div class="col-12 col-md-6">
+            <div class="form-check mt-2">
+                <input class="form-check-input" type="checkbox" id="isDamaged" ${order.is_damaged ? 'checked' : ''}>
+                <label class="form-check-label" for="isDamaged">Artikel beschädigt zurückgegeben</label>
             </div>
+
+            <textarea class="form-control mt-2" id="damageDescription" rows="3"
+                placeholder="Beschreibung der Beschädigung">${order.damage_description || ''}</textarea>
+        </div>
+
+        <div class="col-12 col-md-6">
+            <div class="form-check mt-2">
+                <input class="form-check-input" type="checkbox" id="isLate" ${order.is_late ? 'checked' : ''}>
+                <label class="form-check-label" for="isLate">Artikel verspätet zurückgegeben</label>
+            </div>
+
+            <textarea class="form-control mt-2" id="lateDescription" rows="3"
+                placeholder="Beschreibung der Verspätung">${order.late_description || ''}</textarea>
+        </div>
+
+        <div class="col-12 col-md-4">
+            <label class="form-label">Kautionsabzug</label>
+            <input type="number" step="0.01" min="0" class="form-control" id="depositDeductionAmount"
+                value="${order.deposit_deduction_amount || ''}">
+        </div>
+
+        <div class="col-12 col-md-8">
+            <label class="form-label">Grund für Kautionsabzug</label>
+            <input type="text" class="form-control" id="depositDeductionReason"
+                value="${order.deposit_deduction_reason || ''}">
+        </div>
+
+        <div class="col-12">
+            <label class="form-label">Interne Rückgabe-Notiz</label>
+            <textarea class="form-control" id="returnNotes" rows="3">${order.return_notes || ''}</textarea>
+        </div>
+
+        <div class="col-12">
+            <button type="button" class="btn btn-success" onclick="saveOrderReturn(${order.id})">
+                Rückgabe speichern
+            </button>
+        </div>
+    </div>
+</div>
+
         </div>
     `;
+}
+
+async function saveOrderReturn(orderId) {
+    const payload = {
+        returnStatus: document.getElementById('returnStatus').value,
+        isDamaged: document.getElementById('isDamaged').checked,
+        damageDescription: document.getElementById('damageDescription').value.trim(),
+        isLate: document.getElementById('isLate').checked,
+        lateDescription: document.getElementById('lateDescription').value.trim(),
+        depositDecision: document.getElementById('depositDecision').value,
+        depositRefundAmount: document.getElementById('depositRefundAmount').value || null,
+        depositDeductionAmount: document.getElementById('depositDeductionAmount').value || null,
+        depositDeductionReason: document.getElementById('depositDeductionReason').value.trim(),
+        returnNotes: document.getElementById('returnNotes').value.trim()
+    };
+
+    try {
+        const response = await fetch(`/admin/orders/${orderId}/return`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+            showAlert(result.error || 'Rückgabe konnte nicht gespeichert werden.', 'danger');
+            return;
+        }
+
+        showAlert(result.message || 'Rückgabe wurde gespeichert.', 'success');
+
+        await loadOrders();
+        await openOrderDetails(orderId);
+
+    } catch (error) {
+        console.error('Fehler beim Speichern der Rückgabe:', error);
+        showAlert('Rückgabe konnte nicht gespeichert werden.', 'danger');
+    }
 }
 
 function loadBackendUser() {
@@ -676,15 +783,25 @@ function switchBackendView(view) {
 function getStatusBadge(status) {
     const map = {
         reserved: 'warning',
-        expired: 'secondary',
+        expired: 'danger',
         paid: 'info',
         confirmed: 'primary',
         active: 'success',
         returned: 'success',
-        cancelled: 'danger'
+        cancelled: 'dark'
     };
 
-    return `<span class="badge bg-${map[status] || 'secondary'} me-1">${status || '-'}</span>`;
+    const labels = {
+        reserved: 'Reserviert',
+        expired: 'Abgelaufen',
+        paid: 'Bezahlt',
+        confirmed: 'Bestätigt',
+        active: 'Aktiv',
+        returned: 'Zurückgegeben',
+        cancelled: 'Storniert'
+    };
+
+    return `<span class="badge bg-${map[status] || 'secondary'} me-1">${labels[status] || status || '-'}</span>`;
 }
 
 function getPaymentBadge(status) {

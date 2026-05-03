@@ -1077,16 +1077,16 @@ function renderCart() {
                     </div>
 
                     <div class="text-end">
+                        <strong>${formatCurrency(lineTotal)}</strong><br>
                         <button type="button" class="btn btn-sm btn-outline-primary mt-2 me-2"
                             onclick="openCartItemEditModal(${item.id})">
                             Zeitraum ändern
                         </button>
-
-                        <strong>${formatCurrency(lineTotal)}</strong><br>
                         <button type="button" class="btn btn-sm btn-outline-danger mt-2"
                             onclick="deleteCartItem(${item.id})">
                             Entfernen
                         </button>
+
                     </div>
                 </div>
             </div>
