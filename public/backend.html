@@ -228,6 +228,36 @@
         </div>
     </div>
 
+    <div class="modal fade" id="cancelOrderModal" tabindex="-1" aria-hidden="true" style="z-index: 3060;">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Bestellung stornieren</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+
+                <div class="modal-body">
+                    <input type="hidden" id="cancelOrderId">
+
+                    <label class="form-label" for="cancelReason">
+                        Stornogrund
+                    </label>
+                    <textarea class="form-control" id="cancelReason" rows="4"
+                        placeholder="Bitte Stornogrund eingeben..."></textarea>
+                </div>
+
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                        Abbrechen
+                    </button>
+                    <button type="button" class="btn btn-danger" onclick="submitCancelOrder()">
+                        Bestellung stornieren
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!--Bootstrap-->
     <script type="text/javascript" src="js/bootstrap.bundle.min.js"></script>
     <!-- Javascript to handle Alerts -->

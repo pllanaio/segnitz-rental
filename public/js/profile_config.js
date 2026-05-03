@@ -135,6 +135,12 @@ function renderMyOrderDetails(order) {
                 <p>
                     <strong>Bestellnummer:</strong> ${order.order_no}<br>
                     <strong>Status:</strong> ${getStatusBadge(order.status)}<br>
+                        ${order.status === 'cancelled' ? `
+        <strong>Storniert am:</strong> ${order.cancelled_at || '-'}<br>
+        <strong>Stornogrund:</strong><br>
+        <span class="text-danger">${order.cancel_reason || '-'}</span><br>
+    ` : ''}
+
                     <strong>Zahlung:</strong> ${getPaymentBadge(order.payment_status)}<br>
                     <strong>Rückgabe:</strong> ${getReturnBadge(order.return_status)}
                 </p>
@@ -354,6 +360,22 @@ document.getElementById('passwordForm')?.addEventListener('submit', async (event
         showAlert('Passwort konnte nicht geändert werden.', 'danger');
     }
 });
+
+function formatTextValue(value) {
+    if (value === null || value === undefined || value === '') {
+        return '-';
+    }
+
+    if (typeof value === 'object') {
+        if (value.message) return value.message;
+        if (value.reason) return value.reason;
+        if (value.text) return value.text;
+
+        return JSON.stringify(value);
+    }
+
+    return String(value);
+}
 
 function logout() {
     fetch('/logout', {

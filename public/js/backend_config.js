@@ -506,6 +506,16 @@ function renderOrderDetails(order) {
         </tr>
     `).join('');
 
+    const status = String(order.status || '').trim().toLowerCase();
+
+    const returnHtml = status === 'cancelled' ? '' : `
+    <div class="col-12">
+        <hr>
+        <h5>Rückgabe / Kaution bearbeiten</h5>
+        ...
+    </div>
+`;
+
     const cancelHtml = canCancelOrder(order) ? `
     <div class="col-12">
         <hr>
@@ -535,7 +545,13 @@ function renderOrderDetails(order) {
                 <h5>Bestellung</h5>
                 <p>
                     <strong>Bestellnummer:</strong> ${order.order_no}<br>
-                    <strong>Status:</strong> ${order.status}<br>
+                    <strong>Status:</strong> ${getStatusBadge(order.status)}<br>
+                        ${order.status === 'cancelled' ? `
+        <strong>Storniert am:</strong> ${order.cancelled_at || '-'}<br>
+        <strong>Storniert von:</strong> ${order.cancelled_by_username || '-'}<br>
+        <strong>Stornogrund:</strong><br>
+        <span class="text-danger">${order.cancel_reason || '-'}</span><br>
+    ` : ''}
                     <strong>Zahlungsstatus:</strong> ${order.payment_status || '-'}<br>
                     <strong>Zahlungsmethode:</strong> ${order.payment_method || '-'}
                 </p>
@@ -997,20 +1013,22 @@ async function deleteReturnImage(imageId, orderId) {
     }
 }
 
-async function cancelOrder(orderId) {
-    const reason = prompt('Bitte Stornogrund eingeben:');
+function cancelOrder(orderId) {
+    document.getElementById('cancelOrderId').value = orderId;
+    document.getElementById('cancelReason').value = '';
 
-    if (!reason || !reason.trim()) {
-        showAlert('Stornierung abgebrochen: Es wurde kein Grund angegeben.', 'warning');
+    const modal = new bootstrap.Modal(document.getElementById('cancelOrderModal'));
+    modal.show();
+}
+
+async function submitCancelOrder() {
+    const orderId = document.getElementById('cancelOrderId').value;
+    const reason = document.getElementById('cancelReason').value.trim();
+
+    if (!reason) {
+        showAlert('Bitte geben Sie einen Stornogrund ein.', 'warning');
         return;
     }
-
-    const confirmed = await showConfirm(
-        'Möchten Sie diese Bestellung wirklich stornieren? Diese Aktion kann nicht rückgängig gemacht werden.',
-        'Bestellung stornieren'
-    );
-
-    if (!confirmed) return;
 
     try {
         const response = await fetch(`/admin/orders/${orderId}/cancel`, {
@@ -1019,7 +1037,7 @@ async function cancelOrder(orderId) {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                cancelReason: reason.trim()
+                cancelReason: reason
             })
         });
 
@@ -1029,6 +1047,8 @@ async function cancelOrder(orderId) {
             showAlert(result.error || 'Bestellung konnte nicht storniert werden.', 'danger');
             return;
         }
+
+        bootstrap.Modal.getInstance(document.getElementById('cancelOrderModal'))?.hide();
 
         showAlert(result.message || 'Bestellung wurde storniert.', 'success');
 
@@ -1050,6 +1070,22 @@ async function cancelOrder(orderId) {
 function canCancelOrder(order) {
     const status = String(order.status || '').trim().toLowerCase();
     return !['cancelled', 'returned', 'expired'].includes(status);
+}
+
+function formatTextValue(value) {
+    if (value === null || value === undefined || value === '') {
+        return '-';
+    }
+
+    if (typeof value === 'object') {
+        if (value.message) return value.message;
+        if (value.reason) return value.reason;
+        if (value.text) return value.text;
+
+        return JSON.stringify(value);
+    }
+
+    return String(value);
 }
 
 function logout() {

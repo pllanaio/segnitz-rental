@@ -1548,6 +1548,8 @@ app.get('/my-orders/:id', async (req, res) => {
                 DATE_FORMAT(returned_at, '%Y-%m-%d %H:%i:%s') AS returned_at,
                 DATE_FORMAT(return_case_processed_at, '%Y-%m-%d %H:%i:%s') AS return_case_processed_at,
                 confirmation_json
+                cancel_reason,
+                DATE_FORMAT(cancelled_at, '%Y-%m-%d %H:%i:%s') AS cancelled_at
              FROM rental_orders
              WHERE id = ?
              AND customer_email = ?
