@@ -506,6 +506,29 @@ function renderOrderDetails(order) {
         </tr>
     `).join('');
 
+    const cancelHtml = canCancelOrder(order) ? `
+    <div class="col-12">
+        <hr>
+        <h5>Bestellung stornieren</h5>
+        <p class="text-muted">
+            Storniert die Bestellung vollständig. Mietzeiträume werden dadurch wieder frei.
+        </p>
+
+        <button type="button" class="btn btn-danger"
+            onclick="cancelOrder(${order.id})">
+            Bestellung stornieren
+        </button>
+    </div>
+` : `
+    <div class="col-12">
+        <hr>
+        <h5>Storno</h5>
+        <p class="text-muted">
+            Diese Bestellung kann nicht mehr storniert werden.
+        </p>
+    </div>
+`;
+
     body.innerHTML = `
         <div class="row g-4">
             <div class="col-12 col-lg-6">
@@ -548,20 +571,7 @@ function renderOrderDetails(order) {
                 </div>
             </div>
 
-            ${!['cancelled', 'returned', 'expired'].includes(order.status) ? `
-    <div class="col-12">
-        <hr>
-        <h5>Bestellung stornieren</h5>
-        <p class="text-muted">
-            Storniert die Bestellung vollständig. Mietzeiträume werden dadurch wieder frei.
-        </p>
-
-        <button type="button" class="btn btn-danger"
-            onclick="cancelOrder(${order.id})">
-            Bestellung stornieren
-        </button>
-    </div>
-` : ''}
+                ${cancelHtml}
 
             <div class="col-12">
     <hr>
@@ -1035,6 +1045,11 @@ async function cancelOrder(orderId) {
         console.error('Fehler beim Stornieren der Bestellung:', error);
         showAlert('Bestellung konnte nicht storniert werden.', 'danger');
     }
+}
+
+function canCancelOrder(order) {
+    const status = String(order.status || '').trim().toLowerCase();
+    return !['cancelled', 'returned', 'expired'].includes(status);
 }
 
 function logout() {
