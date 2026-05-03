@@ -1547,7 +1547,7 @@ app.get('/my-orders/:id', async (req, res) => {
                 DATE_FORMAT(reserved_until, '%Y-%m-%d %H:%i:%s') AS reserved_until,
                 DATE_FORMAT(returned_at, '%Y-%m-%d %H:%i:%s') AS returned_at,
                 DATE_FORMAT(return_case_processed_at, '%Y-%m-%d %H:%i:%s') AS return_case_processed_at,
-                confirmation_json
+                confirmation_json,
                 cancel_reason,
                 DATE_FORMAT(cancelled_at, '%Y-%m-%d %H:%i:%s') AS cancelled_at
              FROM rental_orders
@@ -1580,12 +1580,20 @@ app.get('/my-orders/:id', async (req, res) => {
         let finalItems = items;
 
         if (finalItems.length === 0 && orders[0].confirmation_json) {
-            const confirmationJson =
-                typeof orders[0].confirmation_json === 'string'
-                    ? JSON.parse(orders[0].confirmation_json)
-                    : orders[0].confirmation_json;
+            try {
+                const confirmationJson =
+                    typeof orders[0].confirmation_json === 'string'
+                        ? JSON.parse(orders[0].confirmation_json)
+                        : orders[0].confirmation_json;
 
-            finalItems = confirmationJson.items || confirmationJson.order?.items || [];
+                finalItems =
+                    confirmationJson.order?.items ||
+                    confirmationJson.items ||
+                    [];
+            } catch (jsonError) {
+                console.error('Fehler beim Lesen der confirmation_json:', jsonError);
+                finalItems = [];
+            }
         }
 
         const [images] = await connection.execute(
