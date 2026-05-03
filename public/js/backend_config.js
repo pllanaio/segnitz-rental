@@ -620,6 +620,34 @@ function renderOrderDetails(order) {
         </div>
 
         <div class="col-12">
+    <label class="form-label">Rückgabefotos hochladen</label>
+    <input type="file" class="form-control" id="returnImageUpload" accept="image/*" multiple>
+    <small class="text-muted">Maximal 10 Bilder, je 5 MB.</small>
+</div>
+
+<div class="col-12">
+    <button type="button" class="btn btn-outline-primary" onclick="uploadReturnImages(${order.id})">
+        Fotos hochladen
+    </button>
+</div>
+
+<div class="col-12">
+    <h6 class="mt-3">Vorhandene Rückgabefotos</h6>
+    <div class="row g-2">
+        ${(order.returnImages || []).length === 0
+            ? '<div class="col-12 text-muted">Noch keine Fotos vorhanden.</div>'
+            : order.returnImages.map(image => `
+                <div class="col-6 col-md-3">
+                    <a href="/${image.imagePath}" target="_blank">
+                        <img src="/${image.imagePath}" class="img-fluid rounded border" style="height: 140px; object-fit: cover; width: 100%;">
+                    </a>
+                </div>
+            `).join('')
+        }
+    </div>
+</div>
+
+        <div class="col-12">
             <button type="button" class="btn btn-success" onclick="saveOrderReturn(${order.id})">
                 Rückgabe speichern
             </button>
@@ -855,6 +883,48 @@ function getReturnBadge(status) {
     return `<span class="badge bg-${map[status] || 'secondary'}">
         Rückgabe: ${labels[status] || status || 'pending'}
     </span>`;
+}
+
+async function uploadReturnImages(orderId) {
+    const input = document.getElementById('returnImageUpload');
+
+    if (!input || input.files.length === 0) {
+        showAlert('Bitte wählen Sie mindestens ein Foto aus.', 'warning');
+        return;
+    }
+
+    const formData = new FormData();
+
+    Array.from(input.files).forEach(file => {
+        formData.append('images', file);
+    });
+
+    try {
+        const response = await fetch(`/admin/orders/${orderId}/return-images`, {
+            method: 'POST',
+            body: formData
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+            showAlert(result.error || 'Fotos konnten nicht hochgeladen werden.', 'danger');
+            return;
+        }
+
+        showAlert(result.message || 'Fotos wurden hochgeladen.', 'success');
+
+        const detailsResponse = await fetch(`/admin/orders/${orderId}`);
+        const updatedOrder = await detailsResponse.json();
+
+        if (detailsResponse.ok) {
+            renderOrderDetails(updatedOrder);
+        }
+
+    } catch (error) {
+        console.error('Fehler beim Foto-Upload:', error);
+        showAlert('Fotos konnten nicht hochgeladen werden.', 'danger');
+    }
 }
 
 function logout() {
