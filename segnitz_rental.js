@@ -1894,6 +1894,46 @@ app.post('/admin/orders/:id/return-images', checkAdmin, uploadReturnImages.array
     }
 });
 
+app.delete('/admin/return-images/:id', checkAdmin, async (req, res) => {
+    let connection;
+
+    try {
+        connection = await mysql.createConnection(dbConfig);
+
+        const [rows] = await connection.execute(
+            `SELECT image_path
+             FROM rental_order_return_images
+             WHERE id = ?
+             LIMIT 1`,
+            [req.params.id]
+        );
+
+        if (rows.length === 0) {
+            return res.status(404).json({ error: 'Foto nicht gefunden.' });
+        }
+
+        const imagePath = path.join(__dirname, 'public', rows[0].image_path);
+
+        await connection.execute(
+            `DELETE FROM rental_order_return_images WHERE id = ?`,
+            [req.params.id]
+        );
+
+        if (fs.existsSync(imagePath)) {
+            fs.unlinkSync(imagePath);
+        }
+
+        res.json({ message: 'Rückgabefoto wurde gelöscht.' });
+    } catch (error) {
+        console.error('Fehler beim Löschen des Rückgabefotos:', error);
+        res.status(500).json({ error: 'Rückgabefoto konnte nicht gelöscht werden.' });
+    } finally {
+        if (connection) {
+            await connection.end();
+        }
+    }
+});
+
 app.get('/cart', async (req, res) => {
     let connection;
 

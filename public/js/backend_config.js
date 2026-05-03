@@ -637,12 +637,21 @@ function renderOrderDetails(order) {
         ${(order.returnImages || []).length === 0
             ? '<div class="col-12 text-muted">Noch keine Fotos vorhanden.</div>'
             : order.returnImages.map(image => `
-                <div class="col-6 col-md-3">
-                    <a href="/${image.imagePath}" target="_blank">
-                        <img src="/${image.imagePath}" class="img-fluid rounded border" style="height: 140px; object-fit: cover; width: 100%;">
-                    </a>
-                </div>
-            `).join('')
+    <div class="col-6 col-md-3">
+        <div class="card h-100">
+            <a href="/${image.imagePath}" target="_blank">
+                <img src="/${image.imagePath}" class="card-img-top"
+                    style="height: 140px; object-fit: cover;">
+            </a>
+            <div class="card-body p-2">
+                <button type="button" class="btn btn-danger btn-sm w-100"
+                    onclick="deleteReturnImage(${image.id}, ${order.id})">
+                    Foto löschen
+                </button>
+            </div>
+        </div>
+    </div>
+`).join('')
         }
     </div>
 </div>
@@ -924,6 +933,42 @@ async function uploadReturnImages(orderId) {
     } catch (error) {
         console.error('Fehler beim Foto-Upload:', error);
         showAlert('Fotos konnten nicht hochgeladen werden.', 'danger');
+    }
+}
+
+async function deleteReturnImage(imageId, orderId) {
+    const confirmed = await showConfirm(
+        'Möchten Sie dieses Rückgabefoto wirklich löschen?',
+        'Rückgabefoto löschen'
+    );
+
+    if (!confirmed) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/admin/return-images/${imageId}`, {
+            method: 'DELETE'
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+            showAlert(result.error || 'Foto konnte nicht gelöscht werden.', 'danger');
+            return;
+        }
+
+        showAlert(result.message || 'Foto wurde gelöscht.', 'success');
+
+        const detailsResponse = await fetch(`/admin/orders/${orderId}`);
+        const updatedOrder = await detailsResponse.json();
+
+        if (detailsResponse.ok) {
+            renderOrderDetails(updatedOrder);
+        }
+    } catch (error) {
+        console.error('Fehler beim Löschen des Rückgabefotos:', error);
+        showAlert('Foto konnte nicht gelöscht werden.', 'danger');
     }
 }
 
