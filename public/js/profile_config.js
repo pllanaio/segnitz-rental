@@ -23,6 +23,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         document.getElementById('profileBox').classList.remove('d-none');
 
+        await loadMyOrders();
+
     } catch (error) {
         const box = document.getElementById('profileError');
         box.textContent = 'Profil konnte nicht geladen werden.';
@@ -30,7 +32,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 });
 
-let myOrders = [];
+
 
 async function loadMyOrders() {
     const container = document.getElementById('myOrdersList');
@@ -188,4 +190,72 @@ function renderMyOrderDetails(order) {
             </div>
         </div>
     `;
+}
+
+function getStatusBadge(status) {
+    const map = {
+        reserved: 'warning',
+        expired: 'danger',
+        paid: 'info',
+        confirmed: 'primary',
+        active: 'success',
+        returned: 'success',
+        cancelled: 'dark'
+    };
+
+    const labels = {
+        reserved: 'Reserviert',
+        expired: 'Abgelaufen',
+        paid: 'Bezahlt',
+        confirmed: 'Bestätigt',
+        active: 'Aktiv',
+        returned: 'Zurückgegeben',
+        cancelled: 'Storniert'
+    };
+
+    return `<span class="badge bg-${map[status] || 'secondary'} me-1">${labels[status] || status || '-'}</span>`;
+}
+
+function getPaymentBadge(status) {
+    const map = {
+        paid: 'success',
+        unpaid: 'warning',
+        pending: 'warning',
+        failed: 'danger',
+        refunded: 'secondary'
+    };
+
+    const labels = {
+        paid: 'Bezahlt',
+        unpaid: 'Unbezahlt',
+        pending: 'Ausstehend',
+        failed: 'Fehlgeschlagen',
+        refunded: 'Erstattet'
+    };
+
+    return `<span class="badge bg-${map[status] || 'secondary'} me-1">
+        Zahlung: ${labels[status] || status || '-'}
+    </span>`;
+}
+
+function getReturnBadge(status) {
+    const map = {
+        pending: 'secondary',
+        returned_ok: 'success',
+        returned_late: 'warning',
+        returned_damaged: 'danger',
+        returned_late_damaged: 'danger'
+    };
+
+    const labels = {
+        pending: 'Offen',
+        returned_ok: 'OK',
+        returned_late: 'Verspätet',
+        returned_damaged: 'Beschädigt',
+        returned_late_damaged: 'Verspätet + beschädigt'
+    };
+
+    return `<span class="badge bg-${map[status] || 'secondary'}">
+        Rückgabe: ${labels[status] || status || 'pending'}
+    </span>`;
 }
