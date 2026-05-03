@@ -1987,8 +1987,10 @@ app.get('/admin/orders/:id', checkAdmin, async (req, res) => {
             `SELECT 
                 ro.*,
                 u.username AS return_processed_by_username
+                cancelledUser.username AS cancelled_by_username
             FROM rental_orders ro
             LEFT JOIN users u ON u.id = ro.return_processed_by_user_id
+            LEFT JOIN users cancelledUser ON cancelledUser.id = ro.cancelled_by_user_id
             WHERE ro.id = ?
             LIMIT 1`,
             [req.params.id]
@@ -2053,6 +2055,72 @@ app.get('/admin/orders/:id', checkAdmin, async (req, res) => {
         if (connection) {
             await connection.end();
         }
+    }
+});
+
+app.put('/admin/orders/:id/cancel', checkAdmin, async (req, res) => {
+    let connection;
+
+    try {
+        const { cancelReason } = req.body;
+
+        if (!cancelReason || !cancelReason.trim()) {
+            return res.status(400).json({
+                error: 'Ein Stornogrund ist erforderlich.'
+            });
+        }
+
+        connection = await mysql.createConnection(dbConfig);
+
+        const [orders] = await connection.execute(
+            `SELECT id, status
+             FROM rental_orders
+             WHERE id = ?
+             LIMIT 1`,
+            [req.params.id]
+        );
+
+        if (orders.length === 0) {
+            return res.status(404).json({
+                error: 'Bestellung nicht gefunden.'
+            });
+        }
+
+        const order = orders[0];
+
+        if (['cancelled', 'returned', 'expired'].includes(order.status)) {
+            return res.status(409).json({
+                error: 'Diese Bestellung kann nicht storniert werden.'
+            });
+        }
+
+        const cancelledByUserId = await getUserIdByEmail(connection, req.session.user);
+
+        await connection.execute(
+            `UPDATE rental_orders
+             SET status = 'cancelled',
+                 cancel_reason = ?,
+                 cancelled_by_user_id = ?,
+                 cancelled_at = NOW()
+             WHERE id = ?`,
+            [
+                cancelReason.trim(),
+                cancelledByUserId,
+                req.params.id
+            ]
+        );
+
+        res.json({
+            message: 'Bestellung wurde storniert.'
+        });
+
+    } catch (error) {
+        console.error('Fehler beim Stornieren der Bestellung:', error);
+        res.status(500).json({
+            error: 'Bestellung konnte nicht storniert werden.'
+        });
+    } finally {
+        if (connection) await connection.end();
     }
 });
 

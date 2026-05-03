@@ -548,6 +548,21 @@ function renderOrderDetails(order) {
                 </div>
             </div>
 
+            ${!['cancelled', 'returned', 'expired'].includes(order.status) ? `
+    <div class="col-12">
+        <hr>
+        <h5>Bestellung stornieren</h5>
+        <p class="text-muted">
+            Storniert die Bestellung vollständig. Mietzeiträume werden dadurch wieder frei.
+        </p>
+
+        <button type="button" class="btn btn-danger"
+            onclick="cancelOrder(${order.id})">
+            Bestellung stornieren
+        </button>
+    </div>
+` : ''}
+
             <div class="col-12">
     <hr>
     <h5>Rückgabe / Kaution bearbeiten</h5>
@@ -969,6 +984,56 @@ async function deleteReturnImage(imageId, orderId) {
     } catch (error) {
         console.error('Fehler beim Löschen des Rückgabefotos:', error);
         showAlert('Foto konnte nicht gelöscht werden.', 'danger');
+    }
+}
+
+async function cancelOrder(orderId) {
+    const reason = prompt('Bitte Stornogrund eingeben:');
+
+    if (!reason || !reason.trim()) {
+        showAlert('Stornierung abgebrochen: Es wurde kein Grund angegeben.', 'warning');
+        return;
+    }
+
+    const confirmed = await showConfirm(
+        'Möchten Sie diese Bestellung wirklich stornieren? Diese Aktion kann nicht rückgängig gemacht werden.',
+        'Bestellung stornieren'
+    );
+
+    if (!confirmed) return;
+
+    try {
+        const response = await fetch(`/admin/orders/${orderId}/cancel`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                cancelReason: reason.trim()
+            })
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+            showAlert(result.error || 'Bestellung konnte nicht storniert werden.', 'danger');
+            return;
+        }
+
+        showAlert(result.message || 'Bestellung wurde storniert.', 'success');
+
+        await loadOrders();
+
+        const detailsResponse = await fetch(`/admin/orders/${orderId}`);
+        const updatedOrder = await detailsResponse.json();
+
+        if (detailsResponse.ok) {
+            renderOrderDetails(updatedOrder);
+        }
+
+    } catch (error) {
+        console.error('Fehler beim Stornieren der Bestellung:', error);
+        showAlert('Bestellung konnte nicht storniert werden.', 'danger');
     }
 }
 
