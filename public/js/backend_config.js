@@ -585,44 +585,122 @@ function renderOrderDetails(order) {
             ${cancelHtml}
 
             ${canShowReturnSection ? `
-    <div class="col-12">
-        <hr>
-        <h5>Rückgabe / Kaution bearbeiten</h5>
+<div class="col-12">
+    <hr>
+    <h5>Rückgabe / Kaution bearbeiten</h5>
+    <p>
+        <strong>Zuletzt bearbeitet von:</strong> ${order.return_processed_by_username || '-'}<br>
+        <strong>Bearbeitet am:</strong> ${order.return_case_processed_at || '-'}
+    </p>
 
-        <p>
-            <strong>Zuletzt bearbeitet von:</strong> ${order.return_processed_by_username || '-'}<br>
-            <strong>Bearbeitet am:</strong> ${order.return_case_processed_at || '-'}
-        </p>
+    <div class="row g-3">
+        <div class="col-12 col-md-4">
+            <label class="form-label">Rückgabestatus</label>
+            <select class="form-select" id="returnStatus">
+                <option value="returned_ok" ${order.return_status === 'returned_ok' ? 'selected' : ''}>Ordnungsgemäß zurückgegeben</option>
+                <option value="returned_late" ${order.return_status === 'returned_late' ? 'selected' : ''}>Verspätet zurückgegeben</option>
+                <option value="returned_damaged" ${order.return_status === 'returned_damaged' ? 'selected' : ''}>Beschädigt zurückgegeben</option>
+                <option value="returned_late_damaged" ${order.return_status === 'returned_late_damaged' ? 'selected' : ''}>Verspätet und beschädigt</option>
+            </select>
+        </div>
 
-        <div class="row g-3">
-            <div class="col-12 col-md-4">
-                <label class="form-label">Rückgabestatus</label>
-                <select class="form-select" id="returnStatus">
-                    <option value="returned_ok" ${order.return_status === 'returned_ok' ? 'selected' : ''}>Ordnungsgemäß</option>
-                    <option value="returned_late" ${order.return_status === 'returned_late' ? 'selected' : ''}>Verspätet</option>
-                    <option value="returned_damaged" ${order.return_status === 'returned_damaged' ? 'selected' : ''}>Beschädigt</option>
-                    <option value="returned_late_damaged" ${order.return_status === 'returned_late_damaged' ? 'selected' : ''}>Verspätet + beschädigt</option>
-                </select>
+        <div class="col-12 col-md-4">
+            <label class="form-label">Kautionsentscheidung</label>
+            <select class="form-select" id="depositDecision">
+                <option value="full_refund" ${order.deposit_decision === 'full_refund' ? 'selected' : ''}>Vollständig zurückzahlen</option>
+                <option value="partial_refund" ${order.deposit_decision === 'partial_refund' ? 'selected' : ''}>Teilweise zurückzahlen</option>
+                <option value="no_refund" ${order.deposit_decision === 'no_refund' ? 'selected' : ''}>Nicht zurückzahlen</option>
+                <option value="pending" ${!order.deposit_decision || order.deposit_decision === 'pending' ? 'selected' : ''}>Noch offen</option>
+            </select>
+        </div>
+
+        <div class="col-12 col-md-4">
+            <label class="form-label">Rückzahlungsbetrag</label>
+            <input type="number" step="0.01" min="0" class="form-control" id="depositRefundAmount"
+                value="${order.deposit_refund_amount || ''}">
+        </div>
+
+        <div class="col-12 col-md-6">
+            <div class="form-check mt-2">
+                <input class="form-check-input" type="checkbox" id="isDamaged" ${order.is_damaged ? 'checked' : ''}>
+                <label class="form-check-label" for="isDamaged">Artikel beschädigt zurückgegeben</label>
             </div>
 
-            <div class="col-12 col-md-4">
-                <label class="form-label">Kautionsentscheidung</label>
-                <select class="form-select" id="depositDecision">
-                    <option value="full_refund" ${order.deposit_decision === 'full_refund' ? 'selected' : ''}>Vollständig</option>
-                    <option value="partial_refund" ${order.deposit_decision === 'partial_refund' ? 'selected' : ''}>Teilweise</option>
-                    <option value="no_refund" ${order.deposit_decision === 'no_refund' ? 'selected' : ''}>Keine</option>
-                    <option value="pending" ${!order.deposit_decision || order.deposit_decision === 'pending' ? 'selected' : ''}>Offen</option>
-                </select>
+            <textarea class="form-control mt-2" id="damageDescription" rows="3"
+                placeholder="Beschreibung der Beschädigung">${order.damage_description || ''}</textarea>
+        </div>
+
+        <div class="col-12 col-md-6">
+            <div class="form-check mt-2">
+                <input class="form-check-input" type="checkbox" id="isLate" ${order.is_late ? 'checked' : ''}>
+                <label class="form-check-label" for="isLate">Artikel verspätet zurückgegeben</label>
             </div>
 
-            <div class="col-12">
-                <button type="button" class="btn btn-success"
-                    onclick="saveOrderReturn(${order.id})">
-                    Rückgabe speichern
-                </button>
+            <textarea class="form-control mt-2" id="lateDescription" rows="3"
+                placeholder="Beschreibung der Verspätung">${order.late_description || ''}</textarea>
+        </div>
+
+        <div class="col-12 col-md-4">
+            <label class="form-label">Kautionsabzug</label>
+            <input type="number" step="0.01" min="0" class="form-control" id="depositDeductionAmount"
+                value="${order.deposit_deduction_amount || ''}">
+        </div>
+
+        <div class="col-12 col-md-8">
+            <label class="form-label">Grund für Kautionsabzug</label>
+            <input type="text" class="form-control" id="depositDeductionReason"
+                value="${order.deposit_deduction_reason || ''}">
+        </div>
+
+        <div class="col-12">
+            <label class="form-label">Interne Rückgabe-Notiz</label>
+            <textarea class="form-control" id="returnNotes" rows="3">${order.return_notes || ''}</textarea>
+        </div>
+
+        <div class="col-12">
+            <label class="form-label">Rückgabefotos hochladen</label>
+            <input type="file" class="form-control" id="returnImageUpload" accept="image/*" multiple>
+            <small class="text-muted">Maximal 10 Bilder, je 5 MB.</small>
+        </div>
+
+        <div class="col-12">
+            <button type="button" class="btn btn-outline-primary" onclick="uploadReturnImages(${order.id})">
+                Fotos hochladen
+            </button>
+        </div>
+
+        <div class="col-12">
+            <h6 class="mt-3">Vorhandene Rückgabefotos</h6>
+            <div class="row g-2">
+                ${(order.returnImages || []).length === 0
+                ? '<div class="col-12 text-muted">Noch keine Fotos vorhanden.</div>'
+                : order.returnImages.map(image => `
+                        <div class="col-6 col-md-3">
+                            <div class="card h-100">
+                                <a href="/${image.imagePath}" target="_blank">
+                                    <img src="/${image.imagePath}" class="card-img-top"
+                                        style="height: 140px; object-fit: cover;">
+                                </a>
+                                <div class="card-body p-2">
+                                    <button type="button" class="btn btn-danger btn-sm w-100"
+                                        onclick="deleteReturnImage(${image.id}, ${order.id})">
+                                        Foto löschen
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    `).join('')
+            }
             </div>
         </div>
+
+        <div class="col-12">
+            <button type="button" class="btn btn-success" onclick="saveOrderReturn(${order.id})">
+                Rückgabe speichern
+            </button>
+        </div>
     </div>
+</div>
 ` : ''}
 
         </div>
