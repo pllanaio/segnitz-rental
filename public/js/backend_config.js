@@ -551,7 +551,10 @@ function renderOrderDetails(order) {
             <div class="col-12">
     <hr>
     <h5>Rückgabe / Kaution bearbeiten</h5>
-
+<p>
+    <strong>Zuletzt bearbeitet von:</strong> ${order.return_processed_by_username || '-'}<br>
+    <strong>Bearbeitet am:</strong> ${order.return_case_processed_at || '-'}
+</p>
     <div class="row g-3">
         <div class="col-12 col-md-4">
             <label class="form-label">Rückgabestatus</label>
@@ -661,7 +664,13 @@ async function saveOrderReturn(orderId) {
         showAlert(result.message || 'Rückgabe wurde gespeichert.', 'success');
 
         await loadOrders();
-        await openOrderDetails(orderId);
+
+        const detailsResponse = await fetch(`/admin/orders/${orderId}`);
+        const updatedOrder = await detailsResponse.json();
+
+        if (detailsResponse.ok) {
+            renderOrderDetails(updatedOrder);
+        }
 
     } catch (error) {
         console.error('Fehler beim Speichern der Rückgabe:', error);
@@ -813,7 +822,17 @@ function getPaymentBadge(status) {
         refunded: 'secondary'
     };
 
-    return `<span class="badge bg-${map[status] || 'secondary'} me-1">Zahlung: ${status || '-'}</span>`;
+    const labels = {
+        paid: 'Bezahlt',
+        unpaid: 'Unbezahlt',
+        pending: 'Ausstehend',
+        failed: 'Fehlgeschlagen',
+        refunded: 'Erstattet'
+    };
+
+    return `<span class="badge bg-${map[status] || 'secondary'} me-1">
+        Zahlung: ${labels[status] || status || '-'}
+    </span>`;
 }
 
 function getReturnBadge(status) {
@@ -825,7 +844,17 @@ function getReturnBadge(status) {
         returned_late_damaged: 'danger'
     };
 
-    return `<span class="badge bg-${map[status] || 'secondary'}">Rückgabe: ${status || 'pending'}</span>`;
+    const labels = {
+        pending: 'Offen',
+        returned_ok: 'OK',
+        returned_late: 'Verspätet',
+        returned_damaged: 'Beschädigt',
+        returned_late_damaged: 'Verspätet + beschädigt'
+    };
+
+    return `<span class="badge bg-${map[status] || 'secondary'}">
+        Rückgabe: ${labels[status] || status || 'pending'}
+    </span>`;
 }
 
 function logout() {

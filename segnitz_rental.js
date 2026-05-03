@@ -1693,10 +1693,13 @@ app.get('/admin/orders/:id', checkAdmin, async (req, res) => {
         connection = await mysql.createConnection(dbConfig);
 
         const [orders] = await connection.execute(
-            `SELECT *
-             FROM rental_orders
-             WHERE id = ?
-             LIMIT 1`,
+            `SELECT 
+                ro.*,
+                u.username AS return_processed_by_username
+            FROM rental_orders ro
+            LEFT JOIN users u ON u.id = ro.return_processed_by_user_id
+            WHERE ro.id = ?
+            LIMIT 1`,
             [req.params.id]
         );
 
