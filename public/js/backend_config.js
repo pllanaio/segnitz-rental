@@ -840,28 +840,28 @@ function showConfirm(message, title = 'Aktion bestätigen') {
 }
 
 function switchBackendView(view) {
-    const productsView = document.getElementById('productsView');
-    const ordersView = document.getElementById('ordersView');
+    document.getElementById('productsView')?.classList.add('d-none');
+    document.getElementById('ordersView')?.classList.add('d-none');
+    document.getElementById('openingHoursView')?.classList.add('d-none');
 
-    const navProducts = document.getElementById('nav-products');
-    const navOrders = document.getElementById('nav-orders');
+    document.getElementById('nav-products')?.classList.remove('active');
+    document.getElementById('nav-orders')?.classList.remove('active');
+    document.getElementById('nav-opening-hours')?.classList.remove('active');
 
     if (view === 'products') {
-        productsView.classList.remove('d-none');
-        ordersView.classList.add('d-none');
-
-        navProducts.classList.add('active');
-        navOrders.classList.remove('active');
+        document.getElementById('productsView')?.classList.remove('d-none');
+        document.getElementById('nav-products')?.classList.add('active');
     }
 
     if (view === 'orders') {
-        productsView.classList.add('d-none');
-        ordersView.classList.remove('d-none');
+        document.getElementById('ordersView')?.classList.remove('d-none');
+        document.getElementById('nav-orders')?.classList.add('active');
+    }
 
-        navProducts.classList.remove('active');
-        navOrders.classList.add('active');
-
-        loadOrders(); // wichtig
+    if (view === 'opening-hours') {
+        document.getElementById('openingHoursView')?.classList.remove('d-none');
+        document.getElementById('nav-opening-hours')?.classList.add('active');
+        loadOpeningHoursAdmin();
     }
 }
 
@@ -1084,6 +1084,115 @@ function formatTextValue(value) {
     }
 
     return String(value);
+}
+
+const weekdayLabels = {
+    1: 'Montag',
+    2: 'Dienstag',
+    3: 'Mittwoch',
+    4: 'Donnerstag',
+    5: 'Freitag',
+    6: 'Samstag',
+    0: 'Sonntag'
+};
+
+document.addEventListener('DOMContentLoaded', loadOpeningHoursAdmin);
+
+async function loadOpeningHoursAdmin() {
+    const container = document.getElementById('openingHoursAdmin');
+    if (!container) return;
+
+    try {
+        const response = await fetch('/admin/opening-hours');
+        const result = await response.json();
+
+        if (!response.ok) {
+            container.innerHTML = `<div class="alert alert-danger">${result.error || 'Öffnungszeiten konnten nicht geladen werden.'}</div>`;
+            return;
+        }
+
+        renderOpeningHoursAdmin(result);
+    } catch (error) {
+        console.error('Fehler beim Laden der Öffnungszeiten:', error);
+        container.innerHTML = '<div class="alert alert-danger">Öffnungszeiten konnten nicht geladen werden.</div>';
+    }
+}
+
+function renderOpeningHoursAdmin(hours) {
+    const container = document.getElementById('openingHoursAdmin');
+
+    const normalized = [1, 2, 3, 4, 5, 6, 0].map(weekday => {
+        return hours.find(day => Number(day.weekday) === weekday) || {
+            weekday,
+            is_open: 0,
+            open_time: '',
+            close_time: ''
+        };
+    });
+
+    container.innerHTML = normalized.map(day => `
+        <div class="row g-2 align-items-center mb-2 opening-hour-row" data-weekday="${day.weekday}">
+            <div class="col-12 col-md-3">
+                <strong>${weekdayLabels[day.weekday]}</strong>
+            </div>
+
+            <div class="col-12 col-md-2">
+                <div class="form-check form-switch">
+                    <input class="form-check-input opening-is-open" type="checkbox"
+                        ${Number(day.is_open) === 1 ? 'checked' : ''}>
+                    <label class="form-check-label">Geöffnet</label>
+                </div>
+            </div>
+
+            <div class="col-6 col-md-3">
+                <input type="time" class="form-control opening-open-time"
+                    value="${day.open_time || ''}">
+            </div>
+
+            <div class="col-6 col-md-3">
+                <input type="time" class="form-control opening-close-time"
+                    value="${day.close_time || ''}">
+            </div>
+        </div>
+    `).join('');
+}
+
+async function saveOpeningHours() {
+    const rows = Array.from(document.querySelectorAll('.opening-hour-row'));
+
+    const openingHours = rows.map(row => {
+        const isOpen = row.querySelector('.opening-is-open').checked;
+
+        return {
+            weekday: Number(row.dataset.weekday),
+            is_open: isOpen ? 1 : 0,
+            open_time: row.querySelector('.opening-open-time').value || null,
+            close_time: row.querySelector('.opening-close-time').value || null
+        };
+    });
+
+    try {
+        const response = await fetch('/admin/opening-hours', {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ openingHours })
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+            showAlert(result.error || 'Öffnungszeiten konnten nicht gespeichert werden.', 'danger');
+            return;
+        }
+
+        showAlert(result.message || 'Öffnungszeiten gespeichert.', 'success');
+        await loadOpeningHoursAdmin();
+    } catch (error) {
+        console.error('Fehler beim Speichern der Öffnungszeiten:', error);
+        showAlert('Öffnungszeiten konnten nicht gespeichert werden.', 'danger');
+    }
 }
 
 function logout() {
