@@ -1471,9 +1471,35 @@ function updateProductSectionTitle() {
         title.textContent = 'Produkte zur Vermietung auswählen';
     } else {
         title.textContent =
-    selectedCategory === 'all'
-        ? 'Alle Produkte'
-        : selectedCategory;
+            selectedCategory === 'all'
+                ? 'Alle Produkte'
+                : selectedCategory;
     }
 }
 
+async function loadBestsellers() {
+    const grid = document.getElementById('bestsellerGrid');
+    if (!grid) return;
+
+    try {
+        const response = await fetch('/products/bestsellers');
+        const products = await response.json();
+
+        if (!products.length) {
+            grid.innerHTML = '<div class="text-white">Noch keine Bestseller vorhanden.</div>';
+            return;
+        }
+
+        grid.innerHTML = '';
+
+        products.forEach(product => {
+            const card = createRentalProductCard(product);
+            grid.appendChild(card);
+        });
+
+    } catch (error) {
+        console.error('Fehler beim Laden der Bestseller:', error);
+    }
+}
+
+document.addEventListener('DOMContentLoaded', loadBestsellers);

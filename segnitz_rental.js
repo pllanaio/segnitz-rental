@@ -1004,6 +1004,13 @@ app.post('/data', async (req, res) => {
         }
 
         await connection.execute(
+            `UPDATE rental_products
+             SET times_ordered = COALESCE(times_ordered, 0) + 1
+             WHERE id = ?`,
+            [item.productId]
+        );
+
+        await connection.execute(
             `DELETE FROM rental_carts
              WHERE id = ?`,
             [cartId]
@@ -3020,6 +3027,30 @@ app.put('/admin/opening-hours', checkAdmin, async (req, res) => {
     } catch (error) {
         console.error('Fehler beim Speichern der Öffnungszeiten:', error);
         res.status(500).json({ error: 'Öffnungszeiten konnten nicht gespeichert werden.' });
+    } finally {
+        if (connection) await connection.end();
+    }
+});
+
+app.get('/products/bestsellers', async (req, res) => {
+    let connection;
+
+    try {
+        connection = await mysql.createConnection(dbConfig);
+
+        const [rows] = await connection.execute(`
+            SELECT *
+            FROM rental_products
+            WHERE is_active = 1
+            ORDER BY times_ordered DESC
+            LIMIT 6
+        `);
+
+        res.json(rows);
+
+    } catch (error) {
+        console.error('Fehler beim Laden der Bestseller:', error);
+        res.status(500).json({ error: 'Bestseller konnten nicht geladen werden.' });
     } finally {
         if (connection) await connection.end();
     }
