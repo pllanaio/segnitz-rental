@@ -1860,6 +1860,40 @@ app.put('/admin/orders/:id/return', checkAdmin, async (req, res) => {
     }
 });
 
+app.post('/admin/orders/:id/return-images', checkAdmin, uploadReturnImages.array('images', 10), async (req, res) => {
+    let connection;
+
+    try {
+        connection = await mysql.createConnection(dbConfig);
+
+        const uploadedByUserId = await getUserIdByEmail(connection, req.session.user);
+
+        for (const file of req.files) {
+            const imagePath = `img/returns/${file.filename}`;
+
+            await connection.execute(
+                `INSERT INTO rental_order_return_images
+                 (order_id, image_path, uploaded_by_user_id)
+                 VALUES (?, ?, ?)`,
+                [req.params.id, imagePath, uploadedByUserId]
+            );
+        }
+
+        res.json({
+            message: 'Rückgabefotos wurden hochgeladen.'
+        });
+    } catch (error) {
+        console.error('Fehler beim Hochladen der Rückgabefotos:', error);
+        res.status(500).json({
+            error: 'Rückgabefotos konnten nicht hochgeladen werden.'
+        });
+    } finally {
+        if (connection) {
+            await connection.end();
+        }
+    }
+});
+
 app.get('/cart', async (req, res) => {
     let connection;
 
