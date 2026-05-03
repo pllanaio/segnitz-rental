@@ -1762,6 +1762,76 @@ app.get('/admin/orders/:id', checkAdmin, async (req, res) => {
     }
 });
 
+app.put('/admin/orders/:id/return', checkAdmin, async (req, res) => {
+    let connection;
+
+    try {
+        const {
+            returnStatus,
+            isDamaged,
+            damageDescription,
+            isLate,
+            lateDescription,
+            depositDecision,
+            depositRefundAmount,
+            depositDeductionAmount,
+            depositDeductionReason,
+            returnNotes
+        } = req.body;
+
+        connection = await mysql.createConnection(dbConfig);
+
+        const processedByUserId = await getUserIdByEmail(connection, req.session.user);
+
+        await connection.execute(
+            `UPDATE rental_orders
+             SET status = 'returned',
+                 return_status = ?,
+                 returned_at = NOW(),
+                 return_processed_by_user_id = ?,
+                 return_notes = ?,
+                 is_damaged = ?,
+                 damage_description = ?,
+                 is_late = ?,
+                 late_description = ?,
+                 deposit_decision = ?,
+                 deposit_refund_amount = ?,
+                 deposit_deduction_amount = ?,
+                 deposit_deduction_reason = ?,
+                 return_case_status = 'closed',
+                 return_case_processed_at = NOW()
+             WHERE id = ?`,
+            [
+                returnStatus,
+                processedByUserId,
+                returnNotes || null,
+                isDamaged ? 1 : 0,
+                damageDescription || null,
+                isLate ? 1 : 0,
+                lateDescription || null,
+                depositDecision,
+                depositRefundAmount || null,
+                depositDeductionAmount || null,
+                depositDeductionReason || null,
+                req.params.id
+            ]
+        );
+
+        res.json({
+            message: 'Rückgabe wurde gespeichert.'
+        });
+    } catch (error) {
+        console.error('Fehler beim Speichern der Rückgabe:', error);
+        res.status(500).json({
+            error: 'Rückgabe konnte nicht gespeichert werden.'
+        });
+    } finally {
+        if (connection) {
+            await connection.end();
+        }
+    }
+});
+
 app.get('/cart', async (req, res) => {
     let connection;
 
