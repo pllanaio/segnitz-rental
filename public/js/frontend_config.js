@@ -1386,3 +1386,25 @@ function initCustomerInputValidation() {
 }
 
 document.addEventListener('DOMContentLoaded', initCustomerInputValidation);
+
+async function loadOpeningStatus() {
+    const label = document.getElementById('openingStatusLabel');
+    const message = document.getElementById('openingStatusMessage');
+    const box = document.getElementById('openingStatusBox');
+
+    if (!label || !message || !box) return;
+
+    try {
+        const response = await fetch('/opening-hours/status');
+        const result = await response.json();
+
+        label.textContent = result.label || 'Status unbekannt';
+        message.textContent = result.message || '';
+
+    } catch (error) {
+        console.error('Fehler beim Laden des Öffnungsstatus:', error);
+        label.textContent = 'Status unbekannt';
+    }
+}
+
+document.addEventListener('DOMContentLoaded', loadOpeningStatus);

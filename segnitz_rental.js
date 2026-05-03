@@ -2886,6 +2886,126 @@ app.post('/password-reset', async (req, res) => {
     }
 });
 
+app.get('/opening-hours/status', async (req, res) => {
+    let connection;
+
+    try {
+        connection = await mysql.createConnection(dbConfig);
+
+        const now = new Date();
+        const weekday = now.getDay();
+        const currentTime = now.toTimeString().slice(0, 8);
+
+        const [rows] = await connection.execute(
+            `SELECT is_open, open_time, close_time
+             FROM opening_hours
+             WHERE weekday = ?
+             LIMIT 1`,
+            [weekday]
+        );
+
+        if (rows.length === 0 || rows[0].is_open !== 1) {
+            return res.json({
+                isOpen: false,
+                label: 'Geschlossen'
+            });
+        }
+
+        const hours = rows[0];
+
+        const isCurrentlyOpen =
+            currentTime >= hours.open_time &&
+            currentTime <= hours.close_time;
+
+        return res.json({
+            isOpen: isCurrentlyOpen,
+            label: isCurrentlyOpen ? 'Geöffnet' : 'Geschlossen',
+            openTime: hours.open_time?.slice(0, 5),
+            closeTime: hours.close_time?.slice(0, 5)
+        });
+
+    } catch (error) {
+        console.error('Fehler beim Laden des Öffnungsstatus:', error);
+        res.status(500).json({
+            isOpen: false,
+            label: 'Unbekannt'
+        });
+    } finally {
+        if (connection) await connection.end();
+    }
+});
+
+app.get('/admin/opening-hours', checkAdmin, async (req, res) => {
+    let connection;
+
+    try {
+        connection = await mysql.createConnection(dbConfig);
+
+        const [rows] = await connection.execute(
+            `SELECT weekday, is_open, 
+                    TIME_FORMAT(open_time, '%H:%i') AS open_time,
+                    TIME_FORMAT(close_time, '%H:%i') AS close_time
+             FROM opening_hours
+             ORDER BY weekday ASC`
+        );
+
+        res.json(rows);
+    } catch (error) {
+        console.error('Fehler beim Laden der Öffnungszeiten:', error);
+        res.status(500).json({ error: 'Öffnungszeiten konnten nicht geladen werden.' });
+    } finally {
+        if (connection) await connection.end();
+    }
+});
+
+app.put('/admin/opening-hours', checkAdmin, async (req, res) => {
+    const { openingHours } = req.body;
+
+    if (!Array.isArray(openingHours)) {
+        return res.status(400).json({ error: 'Ungültige Öffnungszeiten.' });
+    }
+
+    let connection;
+
+    try {
+        connection = await mysql.createConnection(dbConfig);
+
+        for (const day of openingHours) {
+            const weekday = Number(day.weekday);
+            const isOpen = day.is_open ? 1 : 0;
+            const openTime = isOpen ? day.open_time : null;
+            const closeTime = isOpen ? day.close_time : null;
+
+            if (weekday < 0 || weekday > 6) {
+                return res.status(400).json({ error: 'Ungültiger Wochentag.' });
+            }
+
+            if (isOpen && (!openTime || !closeTime || openTime >= closeTime)) {
+                return res.status(400).json({
+                    error: 'Bei geöffneten Tagen müssen gültige Öffnungs- und Schließzeiten angegeben werden.'
+                });
+            }
+
+            await connection.execute(
+                `INSERT INTO opening_hours (weekday, is_open, open_time, close_time)
+                 VALUES (?, ?, ?, ?)
+                 ON DUPLICATE KEY UPDATE
+                    is_open = VALUES(is_open),
+                    open_time = VALUES(open_time),
+                    close_time = VALUES(close_time)`,
+                [weekday, isOpen, openTime, closeTime]
+            );
+        }
+
+        res.json({ message: 'Öffnungszeiten wurden gespeichert.' });
+    } catch (error) {
+        console.error('Fehler beim Speichern der Öffnungszeiten:', error);
+        res.status(500).json({ error: 'Öffnungszeiten konnten nicht gespeichert werden.' });
+    } finally {
+        if (connection) await connection.end();
+    }
+});
+
 cleanupOnStartup();
 
 setInterval(async () => {

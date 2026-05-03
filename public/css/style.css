@@ -594,3 +594,19 @@ input[type="radio"]:hover {
   min-width: 100%;
   max-width: 100%;
 }
+
+.opening-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: #fff200;
+  color: #000;
+  font-weight: 600;
+  padding: 6px 18px;
+  border-radius: 0;
+  width: fit-content;
+}
+
+.opening-status-badge i {
+  font-size: 1.1rem;
+}
