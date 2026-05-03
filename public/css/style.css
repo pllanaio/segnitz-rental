@@ -610,3 +610,20 @@ input[type="radio"]:hover {
 .opening-status-badge i {
   font-size: 1.1rem;
 }
+
+.category-btn {
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: transparent;
+}
+
+.category-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+.category-btn.active {
+  background: #ffffff;
+  color: #000000;
+  border-color: #ffffff;
+}

@@ -1405,12 +1405,15 @@ function renderCategoryFilters() {
     )].sort();
 
     container.innerHTML = `
-        <button type="button" class="btn btn-light btn-sm text-start"
+        <button type="button"
+            class="btn btn-sm text-start category-btn ${selectedCategory === 'all' ? 'active' : ''}"
             onclick="selectCategoryFilter('all')">
             Alle Produkte
         </button>
+
         ${categories.map(category => `
-            <button type="button" class="btn btn-outline-light btn-sm text-start"
+            <button type="button"
+                class="btn btn-sm text-start category-btn ${selectedCategory === category ? 'active' : ''}"
                 onclick="selectCategoryFilter('${category.replace(/'/g, "\\'")}')">
                 ${category}
             </button>
