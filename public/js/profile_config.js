@@ -138,7 +138,7 @@ function renderMyOrderDetails(order) {
                         ${order.status === 'cancelled' ? `
         <strong>Storniert am:</strong> ${order.cancelled_at || '-'}<br>
         <strong>Stornogrund:</strong><br>
-        <span class="text-danger">${order.cancel_reason || '-'}</span><br>
+        <span class="text-danger">${formatTextValue(order.cancel_reason)}</span><br>
     ` : ''}
 
                     <strong>Zahlung:</strong> ${getPaymentBadge(order.payment_status)}<br>
