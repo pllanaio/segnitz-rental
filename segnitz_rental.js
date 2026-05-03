@@ -625,16 +625,16 @@ app.post('/login', async (req, res) => {
         );
 
         const redirectAfterLogin = req.session.redirectAfterLogin || null;
-        delete req.session.redirectAfterLogin;
+delete req.session.redirectAfterLogin;
 
-        return res.status(200).json({
-            message: 'Login erfolgreich!',
-            redirectTo: redirectAfterLogin || (
-                rows[0].role === 'global_admin'
-                    ? '/backend.html'
-                    : '/index.html'
-            )
-        });
+return res.status(200).json({
+    message: 'Login erfolgreich!',
+    redirectTo: redirectAfterLogin || (
+        rows[0].role === 'global_admin'
+            ? '/backend.html'
+            : '/index.html'
+    )
+});
     } catch (error) {
         console.error('Fehler beim Login:', error);
         return res.status(500).send('Serverfehler beim Versuch, sich anzumelden.');
@@ -682,7 +682,7 @@ function checkAdmin(req, res, next) {
         }
 
         req.session.redirectAfterLogin = req.originalUrl;
-        return res.redirect('/login.html');
+        return res.redirect('/login.html?reason=session_expired');
     }
 
     if (!isAdmin) {
