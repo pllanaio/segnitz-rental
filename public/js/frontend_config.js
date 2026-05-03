@@ -764,6 +764,7 @@ async function loadRentalProducts() {
             </div>
         `;
     }
+    updateProductSectionTitle();
 }
 
 function createRentalProductCard(product) {
@@ -1424,6 +1425,8 @@ function renderCategoryFilters() {
 function selectCategoryFilter(category) {
     selectedCategory = category;
     applyProductFilters();
+    renderCategoryFilters();
+    updateProductSectionTitle();
 }
 
 function applyProductFilters() {
@@ -1449,5 +1452,19 @@ function applyProductFilters() {
 
     currentProductPage = 1;
     renderProductPage();
+}
+
+function updateProductSectionTitle() {
+    const title = document.getElementById('productSectionTitle');
+    if (!title) return;
+
+    if (selectedCategory === 'all') {
+        title.textContent = 'Produkte zur Vermietung auswählen';
+    } else {
+        title.textContent =
+    selectedCategory === 'all'
+        ? 'Alle Produkte'
+        : selectedCategory;
+    }
 }
 

@@ -627,3 +627,11 @@ input[type="radio"]:hover {
   color: #000000;
   border-color: #ffffff;
 }
+
+.category-btn.active,
+.category-btn.active:hover,
+.category-btn.active:focus {
+    background-color: #ffffff !important;
+    color: #000000 !important;
+    border-color: #ffffff !important;
+}
