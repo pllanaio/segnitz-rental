@@ -25,9 +25,11 @@ let currentCart = {
 };
 let productCalendar = null;
 let cartEditCalendar = null;
-
+let selectedCategory = 'all';
 let current_step = 0;
 let stepCount = 5;
+
+
 step[current_step]
     .classList
     .add('d-block');
@@ -748,6 +750,7 @@ async function loadRentalProducts() {
         const products = await response.json();
 
         rentalProducts = products.filter(product => product.is_active === 1);
+        renderCategoryFilters();
         filteredRentalProducts = [...rentalProducts];
         currentProductPage = 1;
 
@@ -1180,25 +1183,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (!searchInput) return;
 
-    searchInput.addEventListener('input', () => {
-        const query = searchInput.value.trim().toLowerCase();
-
-        filteredRentalProducts = rentalProducts.filter(product => {
-            return [
-                product.title,
-                product.description,
-                product.product_key,
-                product.price_per_day,
-                product.deposit
-            ]
-                .join(' ')
-                .toLowerCase()
-                .includes(query);
-        });
-
-        currentProductPage = 1;
-        renderProductPage();
-    });
+    searchInput.addEventListener('input', applyProductFilters);
 
     searchInput.addEventListener('keydown', event => {
         if (event.key === 'Enter') {
@@ -1408,3 +1393,58 @@ async function loadOpeningStatus() {
 }
 
 document.addEventListener('DOMContentLoaded', loadOpeningStatus);
+
+function renderCategoryFilters() {
+    const container = document.getElementById('categoryFilterList');
+    if (!container) return;
+
+    const categories = [...new Set(
+        rentalProducts
+            .map(product => product.category)
+            .filter(Boolean)
+    )].sort();
+
+    container.innerHTML = `
+        <button type="button" class="btn btn-light btn-sm text-start"
+            onclick="selectCategoryFilter('all')">
+            Alle Produkte
+        </button>
+        ${categories.map(category => `
+            <button type="button" class="btn btn-outline-light btn-sm text-start"
+                onclick="selectCategoryFilter('${category.replace(/'/g, "\\'")}')">
+                ${category}
+            </button>
+        `).join('')}
+    `;
+}
+
+function selectCategoryFilter(category) {
+    selectedCategory = category;
+    applyProductFilters();
+}
+
+function applyProductFilters() {
+    const searchInput = document.getElementById('productSearchInput');
+    const query = searchInput ? searchInput.value.trim().toLowerCase() : '';
+
+    filteredRentalProducts = rentalProducts.filter(product => {
+        const matchesCategory =
+            selectedCategory === 'all' ||
+            product.category === selectedCategory;
+
+        const matchesSearch = [
+            product.title,
+            product.description,
+            product.product_key,
+            product.category,
+            product.price_per_day,
+            product.deposit
+        ].join(' ').toLowerCase().includes(query);
+
+        return matchesCategory && matchesSearch;
+    });
+
+    currentProductPage = 1;
+    renderProductPage();
+}
+
