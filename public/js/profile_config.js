@@ -259,3 +259,21 @@ function getReturnBadge(status) {
         Rückgabe: ${labels[status] || status || 'pending'}
     </span>`;
 }
+
+function switchProfileView(view) {
+    document.getElementById('profileView').classList.add('d-none');
+    document.getElementById('ordersView').classList.add('d-none');
+
+    document.getElementById(`nav-profile`).classList.remove('active');
+    document.getElementById(`nav-orders`).classList.remove('active');
+
+    if (view === 'profile') {
+        document.getElementById('profileView').classList.remove('d-none');
+        document.getElementById('nav-profile').classList.add('active');
+    }
+
+    if (view === 'orders') {
+        document.getElementById('ordersView').classList.remove('d-none');
+        document.getElementById('nav-orders').classList.add('active');
+    }
+}
