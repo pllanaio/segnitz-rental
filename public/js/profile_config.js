@@ -32,8 +32,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 });
 
-
-
 async function loadMyOrders() {
     const container = document.getElementById('myOrdersList');
 
@@ -303,7 +301,7 @@ document.getElementById('profileForm')?.addEventListener('submit', async (event)
         city: document.getElementById('profileCity').value.trim()
     };
 
-        if (!/^[0-9]+$/.test(payload.phone)) {
+    if (!/^[0-9]+$/.test(payload.phone)) {
         showAlert('Telefon darf nur Ziffern enthalten.', 'warning');
         return;
     }
@@ -353,6 +351,13 @@ document.getElementById('passwordForm')?.addEventListener('submit', async (event
         newPassword: document.getElementById('newPassword').value,
         newPasswordConfirm: document.getElementById('newPasswordConfirm').value
     };
+
+    const passwordPolicyRegex = /^(?=.*[0-9])(?=.*[^A-Za-z0-9]).{8,}$/;
+
+    if (!passwordPolicyRegex.test(payload.newPassword)) {
+        showAlert('Das Passwort muss mindestens 8 Zeichen, eine Zahl und ein Sonderzeichen enthalten.', 'warning');
+        return;
+    }
 
     try {
         const response = await fetch('/my-profile/password', {
