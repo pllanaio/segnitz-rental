@@ -303,6 +303,21 @@ document.getElementById('profileForm')?.addEventListener('submit', async (event)
         city: document.getElementById('profileCity').value.trim()
     };
 
+        if (!/^[0-9]+$/.test(payload.phone)) {
+        showAlert('Telefon darf nur Ziffern enthalten.', 'warning');
+        return;
+    }
+
+    if (!/^[0-9]+$/.test(payload.zip)) {
+        showAlert('PLZ darf nur Ziffern enthalten.', 'warning');
+        return;
+    }
+
+    if (!/^[a-zA-Z0-9äöüÄÖÜß\s]+$/.test(payload.address)) {
+        showAlert('Adresse darf nur Buchstaben, Zahlen und Leerzeichen enthalten.', 'warning');
+        return;
+    }
+
     try {
         const response = await fetch('/my-profile', {
             method: 'PUT',
@@ -381,6 +396,34 @@ function formatTextValue(value) {
 
     return String(value);
 }
+
+function allowOnlyDigits(input) {
+    input.value = input.value.replace(/[^0-9]/g, '');
+}
+
+function allowAddressChars(input) {
+    input.value = input.value.replace(/[^a-zA-Z0-9äöüÄÖÜß\s]/g, '');
+}
+
+function initProfileInputValidation() {
+    const phoneInput = document.getElementById('profilePhone');
+    const zipInput = document.getElementById('profileZip');
+    const addressInput = document.getElementById('profileAddress');
+
+    if (phoneInput) {
+        phoneInput.addEventListener('input', () => allowOnlyDigits(phoneInput));
+    }
+
+    if (zipInput) {
+        zipInput.addEventListener('input', () => allowOnlyDigits(zipInput));
+    }
+
+    if (addressInput) {
+        addressInput.addEventListener('input', () => allowAddressChars(addressInput));
+    }
+}
+
+document.addEventListener('DOMContentLoaded', initProfileInputValidation);
 
 function logout() {
     fetch('/logout', {

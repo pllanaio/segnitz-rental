@@ -567,54 +567,79 @@ app.get('/backend.html', checkAdmin, (req, res) => {
 app.use(express.static("public"));
 
 app.post('/login', async (req, res) => {
-    const {
-        username,
-        password
-    } = req.body;
+    const { username, password } = req.body;
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    if (
+        typeof username !== 'string' ||
+        typeof password !== 'string' ||
+        !username.trim() ||
+        !password
+    ) {
+        return res.status(400).send('Benutzername und Passwort sind erforderlich.');
+    }
+
+    const normalizedUsername = username.trim().toLowerCase();
+
+    if (normalizedUsername.length > 254 || password.length > 128) {
+        return res.status(400).send('Eingabe ist zu lang.');
+    }
+
+    if (!emailRegex.test(normalizedUsername)) {
+        return res.status(400).send('Ungültige E-Mail-Adresse.');
+    }
+
+    let connection;
+
     try {
-        const connection = await mysql.createConnection(dbConfig);
-        // Hole das Passwort des Benutzers aus der Datenbank
+        connection = await mysql.createConnection(dbConfig);
+
         const [rows] = await connection.execute(
-            'SELECT password, role FROM users WHERE username = ?',
-            [username]
+            'SELECT password, role FROM users WHERE username = ? LIMIT 1',
+            [normalizedUsername]
         );
-        if (rows.length > 0) {
-            // Vergleiche das eingegebene Passwort mit dem gehashten Passwort in der
-            // Datenbank
-            const passwordValid = await bcrypt.compare(password, rows[0].password);
 
-            if (passwordValid) {
-                req.session.user = username;
-                req.session.role = rows[0].role;
-                req.session.createdAt = Date.now();
-                await mergeGuestCartIntoUserCart(connection, req, username);
-                res.status(200).send("Login erfolgreich!");
-
-                console.log(
-                    new Date().toISOString(),
-                    '- Anmeldung: Benutzer',
-                    username,
-                    'erfolgreich angemeldet mit Rolle',
-                    rows[0].role
-                );
-            } else {
-                // Passwort ist falsch
-                res
-                    .status(401)
-                    .send("Falsche Zugangsdaten.");
-            }
-        } else {
-            // Kein Benutzer gefunden
-            res
-                .status(401)
-                .send("Falsche Zugangsdaten.");
+        if (rows.length === 0) {
+            return res.status(401).send('Falsche Zugangsdaten.');
         }
-        await connection.end();
+
+        const passwordValid = await bcrypt.compare(password, rows[0].password);
+
+        if (!passwordValid) {
+            return res.status(401).send('Falsche Zugangsdaten.');
+        }
+
+        req.session.user = normalizedUsername;
+        req.session.role = rows[0].role;
+        req.session.createdAt = Date.now();
+
+        await mergeGuestCartIntoUserCart(connection, req, normalizedUsername);
+
+        console.log(
+            new Date().toISOString(),
+            '- Anmeldung: Benutzer',
+            normalizedUsername,
+            'erfolgreich angemeldet mit Rolle',
+            rows[0].role
+        );
+
+        const redirectAfterLogin = req.session.redirectAfterLogin || null;
+        delete req.session.redirectAfterLogin;
+
+        return res.status(200).json({
+            message: 'Login erfolgreich!',
+            redirectTo: redirectAfterLogin || (
+                rows[0].role === 'global_admin'
+                    ? '/backend.html'
+                    : '/index.html'
+            )
+        });
     } catch (error) {
         console.error('Fehler beim Login:', error);
-        res
-            .status(500)
-            .send("Serverfehler beim Versuch, sich anzumelden.");
+        return res.status(500).send('Serverfehler beim Versuch, sich anzumelden.');
+    } finally {
+        if (connection) await connection.end();
     }
 });
 
@@ -646,11 +671,29 @@ app.post('/logout', (req, res) => {
 });
 
 function checkAdmin(req, res, next) {
-    if (req.session.user && req.session.role === 'global_admin') {
-        next();
-    } else {
-        return res.status(403).send('Kein Zugriff');
+    const isLoggedIn = req.session && req.session.user;
+    const isAdmin = req.session && req.session.role === 'global_admin';
+
+    const isApiCall = req.originalUrl.startsWith('/admin');
+
+    if (!isLoggedIn) {
+        if (isApiCall) {
+            return res.status(401).json({ error: 'Nicht angemeldet.' });
+        }
+
+        req.session.redirectAfterLogin = req.originalUrl;
+        return res.redirect('/login.html');
     }
+
+    if (!isAdmin) {
+        if (isApiCall) {
+            return res.status(403).json({ error: 'Keine Berechtigung.' });
+        }
+
+        return res.redirect('/index.html');
+    }
+
+    next();
 }
 
 async function generatePDF(formDataObj, templatePath, outputPath) {
@@ -1375,6 +1418,21 @@ app.put('/my-profile', async (req, res) => {
 
     if (!firstName || !lastName || !phone || !address || !zip || !city) {
         return res.status(400).json({ error: 'Pflichtfelder fehlen.' });
+    }
+
+    const onlyDigits = /^[0-9]+$/;
+    const addressRegex = /^[a-zA-Z0-9äöüÄÖÜß\s]+$/;
+
+    if (!onlyDigits.test(phone)) {
+        return res.status(400).json({ error: 'Telefon darf nur Ziffern enthalten.' });
+    }
+
+    if (!onlyDigits.test(zip)) {
+        return res.status(400).json({ error: 'PLZ darf nur Ziffern enthalten.' });
+    }
+
+    if (!addressRegex.test(address)) {
+        return res.status(400).json({ error: 'Adresse darf nur Buchstaben, Zahlen und Leerzeichen enthalten.' });
     }
 
     let connection;
