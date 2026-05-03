@@ -1985,14 +1985,14 @@ app.get('/admin/orders/:id', checkAdmin, async (req, res) => {
 
         const [orders] = await connection.execute(
             `SELECT 
-                ro.*,
-                u.username AS return_processed_by_username
-                cancelledUser.username AS cancelled_by_username
-            FROM rental_orders ro
-            LEFT JOIN users u ON u.id = ro.return_processed_by_user_id
-            LEFT JOIN users cancelledUser ON cancelledUser.id = ro.cancelled_by_user_id
-            WHERE ro.id = ?
-            LIMIT 1`,
+        ro.*,
+        u.username AS return_processed_by_username,
+        cancelledUser.username AS cancelled_by_username
+     FROM rental_orders ro
+     LEFT JOIN users u ON u.id = ro.return_processed_by_user_id
+     LEFT JOIN users cancelledUser ON cancelledUser.id = ro.cancelled_by_user_id
+     WHERE ro.id = ?
+     LIMIT 1`,
             [req.params.id]
         );
 
