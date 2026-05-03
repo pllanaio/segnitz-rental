@@ -639,6 +639,25 @@ function validateCustomerRequiredFields() {
         }
     }
 
+    const phone = document.getElementById('CustomerPhone').value.trim();
+    const zip = document.getElementById('CustomerZip').value.trim();
+    const address = document.getElementById('CustomerAddress').value.trim();
+
+    if (!/^[0-9]+$/.test(phone)) {
+        showAlert('Telefon darf nur Ziffern enthalten.', 'warning');
+        return false;
+    }
+
+    if (!/^[0-9]+$/.test(zip)) {
+        showAlert('PLZ darf nur Ziffern enthalten.', 'warning');
+        return false;
+    }
+
+    if (!/^[a-zA-Z0-9äöüÄÖÜß\s]+$/.test(address)) {
+        showAlert('Adresse darf nur Buchstaben, Zahlen und Leerzeichen enthalten.', 'warning');
+        return false;
+    }
+
     return true;
 }
 
@@ -1340,3 +1359,30 @@ async function saveCartItemRentalPeriod() {
         showAlert('Mietzeitraum konnte nicht geändert werden.', 'danger');
     }
 }
+function allowOnlyDigits(input) {
+    input.value = input.value.replace(/[^0-9]/g, '');
+}
+
+function allowAddressChars(input) {
+    input.value = input.value.replace(/[^a-zA-Z0-9äöüÄÖÜß\s]/g, '');
+}
+
+function initCustomerInputValidation() {
+    const phoneInput = document.getElementById('CustomerPhone');
+    const zipInput = document.getElementById('CustomerZip');
+    const addressInput = document.getElementById('CustomerAddress');
+
+    if (phoneInput) {
+        phoneInput.addEventListener('input', () => allowOnlyDigits(phoneInput));
+    }
+
+    if (zipInput) {
+        zipInput.addEventListener('input', () => allowOnlyDigits(zipInput));
+    }
+
+    if (addressInput) {
+        addressInput.addEventListener('input', () => allowAddressChars(addressInput));
+    }
+}
+
+document.addEventListener('DOMContentLoaded', initCustomerInputValidation);
