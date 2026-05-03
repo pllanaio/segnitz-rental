@@ -11,6 +11,7 @@ app.use(express.urlencoded({
     extended: true
 }));
 const session = require('express-session');
+const MySQLStore = require('express-mysql-session')(session);
 const fsp = require("fs").promises;
 const fs = require('fs');
 const mysql = require('mysql2/promise');
@@ -531,17 +532,42 @@ const uploadReturnImages = multer({
     }
 });
 
-// Session Middleware konfigurieren
+const sessionStore = new MySQLStore({
+    host: process.env.DB_HOST,
+    port: Number(process.env.DB_PORT),
+    user: process.env.DB_USER,
+    password: process.env.DB_PW,
+    database: process.env.DB_NAME,
+
+    clearExpired: true,
+    checkExpirationInterval: 15 * 60 * 1000,
+    expiration: 30 * 60 * 1000,
+
+    createDatabaseTable: true,
+    schema: {
+        tableName: 'user_sessions',
+        columnNames: {
+            session_id: 'session_id',
+            expires: 'expires',
+            data: 'data'
+        }
+    }
+});
+
 app.use(session({
+    key: 'segnitz.sid',
     secret: process.env.SESSION_SECRET,
+    store: sessionStore,
     resave: false,
     saveUninitialized: false,
+    rolling: true,
     cookie: {
         secure: false,
+        httpOnly: true,
+        sameSite: 'lax',
         maxAge: 30 * 60 * 1000
     }
 }));
-
 // Spezifische Route für die Startseite
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
@@ -610,36 +636,66 @@ app.post('/login', async (req, res) => {
             return res.status(401).send('Falsche Zugangsdaten.');
         }
 
-        req.session.user = normalizedUsername;
-        req.session.role = rows[0].role;
-        req.session.createdAt = Date.now();
+        const previousRedirectAfterLogin = req.session.redirectAfterLogin || null;
+        const previousCartKey = req.session.cartKey || null;
 
-        await mergeGuestCartIntoUserCart(connection, req, normalizedUsername);
+        req.session.regenerate(async (err) => {
+            if (err) {
+                console.error('Session Regenerate Fehler:', err);
+                return res.status(500).send('Login fehlgeschlagen.');
+            }
 
-        console.log(
-            new Date().toISOString(),
-            '- Anmeldung: Benutzer',
-            normalizedUsername,
-            'erfolgreich angemeldet mit Rolle',
-            rows[0].role
-        );
+            try {
+                req.session.user = normalizedUsername;
+                req.session.role = rows[0].role;
+                req.session.createdAt = Date.now();
 
-        const redirectAfterLogin = req.session.redirectAfterLogin || null;
-delete req.session.redirectAfterLogin;
+                if (previousRedirectAfterLogin) {
+                    req.session.redirectAfterLogin = previousRedirectAfterLogin;
+                }
 
-return res.status(200).json({
-    message: 'Login erfolgreich!',
-    redirectTo: redirectAfterLogin || (
-        rows[0].role === 'global_admin'
-            ? '/backend.html'
-            : '/index.html'
-    )
-});
+                if (previousCartKey) {
+                    req.session.cartKey = previousCartKey;
+                }
+
+                await mergeGuestCartIntoUserCart(connection, req, normalizedUsername);
+
+                if (connection) await connection.end();
+                connection = null;
+
+                const redirectAfterLogin = req.session.redirectAfterLogin || null;
+                delete req.session.redirectAfterLogin;
+
+                console.log(
+                    new Date().toISOString(),
+                    '- Anmeldung: Benutzer',
+                    normalizedUsername,
+                    'erfolgreich angemeldet mit Rolle',
+                    rows[0].role
+                );
+
+                return res.status(200).json({
+                    message: 'Login erfolgreich!',
+                    redirectTo: redirectAfterLogin || (
+                        rows[0].role === 'global_admin'
+                            ? '/backend.html'
+                            : '/index.html'
+                    )
+                });
+            } catch (sessionError) {
+
+                if (connection) await connection.end();
+                connection = null;
+
+                console.error('Fehler nach Session-Regeneration:', sessionError);
+                return res.status(500).send('Login fehlgeschlagen.');
+            }
+        });
     } catch (error) {
         console.error('Fehler beim Login:', error);
         return res.status(500).send('Serverfehler beim Versuch, sich anzumelden.');
     } finally {
-        if (connection) await connection.end();
+        // Verbindung wird erst nach Callback benutzt; deshalb hier NICHT schließen
     }
 });
 
@@ -652,17 +708,16 @@ app.post('/logout', (req, res) => {
             req.session.user,
             'erfolgreich abgemeldet'
         ); // Zugriff auf den gespeicherten Benutzernamen
-        req
-            .session
-            .destroy(err => {
-                if (err) {
-                    console.log('Fehler beim Beenden der Sitzung:', err);
-                    return res
-                        .status(500)
-                        .send('Fehler beim Abmelden');
-                }
-                res.send('Logout erfolgreich');
-            });
+        req.session.destroy(err => {
+            if (err) {
+                console.log('Fehler beim Beenden der Sitzung:', err);
+                return res.status(500).send('Fehler beim Abmelden');
+            }
+
+            res.clearCookie('segnitz.sid');
+
+            res.send('Logout erfolgreich');
+        });
     } else {
         res
             .status(400)
