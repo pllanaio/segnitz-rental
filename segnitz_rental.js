@@ -1343,6 +1343,151 @@ app.get('/my-profile', async (req, res) => {
     }
 });
 
+app.get('/my-orders', async (req, res) => {
+    let connection;
+
+    if (!req.session.user) {
+        return res.status(401).json({ error: 'Nicht angemeldet.' });
+    }
+
+    try {
+        connection = await mysql.createConnection(dbConfig);
+
+        const [orders] = await connection.execute(
+            `SELECT
+                id,
+                order_no,
+                customer_email,
+                customer_first_name,
+                customer_last_name,
+                status,
+                payment_method,
+                payment_status,
+                return_status,
+                is_damaged,
+                damage_description,
+                is_late,
+                late_description,
+                deposit_decision,
+                deposit_refund_amount,
+                deposit_deduction_amount,
+                deposit_deduction_reason,
+                DATE_FORMAT(reserved_until, '%Y-%m-%d %H:%i:%s') AS reserved_until,
+                DATE_FORMAT(returned_at, '%Y-%m-%d %H:%i:%s') AS returned_at,
+                DATE_FORMAT(return_case_processed_at, '%Y-%m-%d %H:%i:%s') AS return_case_processed_at
+             FROM rental_orders
+             WHERE customer_email = ?
+             ORDER BY id DESC`,
+            [req.session.user]
+        );
+
+        res.json(orders);
+    } catch (error) {
+        console.error('Fehler beim Laden der Kundenbestellungen:', error);
+        res.status(500).json({ error: 'Bestellungen konnten nicht geladen werden.' });
+    } finally {
+        if (connection) await connection.end();
+    }
+});
+
+app.get('/my-orders/:id', async (req, res) => {
+    let connection;
+
+    if (!req.session.user) {
+        return res.status(401).json({ error: 'Nicht angemeldet.' });
+    }
+
+    try {
+        connection = await mysql.createConnection(dbConfig);
+
+        const [orders] = await connection.execute(
+            `SELECT
+                id,
+                order_no,
+                customer_email,
+                customer_first_name,
+                customer_last_name,
+                customer_phone,
+                customer_address,
+                customer_zip,
+                customer_city,
+                status,
+                payment_method,
+                payment_status,
+                return_status,
+                is_damaged,
+                damage_description,
+                is_late,
+                late_description,
+                deposit_decision,
+                deposit_refund_amount,
+                deposit_deduction_amount,
+                deposit_deduction_reason,
+                DATE_FORMAT(reserved_until, '%Y-%m-%d %H:%i:%s') AS reserved_until,
+                DATE_FORMAT(returned_at, '%Y-%m-%d %H:%i:%s') AS returned_at,
+                DATE_FORMAT(return_case_processed_at, '%Y-%m-%d %H:%i:%s') AS return_case_processed_at,
+                confirmation_json
+             FROM rental_orders
+             WHERE id = ?
+             AND customer_email = ?
+             LIMIT 1`,
+            [req.params.id, req.session.user]
+        );
+
+        if (orders.length === 0) {
+            return res.status(404).json({ error: 'Bestellung nicht gefunden.' });
+        }
+
+        const [items] = await connection.execute(
+            `SELECT
+                roi.id,
+                roi.product_id AS productId,
+                p.title,
+                DATE_FORMAT(roi.rental_start, '%Y-%m-%d') AS rentalStart,
+                DATE_FORMAT(roi.rental_end, '%Y-%m-%d') AS rentalEnd,
+                roi.price_per_day AS pricePerDay,
+                roi.deposit
+             FROM rental_order_items roi
+             JOIN rental_products p ON p.id = roi.product_id
+             WHERE roi.order_id = ?
+             ORDER BY roi.id ASC`,
+            [req.params.id]
+        );
+
+        let finalItems = items;
+
+        if (finalItems.length === 0 && orders[0].confirmation_json) {
+            const confirmationJson =
+                typeof orders[0].confirmation_json === 'string'
+                    ? JSON.parse(orders[0].confirmation_json)
+                    : orders[0].confirmation_json;
+
+            finalItems = confirmationJson.items || confirmationJson.order?.items || [];
+        }
+
+        const [images] = await connection.execute(
+            `SELECT id, image_path AS imagePath, created_at
+             FROM rental_order_return_images
+             WHERE order_id = ?
+             ORDER BY id DESC`,
+            [req.params.id]
+        );
+
+        const { confirmation_json, ...safeOrder } = orders[0];
+
+        res.json({
+            ...safeOrder,
+            items: finalItems,
+            returnImages: images
+        });
+    } catch (error) {
+        console.error('Fehler beim Laden der Kundenbestellung:', error);
+        res.status(500).json({ error: 'Bestellung konnte nicht geladen werden.' });
+    } finally {
+        if (connection) await connection.end();
+    }
+});
+
 app.get('/products', async (req, res) => {
     let connection;
 
