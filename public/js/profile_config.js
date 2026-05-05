@@ -1,4 +1,5 @@
 let myOrders = [];
+let orderIdToCancel = null;
 
 document.addEventListener('DOMContentLoaded', async () => {
     try {
@@ -74,7 +75,7 @@ function renderMyOrders() {
                     <strong>${order.order_no}</strong><br>
                     ${getStatusBadge(order.status)}
                     ${getPaymentBadge(order.payment_status)}
-                    ${getReturnBadge(order.return_status)}
+                    ${getReturnBadge(order.return_status, order.status)}
                 </div>
 
                 <div class="d-flex gap-2 flex-wrap justify-content-end">
@@ -116,33 +117,11 @@ async function openMyOrderDetails(orderId) {
     }
 }
 
-async function cancelMyOrder(orderId) {
-    const confirmed = confirm('Möchten Sie diese Bestellung wirklich stornieren?');
+function cancelMyOrder(orderId) {
+    orderIdToCancel = orderId;
 
-    if (!confirmed) {
-        return;
-    }
-
-    try {
-        const response = await fetch(`/my-orders/${orderId}/cancel`, {
-            method: 'POST'
-        });
-
-        const result = await response.json();
-
-        if (!response.ok) {
-            showAlert(result.error || 'Bestellung konnte nicht storniert werden.', 'danger');
-            return;
-        }
-
-        showAlert(result.message || 'Bestellung wurde storniert.', 'success');
-
-        await loadMyOrders();
-
-    } catch (error) {
-        console.error('Fehler beim Stornieren der Bestellung:', error);
-        showAlert('Bestellung konnte nicht storniert werden.', 'danger');
-    }
+    const modal = new bootstrap.Modal(document.getElementById('cancelOrderModal'));
+    modal.show();
 }
 
 function renderMyOrderDetails(order) {
@@ -159,6 +138,67 @@ function renderMyOrderDetails(order) {
 
     const status = String(order.status || '').trim().toLowerCase();
     const canShowReturnSection = status !== 'cancelled';
+
+    const canReview = status === 'returned';
+
+    const reviewButtonsHtml = canReview
+        ? (order.items || []).map(item => {
+            if (item.review) {
+                return `
+                <div class="card mt-3">
+                    <div class="card-body">
+                        <h6>Ihre Bewertung für ${item.title}</h6>
+
+                        <div class="mb-2">
+                            <strong>Sterne:</strong> ${'★'.repeat(Number(item.review.rating))}${'☆'.repeat(5 - Number(item.review.rating))}
+                        </div>
+
+                        <div class="mb-2">
+                            <strong>Kommentar:</strong><br>
+                            <div class="border rounded p-2 bg-light">
+                                ${item.review.reviewText || '<span class="text-muted">Kein Kommentar</span>'}
+                            </div>
+                        </div>
+
+                        <div class="text-muted small">
+                            Bewertet am: ${item.review.createdAt || '-'}
+                        </div>
+                    </div>
+                </div>
+            `;
+            }
+
+            return `
+            <div class="card mt-3">
+                <div class="card-body">
+                    <h6>Bewertung für ${item.title}</h6>
+
+                    <div class="mb-2">
+                        <label class="form-label">Sterne</label>
+                        <select class="form-select form-select-sm" id="rating-${item.productId}">
+                            <option value="">Bitte auswählen</option>
+                            <option value="5">5 Sterne</option>
+                            <option value="4">4 Sterne</option>
+                            <option value="3">3 Sterne</option>
+                            <option value="2">2 Sterne</option>
+                            <option value="1">1 Stern</option>
+                        </select>
+                    </div>
+
+                    <div class="mb-2">
+                        <label class="form-label">Kommentar</label>
+                        <textarea class="form-control form-control-sm" id="reviewText-${item.productId}" rows="2"></textarea>
+                    </div>
+
+                    <button type="button" class="btn btn-outline-success btn-sm"
+                        onclick="submitProductReview(${item.productId}, ${order.id})">
+                        Bewertung speichern
+                    </button>
+                </div>
+            </div>
+        `;
+        }).join('')
+        : '';
 
     const cancelButtonHtml = canCancelOrder(order)
         ? `
@@ -196,7 +236,7 @@ function renderMyOrderDetails(order) {
     ` : ''}
 
                     <strong>Zahlung:</strong> ${getPaymentBadge(order.payment_status)}<br>
-                    <strong>Rückgabe:</strong> ${getReturnBadge(order.return_status)}
+                    <strong>Rückgabe:</strong> ${getReturnBadge(order.return_status, order.status)}
                 </p>
             </div>
 
@@ -229,6 +269,12 @@ function renderMyOrderDetails(order) {
                     </table>
                 </div>
             </div>
+            ${canReview ? `
+    <div class="col-12">
+        <h5>Produkte bewerten</h5>
+        ${reviewButtonsHtml}
+    </div>
+` : ''}
             ${cancelButtonHtml}
 
 ${canShowReturnSection ? `
@@ -301,7 +347,11 @@ function getPaymentBadge(status) {
     </span>`;
 }
 
-function getReturnBadge(status) {
+function getReturnBadge(status, orderStatus = null) {
+    if (orderStatus === 'cancelled') {
+        return `<span class="badge bg-dark">Rückgabe: Geschlossen</span>`;
+    }
+
     const map = {
         pending: 'secondary',
         returned_ok: 'success',
@@ -483,6 +533,75 @@ function initProfileInputValidation() {
 }
 
 document.addEventListener('DOMContentLoaded', initProfileInputValidation);
+
+document.getElementById('confirmCancelOrderBtn')?.addEventListener('click', async () => {
+    if (!orderIdToCancel) return;
+
+    const modalEl = document.getElementById('cancelOrderModal');
+    const modal = bootstrap.Modal.getInstance(modalEl);
+
+    try {
+        const response = await fetch(`/my-orders/${orderIdToCancel}/cancel`, {
+            method: 'POST'
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+            showAlert(result.error || 'Bestellung konnte nicht storniert werden.', 'danger');
+            return;
+        }
+
+        showAlert(result.message || 'Bestellung wurde storniert.', 'success');
+
+        modal.hide();
+        orderIdToCancel = null;
+
+        await loadMyOrders();
+
+    } catch (error) {
+        console.error('Fehler beim Stornieren der Bestellung:', error);
+        showAlert('Bestellung konnte nicht storniert werden.', 'danger');
+    }
+});
+
+async function submitProductReview(productId, orderId) {
+    const rating = document.getElementById(`rating-${productId}`).value;
+    const reviewText = document.getElementById(`reviewText-${productId}`).value.trim();
+
+    if (!rating) {
+        showAlert('Bitte wählen Sie eine Sternebewertung aus.', 'warning');
+        return;
+    }
+
+    try {
+        const response = await fetch(`/products/${productId}/reviews`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                orderId,
+                rating: Number(rating),
+                reviewText
+            })
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+            showAlert(result.error || 'Bewertung konnte nicht gespeichert werden.', 'danger');
+            return;
+        }
+
+        showAlert(result.message || 'Bewertung wurde gespeichert.', 'success');
+        await openMyOrderDetails(orderId);
+
+    } catch (error) {
+        console.error('Fehler beim Speichern der Bewertung:', error);
+        showAlert('Bewertung konnte nicht gespeichert werden.', 'danger');
+    }
+}
 
 function logout() {
     fetch('/logout', {

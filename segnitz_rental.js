@@ -1737,6 +1737,30 @@ app.get('/my-orders/:id', async (req, res) => {
             [req.params.id]
         );
 
+        const [reviews] = await connection.execute(
+            `SELECT
+        id,
+        product_id AS productId,
+        order_id AS orderId,
+        rating,
+        review_text AS reviewText,
+        DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS createdAt
+     FROM product_reviews
+     WHERE order_id = ?
+     AND user_email = ?`,
+            [req.params.id, req.session.user]
+        );
+
+        const reviewsByProductId = reviews.reduce((map, review) => {
+            map[Number(review.productId)] = review;
+            return map;
+        }, {});
+
+        finalItems = finalItems.map(item => ({
+            ...item,
+            review: reviewsByProductId[Number(item.productId)] || null
+        }));
+
         const { confirmation_json, ...safeOrder } = orders[0];
 
         res.json({
@@ -1904,14 +1928,26 @@ app.post('/products/:id/reviews', async (req, res) => {
             });
         }
 
+        const [existingReviews] = await connection.execute(
+            `SELECT id
+     FROM product_reviews
+     WHERE product_id = ?
+     AND order_id = ?
+     AND user_email = ?
+     LIMIT 1`,
+            [productId, orderId, req.session.user]
+        );
+
+        if (existingReviews.length > 0) {
+            return res.status(409).json({
+                error: 'Sie haben dieses Produkt für diese Bestellung bereits bewertet.'
+            });
+        }
+
         await connection.execute(
             `INSERT INTO product_reviews
-             (product_id, order_id, user_email, rating, review_text)
-             VALUES (?, ?, ?, ?, ?)
-             ON DUPLICATE KEY UPDATE
-                rating = VALUES(rating),
-                review_text = VALUES(review_text),
-                updated_at = NOW()`,
+     (product_id, order_id, user_email, rating, review_text)
+     VALUES (?, ?, ?, ?, ?)`,
             [
                 productId,
                 orderId,
@@ -3231,13 +3267,18 @@ app.get('/products/bestsellers', async (req, res) => {
         connection = await mysql.createConnection(dbConfig);
 
         const [products] = await connection.execute(`
-            SELECT *
-            FROM rental_products
-            WHERE is_active = 1
-            AND COALESCE(times_ordered, 0) > 0
-            ORDER BY times_ordered DESC
-            LIMIT 6
-        `);
+    SELECT
+        p.*,
+        COALESCE(ROUND(AVG(pr.rating), 1), 0) AS average_rating,
+        COUNT(pr.id) AS review_count
+    FROM rental_products p
+    LEFT JOIN product_reviews pr ON pr.product_id = p.id
+    WHERE p.is_active = 1
+    AND COALESCE(p.times_ordered, 0) > 0
+    GROUP BY p.id
+    ORDER BY p.times_ordered DESC
+    LIMIT 6
+`);
 
         const [images] = await connection.execute(
             `SELECT id, product_id, image_path, sort_order
