@@ -54,6 +54,11 @@ async function loadMyOrders() {
     }
 }
 
+function canCancelOrder(order) {
+    const status = String(order.status || '').trim().toLowerCase();
+    return ['reserved', 'confirmed'].includes(status);
+}
+
 function renderMyOrders() {
     const container = document.getElementById('myOrdersList');
 
@@ -72,10 +77,20 @@ function renderMyOrders() {
                     ${getReturnBadge(order.return_status)}
                 </div>
 
-                <button type="button" class="btn btn-outline-primary btn-sm"
-                    onclick="openMyOrderDetails(${order.id})">
-                    Details anzeigen
-                </button>
+                <div class="d-flex gap-2 flex-wrap justify-content-end">
+    <button type="button" class="btn btn-outline-primary btn-sm"
+        onclick="openMyOrderDetails(${order.id})">
+        Details anzeigen
+    </button>
+
+    ${canCancelOrder(order) ? `
+        <button type="button" class="btn btn-outline-danger btn-sm"
+            onclick="cancelMyOrder(${order.id})">
+            Stornieren
+        </button>
+    ` : ''}
+</div>
+
             </div>
         </div>
     `).join('');
@@ -101,6 +116,35 @@ async function openMyOrderDetails(orderId) {
     }
 }
 
+async function cancelMyOrder(orderId) {
+    const confirmed = confirm('Möchten Sie diese Bestellung wirklich stornieren?');
+
+    if (!confirmed) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/my-orders/${orderId}/cancel`, {
+            method: 'POST'
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+            showAlert(result.error || 'Bestellung konnte nicht storniert werden.', 'danger');
+            return;
+        }
+
+        showAlert(result.message || 'Bestellung wurde storniert.', 'success');
+
+        await loadMyOrders();
+
+    } catch (error) {
+        console.error('Fehler beim Stornieren der Bestellung:', error);
+        showAlert('Bestellung konnte nicht storniert werden.', 'danger');
+    }
+}
+
 function renderMyOrderDetails(order) {
     const body = document.getElementById('myOrderDetailsBody');
 
@@ -115,6 +159,15 @@ function renderMyOrderDetails(order) {
 
     const status = String(order.status || '').trim().toLowerCase();
     const canShowReturnSection = status !== 'cancelled';
+
+    const cancelButtonHtml = canCancelOrder(order)
+        ? `
+        <button type="button" class="btn btn-outline-danger btn-sm mt-3"
+            onclick="cancelMyOrder(${order.id})">
+            Bestellung stornieren
+        </button>
+    `
+        : '';
 
     const imagesHtml = (order.returnImages || []).length === 0
         ? '<div class="text-muted">Keine Rückgabefotos vorhanden.</div>'
@@ -176,6 +229,7 @@ function renderMyOrderDetails(order) {
                     </table>
                 </div>
             </div>
+            ${cancelButtonHtml}
 
 ${canShowReturnSection ? `
     <div class="col-12">
