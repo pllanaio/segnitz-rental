@@ -839,9 +839,13 @@ async function sendOrderEmail(recipients, orderSummary, customer, signatureDataU
         </p>
     `;
 
+    const customerRecipient = recipients[0]; // erster = Kunde
+    const internalRecipient = 'orders@segnitzbau.de';
+
     await transporter.sendMail({
         from: `"Segnitz Rental" <${process.env.SMTP_USER}>`,
-        to: recipients.join(', '),
+        to: customer.email,
+        bcc: 'orders@segnitzbau.de',
         subject: `Mietauftrag ${orderSummary.orderNo}`,
         html
     });
@@ -990,9 +994,7 @@ app.post('/data', async (req, res) => {
             getFormValue(formData, 'email') ||
             email;
 
-        const internalOrderEmail =
-            process.env.MAIN_EMAIL ||
-            'orders@segnitzbau.de';
+        const internalOrderEmail = 'orders@segnitzbau.de';
 
         const recipients = [
             customerOrderEmail,
