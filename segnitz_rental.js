@@ -1038,6 +1038,19 @@ app.post('/data', async (req, res) => {
         const timestamp = new Date().getTime();
         const pdfFilename = `Mietauftrag_${orderNo}_${timestamp}.pdf`;
         const pdfFilepath = path.join(__dirname, 'public', 'pdf', pdfFilename);
+        const customerPdfEmail = email; // kommt schon oben aus CustomerEmail
+        const internalOrderEmail = 'orders@segnitzbau.de';
+
+        const recipients = [
+            customerPdfEmail,
+            internalOrderEmail
+        ]
+            .filter(Boolean)
+            .map(e => e.trim().toLowerCase());
+
+        const uniqueRecipients = [...new Set(recipients)];
+
+        await sendEmailWithPDF(uniqueRecipients, pdfFilepath, pdfFilename);
         const templatePdfPath = path.join(__dirname, 'public', 'pdf', 'template.pdf');
         const activeUser = req.session.user || 'Gast';
 

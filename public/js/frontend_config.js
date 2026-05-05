@@ -514,6 +514,7 @@ async function loadUserProfileIntoForm() {
         document.getElementById('FirstName').value = user.firstName || '';
         document.getElementById('LastName').value = user.lastName || '';
         document.getElementById('CustomerEmail').value = user.email || '';
+        prefillFinalEmailField(user.email);
         document.getElementById('CustomerPhone').value = user.phone || '';
         document.getElementById('CustomerAddress').value = user.address || '';
         document.getElementById('CustomerZip').value = user.zip || '';
@@ -532,6 +533,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (guestOrderBtn) {
         guestOrderBtn.addEventListener('click', async () => {
             const email = document.getElementById('CustomerEmail').value.trim();
+            prefillFinalEmailField(email);
 
             if (!email) {
                 showAlert('Bitte geben Sie zuerst Ihre E-Mail-Adresse ein.', 'warning');
@@ -595,6 +597,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (checkGuestVerificationBtn) {
         checkGuestVerificationBtn.addEventListener('click', async () => {
             const email = document.getElementById('CustomerEmail').value.trim();
+            prefillFinalEmailField(email);
 
             if (!email) {
                 showAlert('Bitte geben Sie Ihre E-Mail-Adresse ein.', 'warning');
@@ -925,6 +928,14 @@ function formatCurrency(value) {
     return `${Number(value || 0).toFixed(2).replace('.', ',')} €`;
 }
 
+function prefillFinalEmailField(email) {
+    const finalEmailInput = document.getElementById('email');
+
+    if (!finalEmailInput || !email) return;
+
+    finalEmailInput.value = email;
+}
+
 async function loadCart() {
     try {
         const response = await fetch('/cart');
@@ -1016,8 +1027,15 @@ async function deleteCartItem(itemId) {
 }
 
 async function clearCart() {
-    const modal = new bootstrap.Modal(document.getElementById('confirmClearCartModal'));
-    modal.show();
+    const confirmModalEl = document.getElementById('confirmClearCartModal');
+
+    confirmModalEl.style.zIndex = 1065;
+
+    const confirmModal = new bootstrap.Modal(confirmModalEl, {
+        backdrop: false
+    });
+
+    confirmModal.show();
 }
 
 async function executeClearCart() {
@@ -1597,14 +1615,23 @@ async function loadProductReviews(productId) {
 document.addEventListener('DOMContentLoaded', () => {
     const btn = document.getElementById('confirmClearCartBtn');
 
-    if (btn) {
-        btn.addEventListener('click', () => {
-            const modalEl = document.getElementById('confirmClearCartModal');
-            const modal = bootstrap.Modal.getInstance(modalEl);
+    if (!btn) return;
 
-            if (modal) modal.hide();
+    btn.addEventListener('click', async () => {
+        const confirmModalEl = document.getElementById('confirmClearCartModal');
+        const confirmModal = bootstrap.Modal.getInstance(confirmModalEl);
 
-            executeClearCart();
-        });
-    }
+        if (confirmModal) {
+            confirmModal.hide();
+        }
+
+        await executeClearCart();
+
+        const cartModalEl = document.getElementById('cartModal');
+        const cartModal = bootstrap.Modal.getInstance(cartModalEl);
+
+        if (cartModal) {
+            cartModal.hide();
+        }
+    });
 });
