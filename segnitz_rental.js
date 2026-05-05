@@ -844,8 +844,8 @@ async function sendOrderEmail(recipients, orderSummary, customer, signatureDataU
 
     await transporter.sendMail({
         from: `"Segnitz Rental" <${process.env.SMTP_USER}>`,
-        to: customer.email,
-        bcc: 'orders@segnitzbau.de',
+        to: customerRecipient,
+        bcc: internalRecipient,
         subject: `Mietauftrag ${orderSummary.orderNo}`,
         html
     });
@@ -1058,12 +1058,6 @@ app.post('/data', async (req, res) => {
             await connection.end();
         }
     }
-});
-
-app.get('/pdf-download/:filename', (req, res) => {
-    const filename = req.params.filename;
-    const filepath = path.join(__dirname, 'public', 'pdf', filename);
-    res.download(filepath); // Setzt Content-Disposition zum Download
 });
 
 function createVerificationToken() {
@@ -2490,9 +2484,10 @@ app.put('/admin/orders/:id/cancel', checkAdmin, async (req, res) => {
         await connection.execute(
             `UPDATE rental_orders
              SET status = 'cancelled',
-                 cancel_reason = ?,
-                 cancelled_by_user_id = ?,
-                 cancelled_at = NOW()
+             return_case_status = 'closed',
+             cancel_reason = ?,
+             cancelled_by_user_id = ?,
+             cancelled_at = NOW()
              WHERE id = ?`,
             [
                 cancelReason.trim(),
