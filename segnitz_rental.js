@@ -793,7 +793,7 @@ async function sendOrderEmail(recipients, orderSummary, customer, signatureDataU
     `).join('');
 
     const signatureHtml = signatureDataUrl
-        ? `<img src="${signatureDataUrl}" alt="Unterschrift" style="max-width:320px; border:1px solid #ddd; padding:8px;">`
+        ? `<img src="${signatureDataUrl}" alt="Unterschrift" style="max-width:180px; max-height:70px; border:1px solid #ddd; padding:6px;">`
         : `<em>Keine Unterschrift vorhanden</em>`;
 
     const html = `
