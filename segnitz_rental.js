@@ -921,9 +921,7 @@ app.post('/data', async (req, res) => {
         await connection.beginTransaction();
 
         const userId = await getUserIdByEmail(connection, email);
-
         const cartId = await getOrCreateActiveCart(connection, req);
-
         const cartItems = await getCartItemsForOrder(connection, cartId);
 
         if (cartItems.length === 0) {
@@ -940,11 +938,6 @@ app.post('/data', async (req, res) => {
                 item.rentalStart,
                 item.rentalEnd
             );
-
-            console.log(
-                `${new Date().toISOString()} - Availability check: Produkt "${item.title}" (${item.productId}) von ${item.rentalStart} bis ${item.rentalEnd}: ${available ? 'frei' : 'blockiert'}`
-            );
-
 
             if (!available) {
                 await connection.rollback();
@@ -978,6 +971,7 @@ app.post('/data', async (req, res) => {
         );
 
         const orderId = orderResult.insertId;
+
         const [orderRows] = await connection.execute(
             `SELECT DATE_FORMAT(reserved_until, '%Y-%m-%d %H:%i:%s') AS reservedUntil
              FROM rental_orders
@@ -1038,7 +1032,16 @@ app.post('/data', async (req, res) => {
         const timestamp = new Date().getTime();
         const pdfFilename = `Mietauftrag_${orderNo}_${timestamp}.pdf`;
         const pdfFilepath = path.join(__dirname, 'public', 'pdf', pdfFilename);
-        const customerPdfEmail = email; // kommt schon oben aus CustomerEmail
+        const templatePdfPath = path.join(__dirname, 'public', 'pdf', 'Mietauftrag_Template.pdf');
+
+        fs.mkdirSync(path.dirname(pdfFilepath), { recursive: true });
+
+        await generatePDF(enrichedPayload, templatePdfPath, pdfFilepath);
+
+        const customerPdfEmail =
+            getFormValue(formData, 'email') ||
+            email;
+
         const internalOrderEmail = 'orders@segnitzbau.de';
 
         const recipients = [
@@ -1050,36 +1053,30 @@ app.post('/data', async (req, res) => {
 
         const uniqueRecipients = [...new Set(recipients)];
 
-        await sendEmailWithPDF(uniqueRecipients, pdfFilepath, pdfFilename);
-        const templatePdfPath = path.join(__dirname, 'public', 'pdf', 'template.pdf');
-        const activeUser = req.session.user || 'Gast';
+        let emailSent = false;
 
-        await fsp.writeFile(
-            path.join(__dirname, 'public', 'json', `order_${orderNo}_${timestamp}.json`),
-            JSON.stringify(enrichedPayload, null, 2)
-        );
-
-        console.log(
-            `${new Date().toISOString()} - Bestellung: Reservierung ${orderNo} vom Benutzer ${activeUser} gespeichert`
-        );
-
-        await generatePDF(enrichedPayload, templatePdfPath, pdfFilepath);
-
-        if (email) {
-            try {
-                await sendEmailWithPDF([email], pdfFilepath, pdfFilename);
-            } catch (mailError) {
-                console.error('Fehler beim Mailversand:', mailError);
-            }
+        try {
+            emailSent = await sendEmailWithPDF(
+                uniqueRecipients,
+                pdfFilepath,
+                pdfFilename
+            );
+        } catch (emailError) {
+            console.error('Fehler beim E-Mail-Versand:', emailError);
         }
 
-        res.json({
+        res.status(200).json({
+            message: 'Bestellung erfolgreich reserviert.',
             orderId,
             orderNo,
-            status: 'reserved',
-            pdfUrl: `/pdf-download/${pdfFilename}`
+            reservedUntil,
+            pdfUrl: `/pdf/${pdfFilename}`,
+            emailSent
         });
-    } catch (err) {
+
+    } catch (error) {
+        console.error('Fehler beim Reservieren der Bestellung:', error);
+
         if (connection) {
             try {
                 await connection.rollback();
@@ -1088,10 +1085,10 @@ app.post('/data', async (req, res) => {
             }
         }
 
-        console.error('Fehler beim Reservieren der Bestellung:', err);
         res.status(500).json({
-            error: 'Fehler beim Reservieren der Bestellung.'
+            error: 'Bestellung konnte nicht reserviert werden.'
         });
+
     } finally {
         if (connection) {
             await connection.end();
