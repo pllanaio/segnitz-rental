@@ -1758,6 +1758,84 @@ app.get('/my-orders/:id', async (req, res) => {
     }
 });
 
+app.post('/my-orders/:id/cancel', async (req, res) => {
+    let connection;
+
+    if (!req.session.user) {
+        return res.status(401).json({
+            error: 'Bitte einloggen.'
+        });
+    }
+
+    try {
+        const orderId = req.params.id;
+        const userEmail = req.session.user;
+
+        connection = await mysql.createConnection(dbConfig);
+        await connection.beginTransaction();
+
+        const [orders] = await connection.execute(
+            `SELECT id, status, customer_email
+             FROM rental_orders
+             WHERE id = ?
+             AND customer_email = ?
+             LIMIT 1`,
+            [orderId, userEmail]
+        );
+
+        if (orders.length === 0) {
+            await connection.rollback();
+            return res.status(404).json({
+                error: 'Bestellung nicht gefunden.'
+            });
+        }
+
+        const order = orders[0];
+
+        if (!['reserved', 'confirmed'].includes(order.status)) {
+            await connection.rollback();
+            return res.status(400).json({
+                error: 'Diese Bestellung kann nicht mehr storniert werden.'
+            });
+        }
+
+        await connection.execute(
+            `UPDATE rental_orders
+             SET status = 'cancelled',
+                 return_case_status = 'closed'
+             WHERE id = ?`,
+            [orderId]
+        );
+
+        await connection.commit();
+
+        return res.json({
+            success: true,
+            message: 'Bestellung wurde storniert.'
+        });
+
+    } catch (error) {
+        console.error('Fehler beim Stornieren der Bestellung:', error);
+
+        if (connection) {
+            try {
+                await connection.rollback();
+            } catch (rollbackError) {
+                console.error('Rollback fehlgeschlagen:', rollbackError);
+            }
+        }
+
+        return res.status(500).json({
+            error: 'Bestellung konnte nicht storniert werden.'
+        });
+
+    } finally {
+        if (connection) {
+            await connection.end();
+        }
+    }
+});
+
 app.get('/products/:id/reviews', async (req, res) => {
     let connection;
 
@@ -3196,6 +3274,42 @@ app.get('/products/bestsellers', async (req, res) => {
         if (connection) await connection.end();
     }
 });
+
+app.get('/products/:id/current-availability', async (req, res) => {
+    let connection;
+
+    try {
+        const productId = req.params.id;
+        const today = new Date().toISOString().split('T')[0];
+
+        connection = await mysql.createConnection(dbConfig);
+
+        const available = await checkProductAvailability(
+            connection,
+            productId,
+            today,
+            today
+        );
+
+        return res.json({
+            productId,
+            available
+        });
+
+    } catch (error) {
+        console.error('Fehler beim Prüfen der Produktverfügbarkeit:', error);
+
+        return res.status(500).json({
+            error: 'Verfügbarkeit konnte nicht geprüft werden.'
+        });
+
+    } finally {
+        if (connection) {
+            await connection.end();
+        }
+    }
+});
+
 cleanupOnStartup();
 
 setInterval(async () => {
