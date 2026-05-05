@@ -683,6 +683,26 @@ async function validateProductStep() {
     return true;
 }
 
+async function goToNextStepFromCart() {
+    const isValid = await validateProductStep();
+
+    if (!isValid) return;
+
+    const modalEl = document.getElementById('cartModal');
+    const modal = bootstrap.Modal.getInstance(modalEl);
+
+    if (modal) {
+        modal.hide();
+    }
+
+    // WICHTIG: Step wirklich weiter schalten
+    const nextBtn = document.getElementById('next-btn');
+
+    if (nextBtn) {
+        nextBtn.click();
+    }
+}
+
 function validateCartReviewStep() {
     if (!currentCart.items || currentCart.items.length === 0) {
         showAlert('Ihr Warenkorb ist leer.', 'warning');
@@ -1082,10 +1102,14 @@ function renderCart() {
     const cartSummary = document.getElementById('cartSummary');
     const cartRentalTotal = document.getElementById('cartRentalTotal');
     const cartDepositTotal = document.getElementById('cartDepositTotal');
+    const cartModalNextBtn = document.getElementById('cartModalNextBtn');
 
     if (!cartItems) return;
 
     const items = currentCart.items || [];
+    if (cartModalNextBtn) {
+        cartModalNextBtn.disabled = items.length === 0;
+    }
 
     if (cartItemCount) {
         cartItemCount.textContent = items.length;
