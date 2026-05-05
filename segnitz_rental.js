@@ -990,8 +990,8 @@ app.post('/data', async (req, res) => {
         for (const item of cartItems) {
             await connection.execute(
                 `INSERT INTO rental_order_items
-                 (order_id, product_id, rental_start, rental_end, price_per_day, deposit)
-                 VALUES (?, ?, ?, ?, ?, ?)`,
+                (order_id, product_id, rental_start, rental_end, price_per_day, deposit)
+                VALUES (?, ?, ?, ?, ?, ?)`,
                 [
                     orderId,
                     item.productId,
@@ -1001,14 +1001,14 @@ app.post('/data', async (req, res) => {
                     item.deposit
                 ]
             );
-        }
 
-        await connection.execute(
-            `UPDATE rental_products
-             SET times_ordered = COALESCE(times_ordered, 0) + 1
-             WHERE id = ?`,
-            [item.productId]
-        );
+            await connection.execute(
+                `UPDATE rental_products
+                SET times_ordered = COALESCE(times_ordered, 0) + 1
+                WHERE id = ?`,
+                [item.productId]
+            );
+        }
 
         await connection.execute(
             `DELETE FROM rental_carts
