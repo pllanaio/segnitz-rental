@@ -27,7 +27,7 @@ let productCalendar = null;
 let cartEditCalendar = null;
 let selectedCategory = 'all';
 let current_step = 0;
-let stepCount = 5;
+let stepCount = 3;
 let bestsellerProducts = [];
 
 
@@ -77,12 +77,6 @@ nextBtn.addEventListener('click', async () => {
             isValid = validateCustomerDataStep();
             break;
         case 3:
-            isValid = validateExtraStepOne();
-            break;
-        case 4:
-            isValid = validateExtraStepTwo();
-            break;
-        case 5:
             isValid = validateSignatureStep();
             break;
     }
@@ -735,14 +729,6 @@ function validateCustomerDataStep() {
         return false;
     }
 
-    return true;
-}
-
-function validateExtraStepOne() {
-    return true;
-}
-
-function validateExtraStepTwo() {
     return true;
 }
 
