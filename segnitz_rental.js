@@ -1784,6 +1784,144 @@ app.get('/my-orders/:id', async (req, res) => {
     }
 });
 
+app.get('/products/:id/reviews', async (req, res) => {
+    let connection;
+
+    try {
+        connection = await mysql.createConnection(dbConfig);
+
+        const [reviews] = await connection.execute(
+            `SELECT
+                pr.id,
+                pr.product_id AS productId,
+                pr.order_id AS orderId,
+                pr.user_email AS userEmail,
+                pr.rating,
+                pr.review_text AS reviewText,
+                DATE_FORMAT(pr.created_at, '%Y-%m-%d %H:%i:%s') AS createdAt,
+                u.first_name AS firstName,
+                u.last_name AS lastName
+             FROM product_reviews pr
+             LEFT JOIN users u ON u.username = pr.user_email
+             WHERE pr.product_id = ?
+             ORDER BY pr.created_at DESC`,
+            [req.params.id]
+        );
+
+        res.json(reviews);
+    } catch (error) {
+        console.error('Fehler beim Laden der Produktbewertungen:', error);
+        res.status(500).json({ error: 'Produktbewertungen konnten nicht geladen werden.' });
+    } finally {
+        if (connection) await connection.end();
+    }
+});
+
+app.post('/products/:id/reviews', async (req, res) => {
+    if (!req.session.user) {
+        return res.status(401).json({ error: 'Nicht angemeldet.' });
+    }
+
+    const productId = Number(req.params.id);
+    const { orderId, rating, reviewText } = req.body;
+
+    const normalizedRating = Number(rating);
+
+    if (!productId || !orderId || !normalizedRating) {
+        return res.status(400).json({ error: 'Produkt, Bestellung und Bewertung sind erforderlich.' });
+    }
+
+    if (!Number.isInteger(normalizedRating) || normalizedRating < 1 || normalizedRating > 5) {
+        return res.status(400).json({ error: 'Die Bewertung muss zwischen 1 und 5 Sternen liegen.' });
+    }
+
+    let connection;
+
+    try {
+        connection = await mysql.createConnection(dbConfig);
+
+        const [eligibleOrders] = await connection.execute(
+            `SELECT ro.id
+             FROM rental_orders ro
+             JOIN rental_order_items roi ON roi.order_id = ro.id
+             WHERE ro.id = ?
+             AND ro.customer_email = ?
+             AND ro.status = 'returned'
+             AND roi.product_id = ?
+             LIMIT 1`,
+            [orderId, req.session.user, productId]
+        );
+
+        if (eligibleOrders.length === 0) {
+            return res.status(403).json({
+                error: 'Dieses Produkt kann nur nach einer zurückgegebenen eigenen Bestellung bewertet werden.'
+            });
+        }
+
+        await connection.execute(
+            `INSERT INTO product_reviews
+             (product_id, order_id, user_email, rating, review_text)
+             VALUES (?, ?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE
+                rating = VALUES(rating),
+                review_text = VALUES(review_text),
+                updated_at = NOW()`,
+            [
+                productId,
+                orderId,
+                req.session.user,
+                normalizedRating,
+                reviewText ? String(reviewText).trim() : null
+            ]
+        );
+
+        res.json({ message: 'Bewertung wurde gespeichert.' });
+    } catch (error) {
+        console.error('Fehler beim Speichern der Produktbewertung:', error);
+        res.status(500).json({ error: 'Bewertung konnte nicht gespeichert werden.' });
+    } finally {
+        if (connection) await connection.end();
+    }
+});
+
+app.get('/my-reviews', async (req, res) => {
+    if (!req.session.user) {
+        return res.status(401).json({ error: 'Nicht angemeldet.' });
+    }
+
+    let connection;
+
+    try {
+        connection = await mysql.createConnection(dbConfig);
+
+        const [reviews] = await connection.execute(
+            `SELECT
+                pr.id,
+                pr.product_id AS productId,
+                pr.order_id AS orderId,
+                pr.rating,
+                pr.review_text AS reviewText,
+                DATE_FORMAT(pr.created_at, '%Y-%m-%d %H:%i:%s') AS createdAt,
+                DATE_FORMAT(pr.updated_at, '%Y-%m-%d %H:%i:%s') AS updatedAt,
+                p.title AS productTitle,
+                ro.order_no AS orderNo
+             FROM product_reviews pr
+             JOIN rental_products p ON p.id = pr.product_id
+             JOIN rental_orders ro ON ro.id = pr.order_id
+             WHERE pr.user_email = ?
+             ORDER BY pr.updated_at DESC`,
+            [req.session.user]
+        );
+
+        res.json(reviews);
+    } catch (error) {
+        console.error('Fehler beim Laden eigener Bewertungen:', error);
+        res.status(500).json({ error: 'Eigene Bewertungen konnten nicht geladen werden.' });
+    } finally {
+        if (connection) await connection.end();
+    }
+});
+
 app.get('/products', async (req, res) => {
     let connection;
 
@@ -1791,7 +1929,14 @@ app.get('/products', async (req, res) => {
         connection = await mysql.createConnection(dbConfig);
 
         const [products] = await connection.execute(
-            'SELECT * FROM rental_products ORDER BY title ASC'
+            `SELECT
+        p.*,
+        COALESCE(ROUND(AVG(pr.rating), 1), 0) AS average_rating,
+        COUNT(pr.id) AS review_count
+        FROM rental_products p
+        LEFT JOIN product_reviews pr ON pr.product_id = p.id
+        GROUP BY p.id
+        ORDER BY p.title ASC`
         );
 
         const [images] = await connection.execute(
