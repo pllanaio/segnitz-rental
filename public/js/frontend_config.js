@@ -1016,12 +1016,11 @@ async function deleteCartItem(itemId) {
 }
 
 async function clearCart() {
-    const confirmed = confirm('Möchten Sie den Warenkorb wirklich leeren?');
+    const modal = new bootstrap.Modal(document.getElementById('confirmClearCartModal'));
+    modal.show();
+}
 
-    if (!confirmed) {
-        return;
-    }
-
+async function executeClearCart() {
     try {
         const response = await fetch('/cart', {
             method: 'DELETE'
@@ -1036,6 +1035,7 @@ async function clearCart() {
 
         await loadCart();
         showAlert(result.message || 'Warenkorb wurde geleert.', 'success');
+
     } catch (error) {
         console.error('Fehler beim Leeren des Warenkorbs:', error);
         showAlert('Warenkorb konnte nicht geleert werden.', 'danger');
@@ -1070,7 +1070,7 @@ function renderCart() {
     const items = currentCart.items || [];
 
     if (cartItemCount) {
-        cartItemCount.textContent = `${items.length} Produkt${items.length === 1 ? '' : 'e'}`;
+        cartItemCount.textContent = items.length;
     }
 
     if (items.length === 0) {
@@ -1087,15 +1087,7 @@ function renderCart() {
         return;
     }
 
-    const clearCartButtonHtml = `
-    <div class="d-flex justify-content-end mb-3">
-        <button type="button" class="btn btn-outline-danger btn-sm" onclick="clearCart()">
-            Warenkorb leeren
-        </button>
-    </div>
-`;
-
-    cartItems.innerHTML = clearCartButtonHtml + items.map(item => {
+    cartItems.innerHTML = items.map(item => {
         const days = calculateRentalDays(item.rentalStart, item.rentalEnd);
         const lineTotal = days * Number(item.pricePerDay || 0);
 
@@ -1601,3 +1593,18 @@ async function loadProductReviews(productId) {
         container.innerHTML = '<div class="text-muted">Bewertungen konnten nicht geladen werden.</div>';
     }
 }
+
+document.addEventListener('DOMContentLoaded', () => {
+    const btn = document.getElementById('confirmClearCartBtn');
+
+    if (btn) {
+        btn.addEventListener('click', () => {
+            const modalEl = document.getElementById('confirmClearCartModal');
+            const modal = bootstrap.Modal.getInstance(modalEl);
+
+            if (modal) modal.hide();
+
+            executeClearCart();
+        });
+    }
+});
