@@ -460,7 +460,7 @@ function renderOrders() {
                         <small>${order.customer_email || ''}</small><br>
                         ${getStatusBadge(order.status)}
                         ${getPaymentBadge(order.payment_status)}
-                        ${getReturnBadge(order.return_status)}
+                        ${getReturnBadge(order.return_status, order.status)}
                     </div>
 
                     <button class="btn btn-primary btn-sm"
@@ -914,7 +914,11 @@ function getPaymentBadge(status) {
     </span>`;
 }
 
-function getReturnBadge(status) {
+function getReturnBadge(status, orderStatus = null) {
+    if (orderStatus === 'cancelled') {
+        return `<span class="badge bg-dark">Rückgabe: Geschlossen</span>`;
+    }
+
     const map = {
         pending: 'secondary',
         returned_ok: 'success',
