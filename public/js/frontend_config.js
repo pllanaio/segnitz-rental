@@ -793,6 +793,7 @@ function createRentalProductCard(product) {
     card.className = 'product-card';
     card.dataset.product = product.product_key;
     card.dataset.productId = product.id;
+    card.dataset.available = 'unknown';
     card.dataset.title = product.title;
     card.dataset.description = product.description || '';
     card.dataset.price = `${Number(product.price_per_day).toFixed(2)} € / Tag`;
@@ -810,6 +811,10 @@ function createRentalProductCard(product) {
 
     card.innerHTML = `
     ${firstImage ? `<img src="${firstImage}" alt="${product.title}">` : ''}
+
+    <div class="availability-badge badge bg-secondary mb-2">
+        Verfügbarkeit wird geprüft...
+    </div>
 
     <h5 class="mt-2">${product.title}</h5>
     ${ratingHtml}
@@ -839,8 +844,46 @@ function createRentalProductCard(product) {
             showProductDetails(card);
         });
     }
-
+    loadProductCurrentAvailability(product.id, card);
     return card;
+}
+
+async function loadProductCurrentAvailability(productId, card) {
+    const badge = card.querySelector('.availability-badge');
+
+    try {
+        const response = await fetch(`/products/${productId}/current-availability`);
+        const result = await response.json();
+
+        if (!response.ok) {
+            throw new Error(result.error || 'Verfügbarkeit konnte nicht geladen werden.');
+        }
+
+        card.dataset.available = result.available ? 'true' : 'false';
+
+        if (badge) {
+            badge.classList.remove('bg-secondary', 'bg-success', 'bg-danger');
+
+            if (result.available) {
+                badge.classList.add('bg-success');
+                badge.textContent = 'Verfügbar';
+            } else {
+                badge.classList.add('bg-danger');
+                badge.textContent = 'Nicht verfügbar';
+            }
+        }
+
+    } catch (error) {
+        console.error('Fehler beim Laden der Verfügbarkeit:', error);
+
+        card.dataset.available = 'false';
+
+        if (badge) {
+            badge.classList.remove('bg-secondary', 'bg-success');
+            badge.classList.add('bg-danger');
+            badge.textContent = 'Nicht verfügbar';
+        }
+    }
 }
 
 function renderProductPage() {
@@ -968,6 +1011,12 @@ async function loadCart() {
 }
 
 async function addProductToCart(productId, rentalStart, rentalEnd) {
+
+    if (selectedProductCard && selectedProductCard.dataset.available === 'false') {
+        showAlert('Dieses Produkt ist aktuell nicht verfügbar.', 'warning');
+        return;
+    }
+    
     if (selectedRangeConflicts(rentalStart, rentalEnd)) {
         showAlert('Dieses Produkt ist im ausgewählten Zeitraum bereits reserviert.', 'danger');
         return;
