@@ -407,6 +407,11 @@ async function showProductDetails(card) {
 
     document.getElementById('modalProductId').value = card.dataset.productId;
     document.getElementById('modalProductTitle').textContent = card.dataset.title;
+    document.getElementById('modalProductRating').innerHTML = renderRatingStars(
+        Number(card.dataset.averageRating || 0),
+        Number(card.dataset.reviewCount || 0)
+    );
+    loadProductReviews(card.dataset.productId);
     document.getElementById('modalProductDescription').textContent = card.dataset.description;
     document.getElementById('modalProductPrice').textContent = card.dataset.price;
     document.getElementById('modalProductDeposit').textContent = card.dataset.deposit;
@@ -787,12 +792,18 @@ function createRentalProductCard(product) {
     card.dataset.images = JSON.stringify(
         productImages.map(image => image.path)
     );
+    card.dataset.averageRating = product.average_rating || 0;
+    card.dataset.reviewCount = product.review_count || 0;
+    const ratingHtml = renderRatingStars(
+        product.average_rating,
+        product.review_count
+    );
 
     card.innerHTML = `
     ${firstImage ? `<img src="${firstImage}" alt="${product.title}">` : ''}
 
     <h5 class="mt-2">${product.title}</h5>
-
+    ${ratingHtml}
     <p class="mb-2">${product.description || ''}</p>
 
     <div class="d-flex justify-content-between align-items-end mt-auto">
@@ -1532,4 +1543,61 @@ function renderBestsellers() {
     });
 
     section.classList.remove('d-none');
+}
+
+function renderRatingStars(rating, count = null) {
+    const normalizedRating = Number(rating || 0);
+    const reviewCount = Number(count || 0);
+
+    let stars = '';
+
+    for (let i = 1; i <= 5; i++) {
+        stars += normalizedRating >= i
+            ? '<i class="bi bi-star-fill text-warning"></i>'
+            : '<i class="bi bi-star text-warning"></i>';
+    }
+
+    return `
+        <div class="d-flex align-items-center gap-2 small">
+            <span>${stars}</span>
+            ${count !== null ? `<span class="text-muted">${normalizedRating.toFixed(1)} (${reviewCount})</span>` : ''}
+        </div>
+    `;
+}
+
+async function loadProductReviews(productId) {
+    const container = document.getElementById('modalProductReviews');
+    if (!container) return;
+
+    container.innerHTML = '<div class="text-muted">Bewertungen werden geladen...</div>';
+
+    try {
+        const response = await fetch(`/products/${productId}/reviews`);
+        const reviews = await response.json();
+
+        if (!response.ok) {
+            container.innerHTML = '<div class="text-muted">Bewertungen konnten nicht geladen werden.</div>';
+            return;
+        }
+
+        if (!reviews || reviews.length === 0) {
+            container.innerHTML = '<div class="text-muted">Noch keine Bewertungen vorhanden.</div>';
+            return;
+        }
+
+        container.innerHTML = reviews.map(review => `
+            <div class="border-bottom pb-2 mb-2">
+                ${renderRatingStars(review.rating)}
+                <div class="small text-muted">
+                    ${review.firstName || ''} ${review.lastName || ''}
+                    · ${review.createdAt || ''}
+                </div>
+                <div>${review.reviewText || '<span class="text-muted">Keine Rezension geschrieben.</span>'}</div>
+            </div>
+        `).join('');
+
+    } catch (error) {
+        console.error('Fehler beim Laden der Bewertungen:', error);
+        container.innerHTML = '<div class="text-muted">Bewertungen konnten nicht geladen werden.</div>';
+    }
 }
