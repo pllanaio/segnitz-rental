@@ -16,11 +16,6 @@ const fsp = require("fs").promises;
 const fs = require('fs');
 const mysql = require('mysql2/promise');
 const nodemailer = require('nodemailer');
-const {
-    PDFDocument,
-    PDFTextField,
-    PDFCheckBox
-} = require('pdf-lib');
 const crypto = require('crypto');
 const dbConfig = {
     host: process.env.DB_HOST,
@@ -751,110 +746,28 @@ function checkAdmin(req, res, next) {
     next();
 }
 
-async function generatePDF(formDataObj, templatePath, outputPath) {
+function getSignatureDataUrl(formData) {
+    for (const step of formData) {
+        const signatureElement = step.elements.find(element => element.name === 'Signature');
 
-    let signatureBase64;
-    const formData = formDataObj;
-    const templateBytes = fs.readFileSync(templatePath);
-    const pdfDoc = await PDFDocument.load(templateBytes);
-    const form = pdfDoc.getForm();
-
-    // Suche nach der Signatur im formDataObj
-    formDataObj
-        .form
-        .forEach(step => {
-            if (true) {
-                const signatureElement = step
-                    .elements
-                    .find(element => element.name === "Signature");
-                if (signatureElement) {
-                    signatureBase64 = signatureElement
-                        .value
-                        .split(';base64,')
-                        .pop();
-                }
-            }
-        });
-
-    formData
-        .form
-        .forEach(step => {
-            step
-                .elements
-                .forEach(element => {
-                    // Ignoriere einige Felder sodass keine Fehler auftreten
-                    if (element.name === "total_work" || element.name === "total_material" || element.name === "Signature" || ((element.name.startsWith("work_") || element.name.startsWith("material_")) && !element.name.includes("_combined_")) || element.name === "email") {
-                        return;
-                    }
-
-                    // Behandlung des OrderType
-                    if (element.name === "OrderType" && element.value !== "Auftragsart auswählen...") {
-                        // Setze das entsprechende Checkfeld basierend auf dem Wert von OrderType
-                        const orderTypeToCheckboxName = {
-                            "Materiallieferung": "MaterialDelivery",
-                            "Inbetriebnahme": "Commissioning",
-                            "Gewährleistung": "Warranty",
-                            "Wartung ohne Vertrag": "MaintenanceNoContract",
-                            "Wartung mit Vertrag": "MaintenanceContract",
-                            "Arbeits- und Materialnachweis": "WorkAndMaterialProof"
-                        };
-                        const checkboxName = orderTypeToCheckboxName[element.value];
-                        if (checkboxName) {
-                            try {
-                                const checkBox = form.getCheckBox(checkboxName);
-                                checkBox.check();
-                            } catch (error) {
-                                console.error(
-                                    `${new Date().toISOString()} - Fehler beim Setzen des Checkfelds "${checkboxName}": ${error}`
-                                );
-                            }
-                        }
-                    } else {
-                        try {
-                            // Behandlung anderer Felder (Textfelder und Checkfelder)
-                            const field = form.getField(element.name);
-                            if (field instanceof PDFTextField) {
-                                field.setText(element.value);
-                            } else if (field instanceof PDFCheckBox && element.value === "on") {
-                                field.check();
-                            }
-                        } catch (error) {
-                            console.error(
-                                `${new Date().toISOString()} - Fehler beim Verarbeiten des Feldes "${element.name}": ${error}`
-                            );
-                        }
-                    }
-                });
-        });
-
-    if (signatureBase64) {
-        const signatureImage = await pdfDoc.embedPng(
-            Buffer.from(signatureBase64, 'base64')
-        );
-        // Annahme: Die Signatur soll auf der ersten Seite erscheinen.
-        const page = pdfDoc.getPages()[0];
-
-        // Feste Position und Größe für die Signatur. Diese Werte solltest du anpassen,
-        // basierend auf der Position, wo die Signatur erscheinen soll.
-        const x = 298.38; // Horizontale Position
-        const y = 762.24; // Vertikale Position
-        const width = 142.02; // Breite der Signatur
-        const height = 37.54; // Höhe der Signatur
-
-        page.drawImage(signatureImage, {
-            x: x,
-            y: page.getHeight() - y - height, // Anpassung, um y von unten zu positionieren
-            width: width,
-            height: height
-        });
+        if (signatureElement && signatureElement.value) {
+            return signatureElement.value;
+        }
     }
 
-    // Optional: Formularfelder flatten, wenn nötig form.flatten();
-    const pdfBytes = await pdfDoc.save();
-    fs.writeFileSync(outputPath, pdfBytes);
+    return null;
 }
 
-async function sendEmailWithPDF(recipients, pdfFilePath, pdfFilename) {
+function escapeHtml(value) {
+    return String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
+async function sendOrderEmail(recipients, orderSummary, customer, signatureDataUrl) {
     if (!recipients || recipients.length === 0) {
         return false;
     }
@@ -869,17 +782,68 @@ async function sendEmailWithPDF(recipients, pdfFilePath, pdfFilename) {
         }
     });
 
+    const itemsHtml = orderSummary.items.map(item => `
+        <tr>
+            <td>${escapeHtml(item.title)}</td>
+            <td>${escapeHtml(item.rentalStart)} bis ${escapeHtml(item.rentalEnd)}</td>
+            <td>${escapeHtml(item.quantity)}</td>
+            <td>${Number(item.rentalTotal || 0).toFixed(2)} €</td>
+            <td>${Number(item.depositTotal || 0).toFixed(2)} €</td>
+        </tr>
+    `).join('');
+
+    const signatureHtml = signatureDataUrl
+        ? `<img src="${signatureDataUrl}" alt="Unterschrift" style="max-width:320px; border:1px solid #ddd; padding:8px;">`
+        : `<em>Keine Unterschrift vorhanden</em>`;
+
+    const html = `
+        <h2>Mietauftrag ${escapeHtml(orderSummary.orderNo)}</h2>
+
+        <h3>Kundendaten</h3>
+        <p>
+            ${escapeHtml(customer.firstName)} ${escapeHtml(customer.lastName)}<br>
+            ${escapeHtml(customer.email)}<br>
+            ${escapeHtml(customer.phone)}<br>
+            ${escapeHtml(customer.address)}<br>
+            ${escapeHtml(customer.zip)} ${escapeHtml(customer.city)}
+        </p>
+
+        <h3>Mietprodukte</h3>
+        <table border="1" cellpadding="6" cellspacing="0">
+            <thead>
+                <tr>
+                    <th>Produkt</th>
+                    <th>Zeitraum</th>
+                    <th>Menge</th>
+                    <th>Miete</th>
+                    <th>Kaution</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${itemsHtml}
+            </tbody>
+        </table>
+
+        <h3>Summen</h3>
+        <p>
+            Miete: ${Number(orderSummary.totals.rentalTotal || 0).toFixed(2)} €<br>
+            Kaution: ${Number(orderSummary.totals.depositTotal || 0).toFixed(2)} €<br>
+            Gesamt vor Kautionsrückgabe: ${Number(orderSummary.totals.grandTotalBeforeDepositReturn || 0).toFixed(2)} €
+        </p>
+
+        <h3>Unterschrift</h3>
+        ${signatureHtml}
+
+        <p style="margin-top:24px;">
+            Hinweis: Die Rechnungsstellung erfolgt später über Stripe.
+        </p>
+    `;
+
     await transporter.sendMail({
         from: `"Segnitz Rental" <${process.env.SMTP_USER}>`,
         to: recipients.join(', '),
-        subject: 'Ihr Mietauftrag',
-        text: 'Im Anhang finden Sie Ihren Mietauftrag als PDF.',
-        attachments: [
-            {
-                filename: pdfFilename,
-                path: pdfFilePath
-            }
-        ]
+        subject: `Mietauftrag ${orderSummary.orderNo}`,
+        html
     });
 
     return true;
@@ -1018,34 +982,20 @@ app.post('/data', async (req, res) => {
             [email]
         );
 
-        const enrichedPayload = {
-            ...req.body,
-            order: {
-                id: orderId,
-                reservedUntil,
-                ...orderSummary
-            }
-        };
-
         await connection.commit();
 
-        const timestamp = new Date().getTime();
-        const pdfFilename = `Mietauftrag_${orderNo}_${timestamp}.pdf`;
-        const pdfFilepath = path.join(__dirname, 'public', 'pdf', pdfFilename);
-        const templatePdfPath = path.join(__dirname, 'public', 'pdf', 'Mietauftrag_Template.pdf');
+        const signatureDataUrl = getSignatureDataUrl(formData);
 
-        fs.mkdirSync(path.dirname(pdfFilepath), { recursive: true });
-
-        await generatePDF(enrichedPayload, templatePdfPath, pdfFilepath);
-
-        const customerPdfEmail =
+        const customerOrderEmail =
             getFormValue(formData, 'email') ||
             email;
 
-        const internalOrderEmail = 'orders@segnitzbau.de';
+        const internalOrderEmail =
+            process.env.MAIN_EMAIL ||
+            'orders@segnitzbau.de';
 
         const recipients = [
-            customerPdfEmail,
+            customerOrderEmail,
             internalOrderEmail
         ]
             .filter(Boolean)
@@ -1056,21 +1006,33 @@ app.post('/data', async (req, res) => {
         let emailSent = false;
 
         try {
-            emailSent = await sendEmailWithPDF(
+            emailSent = await sendOrderEmail(
                 uniqueRecipients,
-                pdfFilepath,
-                pdfFilename
+                {
+                    ...orderSummary,
+                    id: orderId,
+                    reservedUntil
+                },
+                {
+                    firstName,
+                    lastName,
+                    email,
+                    phone,
+                    address,
+                    zip,
+                    city
+                },
+                signatureDataUrl
             );
         } catch (emailError) {
             console.error('Fehler beim E-Mail-Versand:', emailError);
         }
 
-        res.status(200).json({
+        return res.status(200).json({
             message: 'Bestellung erfolgreich reserviert.',
             orderId,
             orderNo,
             reservedUntil,
-            pdfUrl: `/pdf/${pdfFilename}`,
             emailSent
         });
 
@@ -1085,7 +1047,7 @@ app.post('/data', async (req, res) => {
             }
         }
 
-        res.status(500).json({
+        return res.status(500).json({
             error: 'Bestellung konnte nicht reserviert werden.'
         });
 

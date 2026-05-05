@@ -55,24 +55,26 @@ document
             body: jsonStr
         })
             .then(response => response.json())
-            .then(async data => {
-                if (!data.pdfUrl) {
-                    throw new Error('Keine PDF URL vom Server erhalten');
+            .then(data => {
+                const final = document.getElementById('final');
+
+                if (final) {
+                    final.innerHTML = `
+            <div class="alert alert-success">
+                Mietauftrag erfolgreich per E-Mail versendet.
+            </div>
+        `;
                 }
-
-                const response = await fetch(data.pdfUrl);
-                const blob = await response.blob();
-
-                const downloadUrl = URL.createObjectURL(blob);
-                const link = document.createElement('a');
-
-                link.href = downloadUrl;
-                link.download = data.pdfUrl.split('/').pop();
-
-                document.body.appendChild(link);
-                link.click();
-
-                document.body.removeChild(link);
-                URL.revokeObjectURL(downloadUrl);
             })
+            .catch(error => {
+                const final = document.getElementById('final');
+
+                if (final) {
+                    final.innerHTML = `
+            <div class="alert alert-danger">
+                ${error.message || 'Der Mietauftrag konnte nicht versendet werden.'}
+            </div>
+        `;
+                }
+            });
     });
