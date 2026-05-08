@@ -2692,6 +2692,7 @@ app.put('/admin/order-items/:itemId/return', checkAdmin, async (req, res) => {
             depositDecision,
             depositRefundAmount,
             depositDeductionAmount,
+            depositDeductionPercent,
             depositDeductionReason,
             returnNotes
         } = req.body;
@@ -2720,6 +2721,10 @@ app.put('/admin/order-items/:itemId/return', checkAdmin, async (req, res) => {
 
         const days = calculateRentalDays(finalStart, finalEnd);
         const adjustedRentalTotal = days * finalPricePerDay;
+        const deposit = Number(existingItem.deposit || 0);
+        const deductionPercent = Number(req.body.depositDeductionPercent || 0);
+        const depositDeductionAmount = deposit * deductionPercent / 100;
+        const depositRefundAmount = Math.max(deposit - depositDeductionAmount, 0);
 
         await connection.execute(
             `UPDATE rental_order_items
@@ -2736,6 +2741,9 @@ app.put('/admin/order-items/:itemId/return', checkAdmin, async (req, res) => {
                  deposit_decision = ?,
                  deposit_refund_amount = ?,
                  deposit_deduction_amount = ?,
+                 deposit_deduction_percent = ?,
+                 deposit_deduction_amount = ?,
+                 deposit_refund_amount = ?,
                  deposit_deduction_reason = ?,
                  return_notes = ?,
                  returned_at = NOW(),
@@ -2756,6 +2764,9 @@ app.put('/admin/order-items/:itemId/return', checkAdmin, async (req, res) => {
                 depositDecision || 'pending',
                 depositRefundAmount || null,
                 depositDeductionAmount || null,
+                depositDeductionPercent,
+                depositDeductionAmount,
+                depositRefundAmount,
                 depositDeductionReason || null,
                 returnNotes || null,
                 processedByUserId,
