@@ -1402,9 +1402,6 @@ async function saveOrderItemReturn(itemId, orderId) {
         depositRefundAmount: normalizeDecimalInput(
             document.getElementById(`depositRefundAmount-${itemId}`).value
         ),
-        depositDeductionAmount: normalizeDecimalInput(
-            document.getElementById(`depositDeductionAmount-${itemId}`).value
-        ),
         depositDeductionReason: document.getElementById(`depositDeductionReason-${itemId}`).value.trim(),
         returnNotes: document.getElementById(`returnNotes-${itemId}`).value.trim()
     };

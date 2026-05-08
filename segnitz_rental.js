@@ -2690,8 +2690,6 @@ app.put('/admin/order-items/:itemId/return', checkAdmin, async (req, res) => {
             isLate,
             lateDescription,
             depositDecision,
-            depositRefundAmount,
-            depositDeductionAmount,
             depositDeductionPercent,
             depositDeductionReason,
             returnNotes
@@ -2721,7 +2719,7 @@ app.put('/admin/order-items/:itemId/return', checkAdmin, async (req, res) => {
 
         const days = calculateRentalDays(finalStart, finalEnd);
         const adjustedRentalTotal = days * finalPricePerDay;
-        const deposit = Number(existingItem.deposit || 0);
+        const deposit = Number(item.deposit || 0);
         const deductionPercent = Number(req.body.depositDeductionPercent || 0);
         const depositDeductionAmount = deposit * deductionPercent / 100;
         const depositRefundAmount = Math.max(deposit - depositDeductionAmount, 0);
@@ -2739,12 +2737,9 @@ app.put('/admin/order-items/:itemId/return', checkAdmin, async (req, res) => {
                  is_late = ?,
                  late_description = ?,
                  deposit_decision = ?,
-                 deposit_refund_amount = ?,
-                 deposit_deduction_amount = ?,
                  deposit_deduction_percent = ?,
                  deposit_deduction_amount = ?,
                  deposit_refund_amount = ?,
-                 deposit_deduction_reason = ?,
                  return_notes = ?,
                  returned_at = NOW(),
                  return_processed_by_user_id = ?,
@@ -2762,9 +2757,7 @@ app.put('/admin/order-items/:itemId/return', checkAdmin, async (req, res) => {
                 isLate ? 1 : 0,
                 lateDescription || null,
                 depositDecision || 'pending',
-                depositRefundAmount || null,
-                depositDeductionAmount || null,
-                depositDeductionPercent,
+                deductionPercent,
                 depositDeductionAmount,
                 depositRefundAmount,
                 depositDeductionReason || null,
