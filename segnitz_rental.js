@@ -2675,6 +2675,84 @@ app.post('/admin/orders/:id/return-images', checkAdmin, uploadReturnImages.array
     }
 });
 
+app.put('/admin/order-items/:itemId/rental-adjustment', checkAdmin, async (req, res) => {
+    let connection;
+
+    try {
+        const {
+            adjustedRentalStart,
+            adjustedRentalEnd,
+            adjustedPricePerDay
+        } = req.body;
+
+        connection = await mysql.createConnection(dbConfig);
+
+        const [items] = await connection.execute(
+            `SELECT id, order_id, price_per_day, rental_start, rental_end
+             FROM rental_order_items
+             WHERE id = ?
+             LIMIT 1`,
+            [req.params.itemId]
+        );
+
+        if (items.length === 0) {
+            return res.status(404).json({ error: 'Bestellposition nicht gefunden.' });
+        }
+
+        const item = items[0];
+
+        const finalStart = adjustedRentalStart || item.rental_start;
+        const finalEnd = adjustedRentalEnd || item.rental_end;
+        const finalPricePerDay = Number(adjustedPricePerDay || item.price_per_day || 0);
+
+        if (new Date(finalEnd) < new Date(finalStart)) {
+            return res.status(400).json({
+                error: 'Das angepasste Mietende darf nicht vor dem angepassten Mietbeginn liegen.'
+            });
+        }
+
+        const days = calculateRentalDays(finalStart, finalEnd);
+        const adjustedRentalTotal = days * finalPricePerDay;
+
+        await connection.execute(
+            `UPDATE rental_order_items
+             SET adjusted_rental_start = ?,
+                 adjusted_rental_end = ?,
+                 adjusted_price_per_day = ?,
+                 adjusted_rental_total = ?
+             WHERE id = ?`,
+            [
+                adjustedRentalStart || null,
+                adjustedRentalEnd || null,
+                finalPricePerDay,
+                adjustedRentalTotal,
+                req.params.itemId
+            ]
+        );
+
+        await connection.execute(
+            `UPDATE rental_orders
+             SET return_case_status = COALESCE(return_case_status, 'open')
+             WHERE id = ?
+             AND status != 'returned'`,
+            [item.order_id]
+        );
+
+        res.json({
+            message: 'Mietzeitraum wurde gespeichert.',
+            adjustedRentalTotal
+        });
+
+    } catch (error) {
+        console.error('Fehler beim Speichern des angepassten Mietzeitraums:', error);
+        res.status(500).json({
+            error: 'Mietzeitraum konnte nicht gespeichert werden.'
+        });
+    } finally {
+        if (connection) await connection.end();
+    }
+});
+
 app.put('/admin/order-items/:itemId/return', checkAdmin, async (req, res) => {
     let connection;
 
