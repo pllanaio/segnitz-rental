@@ -505,7 +505,7 @@ const returnImageStorage = multer.diskStorage({
     },
     filename: (req, file, cb) => {
         const ext = path.extname(file.originalname).toLowerCase();
-        cb(null, `return_order_${req.params.id}_${Date.now()}_${Math.round(Math.random() * 1E9)}${ext}`);
+        cb(null, `return_item_${req.params.itemId}_${Date.now()}_${Math.round(Math.random() * 1E9)}${ext}`);
     }
 });
 
