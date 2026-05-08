@@ -2740,6 +2740,7 @@ app.put('/admin/order-items/:itemId/return', checkAdmin, async (req, res) => {
                  deposit_deduction_percent = ?,
                  deposit_deduction_amount = ?,
                  deposit_refund_amount = ?,
+                 deposit_deduction_reason = ?,
                  return_notes = ?,
                  returned_at = NOW(),
                  return_processed_by_user_id = ?,
