@@ -862,29 +862,25 @@ async function loadProductCurrentAvailability(productId, card) {
             throw new Error(result.error || 'Verfügbarkeit konnte nicht geladen werden.');
         }
 
-        card.dataset.available = result.available ? 'true' : 'false';
-
         if (badge) {
             badge.classList.remove('bg-secondary', 'bg-success', 'bg-danger');
 
             if (result.available) {
                 badge.classList.add('bg-success');
-                badge.textContent = 'Verfügbar';
+                badge.textContent = 'Aktuell verfügbar';
             } else {
-                badge.classList.add('bg-danger');
-                badge.textContent = 'Nicht verfügbar';
+                badge.classList.add('bg-warning');
+                badge.textContent = 'Aktuell vermietet';
             }
         }
 
     } catch (error) {
         console.error('Fehler beim Laden der Verfügbarkeit:', error);
 
-        card.dataset.available = 'false';
-
         if (badge) {
-            badge.classList.remove('bg-secondary', 'bg-success');
-            badge.classList.add('bg-danger');
-            badge.textContent = 'Nicht verfügbar';
+            badge.classList.remove('bg-secondary', 'bg-success', 'bg-danger');
+            badge.classList.add('bg-secondary');
+            badge.textContent = 'Verfügbarkeit unbekannt';
         }
     }
 }
@@ -1014,12 +1010,6 @@ async function loadCart() {
 }
 
 async function addProductToCart(productId, rentalStart, rentalEnd) {
-
-    if (selectedProductCard && selectedProductCard.dataset.available === 'false') {
-        showAlert('Dieses Produkt ist aktuell nicht verfügbar.', 'warning');
-        return;
-    }
-
     if (selectedRangeConflicts(rentalStart, rentalEnd)) {
         showAlert('Dieses Produkt ist im ausgewählten Zeitraum bereits reserviert.', 'danger');
         return;
@@ -1118,13 +1108,23 @@ async function executeClearCart() {
     }
 }
 
+function getItemPricePerDay(item) {
+    return Number(item.pricePerDay ?? item.price_per_day ?? item.price_per_day_gross ?? 0);
+}
+
+function getItemDeposit(item) {
+    return Number(item.deposit ?? 0);
+}
+
 function calculateCartTotals(items) {
     return items.reduce((totals, item) => {
         const days = calculateRentalDays(item.rentalStart, item.rentalEnd);
-        const pricePerDay = Number(item.pricePerDay || 0);
-        const deposit = Number(item.deposit || 0);
+        const pricePerDay = getItemPricePerDay(item);
+        const deposit = getItemDeposit(item);
 
-        totals.rentalTotal += days * pricePerDay;
+        const rentalTotal = days * pricePerDay;
+
+        totals.rentalTotal += rentalTotal;
         totals.depositTotal += deposit;
 
         return totals;
@@ -1140,6 +1140,8 @@ function renderCart() {
     const cartSummary = document.getElementById('cartSummary');
     const cartRentalTotal = document.getElementById('cartRentalTotal');
     const cartDepositTotal = document.getElementById('cartDepositTotal');
+    const cartRentalNetTotal = document.getElementById('cartRentalNetTotal');
+    const cartRentalVatTotal = document.getElementById('cartRentalVatTotal');
     const cartModalNextBtn = document.getElementById('cartModalNextBtn');
 
     if (!cartItems) return;
@@ -1169,7 +1171,9 @@ function renderCart() {
 
     cartItems.innerHTML = items.map(item => {
         const days = calculateRentalDays(item.rentalStart, item.rentalEnd);
-        const lineTotal = days * Number(item.pricePerDay || 0);
+        const pricePerDay = getItemPricePerDay(item);
+        const deposit = getItemDeposit(item);
+        const lineTotal = days * pricePerDay;
 
         return `
             <div class="border rounded p-3 mb-2">
@@ -1179,8 +1183,8 @@ function renderCart() {
                         <span class="small text-muted">
                             ${item.rentalStart} bis ${item.rentalEnd} · ${days} Tag${days === 1 ? '' : 'e'}
                         </span><br>
-                        <span>${formatCurrency(item.pricePerDay)} / Tag</span><br>
-                        <span>Kaution: ${formatCurrency(item.deposit)}</span>
+                        <span>${formatCurrency(pricePerDay)} / Tag</span><br>
+                        <span>Kaution: ${formatCurrency(deposit)}</span>
                     </div>
 
 <div class="text-end">
@@ -1212,12 +1216,24 @@ function renderCart() {
 
     const totals = calculateCartTotals(items);
 
+    const rentalGross = totals.rentalTotal;
+    const rentalNet = rentalGross / (1 + VAT_RATE);
+    const rentalVat = rentalGross - rentalNet;
+
     if (cartSummary) {
         cartSummary.classList.remove('d-none');
     }
 
+    if (cartRentalNetTotal) {
+        cartRentalNetTotal.textContent = formatCurrency(rentalNet);
+    }
+
+    if (cartRentalVatTotal) {
+        cartRentalVatTotal.textContent = formatCurrency(rentalVat);
+    }
+
     if (cartRentalTotal) {
-        cartRentalTotal.textContent = formatCurrency(totals.rentalTotal);
+        cartRentalTotal.textContent = formatCurrency(rentalGross);
     }
 
     if (cartDepositTotal) {
@@ -1229,6 +1245,8 @@ function renderCartReview() {
     const cartReviewItems = document.getElementById('cartReviewItems');
     const cartReviewRentalTotal = document.getElementById('cartReviewRentalTotal');
     const cartReviewDepositTotal = document.getElementById('cartReviewDepositTotal');
+    const cartReviewRentalNetTotal = document.getElementById('cartReviewRentalNetTotal');
+    const cartReviewRentalVatTotal = document.getElementById('cartReviewRentalVatTotal');
 
     if (!cartReviewItems) return;
 
@@ -1245,7 +1263,9 @@ function renderCartReview() {
 
     cartReviewItems.innerHTML = items.map(item => {
         const days = calculateRentalDays(item.rentalStart, item.rentalEnd);
-        const lineTotal = days * Number(item.pricePerDay || 0);
+        const pricePerDay = getItemPricePerDay(item);
+        const deposit = getItemDeposit(item);
+        const lineTotal = days * pricePerDay;
 
         return `
             <div class="border rounded p-3 mb-2">
@@ -1253,15 +1273,27 @@ function renderCartReview() {
                 Mietzeitraum: ${item.rentalStart} bis ${item.rentalEnd}<br>
                 Dauer: ${days} Tag${days === 1 ? '' : 'e'}<br>
                 Miete: ${formatCurrency(lineTotal)}<br>
-                Kaution: ${formatCurrency(item.deposit)}
+                Kaution: ${formatCurrency(deposit)}
             </div>
         `;
     }).join('');
 
     const totals = calculateCartTotals(items);
 
+    const rentalGross = totals.rentalTotal;
+    const rentalNet = rentalGross / (1 + VAT_RATE);
+    const rentalVat = rentalGross - rentalNet;
+
+    if (cartReviewRentalNetTotal) {
+        cartReviewRentalNetTotal.textContent = formatCurrency(rentalNet);
+    }
+
+    if (cartReviewRentalVatTotal) {
+        cartReviewRentalVatTotal.textContent = formatCurrency(rentalVat);
+    }
+
     if (cartReviewRentalTotal) {
-        cartReviewRentalTotal.textContent = formatCurrency(totals.rentalTotal);
+        cartReviewRentalTotal.textContent = formatCurrency(rentalGross);
     }
 
     if (cartReviewDepositTotal) {
@@ -1763,21 +1795,3 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 });
-
-function calculateCartTotals(items) {
-    return items.reduce((totals, item) => {
-        const days = calculateRentalDays(item.rentalStart, item.rentalEnd);
-        const pricePerDay = Number(item.pricePerDay || 0);
-        const deposit = Number(item.deposit || 0);
-
-        const lineGross = days * pricePerDay;
-
-        totals.rentalTotalGross += lineGross;
-        totals.depositTotal += deposit;
-
-        return totals;
-    }, {
-        rentalTotalGross: 0,
-        depositTotal: 0
-    });
-}

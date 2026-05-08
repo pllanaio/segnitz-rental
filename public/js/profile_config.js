@@ -16,6 +16,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         document.getElementById('email').value = user.email || '-';
         document.getElementById('profileFirstName').value = user.firstName || '';
         document.getElementById('profileLastName').value = user.lastName || '';
+        document.getElementById('profileCompany').value = user.company || '';
         document.getElementById('profilePhone').value = user.phone || '';
         document.getElementById('profileAddress').value = user.address || '';
         document.getElementById('profileZip').value = user.zip || '';
@@ -444,6 +445,7 @@ document.getElementById('profileForm')?.addEventListener('submit', async (event)
     const payload = {
         firstName: document.getElementById('profileFirstName').value.trim(),
         lastName: document.getElementById('profileLastName').value.trim(),
+        company: document.getElementById('profileCompany').value.trim(),
         phone: document.getElementById('profilePhone').value.trim(),
         address: document.getElementById('profileAddress').value.trim(),
         zip: document.getElementById('profileZip').value.trim(),
