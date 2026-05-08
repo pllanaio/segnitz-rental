@@ -481,7 +481,7 @@ const productImageStorage = multer.diskStorage({
     },
     filename: (req, file, cb) => {
         const ext = path.extname(file.originalname).toLowerCase();
-        cb(null, `return_item_${req.params.itemId}_${Date.now()}_${Math.round(Math.random() * 1E9)}${ext}`);
+        cb(null, `product_${Date.now()}_${Math.round(Math.random() * 1E9)}${ext}`);
     }
 });
 
@@ -2502,12 +2502,34 @@ app.get('/admin/orders/:id', checkAdmin, async (req, res) => {
         }
 
         const [images] = await connection.execute(
-            `SELECT id, image_path AS imagePath, created_at
-             FROM rental_order_return_images
-             WHERE order_id = ?
-             ORDER BY id DESC`,
+            `SELECT
+    id,
+    order_item_id AS orderItemId,
+    image_path AS imagePath,
+    created_at
+FROM rental_order_return_images
+WHERE order_id = ?
+ORDER BY id DESC`,
             [req.params.id]
         );
+
+        const imagesByItemId = images.reduce((map, image) => {
+            const itemId = Number(image.orderItemId);
+
+            if (!itemId) return map;
+
+            if (!map[itemId]) {
+                map[itemId] = [];
+            }
+
+            map[itemId].push(image);
+            return map;
+        }, {});
+
+        finalItems = finalItems.map(item => ({
+            ...item,
+            returnImages: imagesByItemId[Number(item.id)] || []
+        }));
 
         res.json({
             ...orders[0],

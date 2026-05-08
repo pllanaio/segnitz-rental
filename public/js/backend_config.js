@@ -510,6 +510,16 @@ function renderOrderDetails(order) {
         const adjustedEnd = item.adjustedRentalEnd || item.actualReturnDate || item.rentalEnd;
         const adjustedPrice = item.adjustedPricePerDay || item.pricePerDay;
         const adjustedTotal = item.adjustedRentalTotal;
+        const originalDays = calculateRentalDays(item.rentalStart, item.rentalEnd);
+        const currentDays = calculateRentalDays(adjustedStart, adjustedEnd);
+        const originalNetTotal = originalDays * Number(item.pricePerDay || 0);
+        const adjustedNetTotal = currentDays * Number(adjustedPrice || 0);
+        const taxRate = 0.19;
+        const originalGrossTotal = originalNetTotal * (1 + taxRate);
+        const adjustedGrossTotal = adjustedNetTotal * (1 + taxRate);
+        const priceDifference = adjustedGrossTotal - originalGrossTotal;
+        const depositRefund = Number(item.depositRefundAmount || 0);
+        const customerBalance = adjustedGrossTotal - originalGrossTotal - depositRefund;
 
         return `
         <tr>
@@ -668,6 +678,24 @@ function renderOrderDetails(order) {
                 <img src="${image.imagePath}" class="img-fluid rounded border">
             </div>
         `).join('')}
+    </div>
+</div>
+<div class="col-12">
+    <div class="alert alert-secondary">
+        <strong>Preisübersicht</strong><br>
+        Ursprünglich netto: ${originalNetTotal.toFixed(2)} €<br>
+        Ursprünglich brutto: ${originalGrossTotal.toFixed(2)} €<br>
+        Aktuell netto: ${adjustedNetTotal.toFixed(2)} €<br>
+        Aktuell brutto: ${adjustedGrossTotal.toFixed(2)} €<br>
+        Differenz brutto: ${priceDifference.toFixed(2)} €<br>
+        Kautionsrückzahlung: ${depositRefund.toFixed(2)} €<br>
+        <strong>
+            ${customerBalance > 0
+                ? `Kunde muss nachzahlen: ${customerBalance.toFixed(2)} €`
+                : customerBalance < 0
+                    ? `Wir zahlen zurück: ${Math.abs(customerBalance).toFixed(2)} €`
+                    : 'Ausgeglichen: 0,00 €'}
+        </strong>
     </div>
 </div>
 
@@ -1363,18 +1391,14 @@ function applyOrderItemReturnRules(itemId) {
     const isLate = lateDays > 0;
     const isDamaged = isDamagedInput.checked;
 
-    if (isLate) {
-        isLateInput.checked = true;
-    }
-
     if (isDamaged && isLate) {
         returnStatusInput.value = 'returned_late_damaged';
+        depositDecisionInput.value = 'no_refund';
+        depositDeductionPercentInput.value = 100;
     } else if (isDamaged) {
         returnStatusInput.value = 'returned_damaged';
     } else if (isLate) {
         returnStatusInput.value = 'returned_late';
-    } else if (actualReturnDate) {
-        returnStatusInput.value = 'returned_ok';
     }
 
     [...depositDecisionInput.options].forEach(option => {
