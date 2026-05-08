@@ -649,6 +649,13 @@ function renderOrderDetails(order) {
                         </div>
 
                         <div class="col-12 text-end">
+
+                            <button type="button"
+                                class="btn btn-outline-primary"
+                                onclick="saveOrderItemRentalAdjustment(${item.id}, ${order.id})">
+                                Mietzeitraum speichern
+                            </button>
+
                             <button type="button"
                                 class="btn btn-success"
                                 onclick="saveOrderItemReturn(${item.id}, ${order.id})">
@@ -1381,6 +1388,50 @@ function applyOrderItemReturnRules(itemId) {
     if (isLate) reasons.push('Verspätet');
 
     depositDeductionReasonInput.value = reasons.join(', ');
+}
+
+async function saveOrderItemRentalAdjustment(itemId, orderId) {
+    const payload = {
+        adjustedRentalStart: document.getElementById(`adjustedRentalStart-${itemId}`).value || null,
+        adjustedRentalEnd: document.getElementById(`adjustedRentalEnd-${itemId}`).value || null,
+        adjustedPricePerDay: normalizeDecimalInput(
+            document.getElementById(`adjustedPricePerDay-${itemId}`).value
+        )
+    };
+
+    try {
+        const response = await fetch(`/admin/order-items/${itemId}/rental-adjustment`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+            showAlert(result.error || 'Mietzeitraum konnte nicht gespeichert werden.', 'danger');
+            return;
+        }
+
+        showAlert(result.message || 'Mietzeitraum gespeichert.', 'success');
+
+        await loadOrders();
+
+        if (orderId) {
+            const detailsResponse = await fetch(`/admin/orders/${orderId}`);
+            const updatedOrder = await detailsResponse.json();
+
+            if (detailsResponse.ok) {
+                renderOrderDetails(updatedOrder);
+            }
+        }
+
+    } catch (error) {
+        console.error('Fehler beim Speichern des Mietzeitraums:', error);
+        showAlert('Mietzeitraum konnte nicht gespeichert werden.', 'danger');
+    }
 }
 
 async function saveOrderItemReturn(itemId, orderId) {
