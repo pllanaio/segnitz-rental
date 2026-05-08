@@ -141,8 +141,34 @@ function renderMyOrderDetails(order) {
 
     const canReview = status === 'returned';
 
+    const uniqueReviewItems = [];
+
+    if (canReview) {
+        const reviewItemsByProductId = new Map();
+
+        (order.items || []).forEach(item => {
+            const productId = String(item.productId);
+
+            if (!reviewItemsByProductId.has(productId)) {
+                reviewItemsByProductId.set(productId, item);
+                return;
+            }
+
+            const existingItem = reviewItemsByProductId.get(productId);
+
+            if (!existingItem.review && item.review) {
+                reviewItemsByProductId.set(productId, {
+                    ...existingItem,
+                    review: item.review
+                });
+            }
+        });
+
+        uniqueReviewItems.push(...reviewItemsByProductId.values());
+    }
+
     const reviewButtonsHtml = canReview
-        ? (order.items || []).map(item => {
+        ? uniqueReviewItems.map(item => {
             if (item.review) {
                 return `
                 <div class="card mt-3">
@@ -150,7 +176,9 @@ function renderMyOrderDetails(order) {
                         <h6>Ihre Bewertung für ${item.title}</h6>
 
                         <div class="mb-2">
-                            <strong>Sterne:</strong> ${'★'.repeat(Number(item.review.rating))}${'☆'.repeat(5 - Number(item.review.rating))}
+                            <strong>Sterne:</strong>
+                            ${'★'.repeat(Number(item.review.rating))}
+                            ${'☆'.repeat(5 - Number(item.review.rating))}
                         </div>
 
                         <div class="mb-2">
@@ -173,8 +201,16 @@ function renderMyOrderDetails(order) {
                 <div class="card-body">
                     <h6>Bewertung für ${item.title}</h6>
 
+                    <div class="alert alert-light border small mb-3">
+                        Dieses Produkt kann pro Bestellung einmal bewertet werden,
+                        auch wenn es in mehreren Mietzeiträumen gebucht wurde.
+                    </div>
+
                     <div class="mb-2">
-                        <label class="form-label">Sterne</label>
+                        <label class="form-label" for="rating-${item.productId}">
+                            Sterne
+                        </label>
+
                         <select class="form-select form-select-sm" id="rating-${item.productId}">
                             <option value="">Bitte auswählen</option>
                             <option value="5">5 Sterne</option>
@@ -186,12 +222,21 @@ function renderMyOrderDetails(order) {
                     </div>
 
                     <div class="mb-2">
-                        <label class="form-label">Kommentar</label>
-                        <textarea class="form-control form-control-sm" id="reviewText-${item.productId}" rows="2"></textarea>
+                        <label class="form-label" for="reviewText-${item.productId}">
+                            Kommentar
+                        </label>
+
+                        <textarea
+                            class="form-control form-control-sm"
+                            id="reviewText-${item.productId}"
+                            rows="2"></textarea>
                     </div>
 
-                    <button type="button" class="btn btn-outline-success btn-sm"
+                    <button
+                        type="button"
+                        class="btn btn-outline-success btn-sm"
                         onclick="submitProductReview(${item.productId}, ${order.id})">
+
                         Bewertung speichern
                     </button>
                 </div>
@@ -566,12 +611,24 @@ document.getElementById('confirmCancelOrderBtn')?.addEventListener('click', asyn
 });
 
 async function submitProductReview(productId, orderId) {
-    const rating = document.getElementById(`rating-${productId}`).value;
-    const reviewText = document.getElementById(`reviewText-${productId}`).value.trim();
+    const ratingInput = document.getElementById(`rating-${productId}`);
+    const reviewTextInput = document.getElementById(`reviewText-${productId}`);
+
+    const rating = ratingInput ? ratingInput.value : '';
+    const reviewText = reviewTextInput ? reviewTextInput.value.trim() : '';
 
     if (!rating) {
         showAlert('Bitte wählen Sie eine Sternebewertung aus.', 'warning');
         return;
+    }
+
+    const submitButton = document.querySelector(
+        `button[onclick="submitProductReview(${productId}, ${orderId})"]`
+    );
+
+    if (submitButton) {
+        submitButton.disabled = true;
+        submitButton.textContent = 'Bewertung wird gespeichert...';
     }
 
     try {
@@ -590,18 +647,69 @@ async function submitProductReview(productId, orderId) {
         const result = await response.json();
 
         if (!response.ok) {
+            if (submitButton) {
+                submitButton.disabled = false;
+                submitButton.textContent = 'Bewertung speichern';
+            }
+
             showAlert(result.error || 'Bewertung konnte nicht gespeichert werden.', 'danger');
             return;
         }
 
         showAlert(result.message || 'Bewertung wurde gespeichert.', 'success');
-        await openMyOrderDetails(orderId);
+
+        await refreshMyOrderDetails(orderId);
+        await loadMyOrders();
 
     } catch (error) {
+        if (submitButton) {
+            submitButton.disabled = false;
+            submitButton.textContent = 'Bewertung speichern';
+        }
+
         console.error('Fehler beim Speichern der Bewertung:', error);
         showAlert('Bewertung konnte nicht gespeichert werden.', 'danger');
     }
 }
+
+async function refreshMyOrderDetails(orderId) {
+    try {
+        const response = await fetch(`/my-orders/${orderId}`);
+        const order = await response.json();
+
+        if (!response.ok) {
+            showAlert(order.error || 'Bestellung konnte nicht aktualisiert werden.', 'danger');
+            return;
+        }
+
+        renderMyOrderDetails(order);
+
+    } catch (error) {
+        console.error('Fehler beim Aktualisieren der Bestelldetails:', error);
+        showAlert('Bestellung konnte nicht aktualisiert werden.', 'danger');
+    }
+}
+
+function cleanupBootstrapModalState() {
+    document.querySelectorAll('.modal-backdrop').forEach(backdrop => {
+        backdrop.remove();
+    });
+
+    document.body.classList.remove('modal-open');
+    document.body.style.removeProperty('overflow');
+    document.body.style.removeProperty('padding-right');
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const orderDetailsModal = document.getElementById('myOrderDetailsModal');
+
+    if (!orderDetailsModal) return;
+
+    orderDetailsModal.addEventListener('hidden.bs.modal', () => {
+        cleanupBootstrapModalState();
+    });
+});
+
 
 function logout() {
     fetch('/logout', {

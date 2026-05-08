@@ -29,6 +29,9 @@ let selectedCategory = 'all';
 let current_step = 0;
 let stepCount = 3;
 let bestsellerProducts = [];
+let currentModalProductReviews = [];
+
+const VAT_RATE = 0.19;
 
 
 step[current_step]
@@ -644,6 +647,7 @@ function validateCustomerRequiredFields() {
         }
     }
 
+    document.getElementById('CustomerCompany').value = user.company || '';
     const phone = document.getElementById('CustomerPhone').value.trim();
     const zip = document.getElementById('CustomerZip').value.trim();
     const address = document.getElementById('CustomerAddress').value.trim();
@@ -1016,7 +1020,7 @@ async function addProductToCart(productId, rentalStart, rentalEnd) {
         showAlert('Dieses Produkt ist aktuell nicht verfügbar.', 'warning');
         return;
     }
-    
+
     if (selectedRangeConflicts(rentalStart, rentalEnd)) {
         showAlert('Dieses Produkt ist im ausgewählten Zeitraum bereits reserviert.', 'danger');
         return;
@@ -1180,18 +1184,28 @@ function renderCart() {
                         <span>Kaution: ${formatCurrency(item.deposit)}</span>
                     </div>
 
-                    <div class="text-end">
-                        <strong>${formatCurrency(lineTotal)}</strong><br>
-                        <button type="button" class="btn btn-sm btn-outline-primary mt-2 me-2"
-                            onclick="openCartItemEditModal(${item.id})">
-                            Zeitraum ändern
-                        </button>
-                        <button type="button" class="btn btn-sm btn-outline-danger mt-2"
-                            onclick="deleteCartItem(${item.id})">
-                            Entfernen
-                        </button>
+<div class="text-end">
+    <strong>${formatCurrency(lineTotal)}</strong>
 
-                    </div>
+    <div class="cart-item-actions mt-2">
+        <button
+            type="button"
+            class="btn btn-sm btn-outline-primary"
+            onclick="openCartItemEditModal(${item.id})">
+
+            <i class="bi bi-calendar-range"></i>
+            Zeitraum ändern
+        </button>
+        <button
+            type="button"
+            class="btn btn-sm btn-outline-danger"
+            onclick="deleteCartItem(${item.id})">
+
+            <i class="bi bi-trash"></i>
+            Entfernen
+        </button>
+    </div>
+</div>
                 </div>
             </div>
         `;
@@ -1636,9 +1650,15 @@ function renderRatingStars(rating, count = null) {
 
 async function loadProductReviews(productId) {
     const container = document.getElementById('modalProductReviews');
+    const reviewCount = document.getElementById('modalProductReviewCount');
+
     if (!container) return;
 
     container.innerHTML = '<div class="text-muted">Bewertungen werden geladen...</div>';
+
+    if (reviewCount) {
+        reviewCount.textContent = '';
+    }
 
     try {
         const response = await fetch(`/products/${productId}/reviews`);
@@ -1649,26 +1669,76 @@ async function loadProductReviews(productId) {
             return;
         }
 
-        if (!reviews || reviews.length === 0) {
-            container.innerHTML = '<div class="text-muted">Noch keine Bewertungen vorhanden.</div>';
-            return;
+        currentModalProductReviews = (reviews || []).sort((a, b) => {
+            const ratingA = Number(a.rating || 0);
+            const ratingB = Number(b.rating || 0);
+
+            if (ratingB !== ratingA) {
+                return ratingB - ratingA;
+            }
+
+            const dateA = new Date(a.createdAt || 0).getTime();
+            const dateB = new Date(b.createdAt || 0).getTime();
+
+            return dateB - dateA;
+        });
+
+        if (reviewCount) {
+            reviewCount.textContent = currentModalProductReviews.length === 1
+                ? '1 Bewertung'
+                : `${currentModalProductReviews.length} Bewertungen`;
         }
 
-        container.innerHTML = reviews.map(review => `
-            <div class="border-bottom pb-2 mb-2">
-                ${renderRatingStars(review.rating)}
-                <div class="small text-muted">
-                    ${review.firstName || ''} ${review.lastName || ''}
-                    · ${review.createdAt || ''}
-                </div>
-                <div>${review.reviewText || '<span class="text-muted">Keine Rezension geschrieben.</span>'}</div>
-            </div>
-        `).join('');
+        renderModalProductReviews(false);
 
     } catch (error) {
         console.error('Fehler beim Laden der Bewertungen:', error);
         container.innerHTML = '<div class="text-muted">Bewertungen konnten nicht geladen werden.</div>';
     }
+}
+
+function renderModalProductReviews(showAll = false) {
+    const container = document.getElementById('modalProductReviews');
+
+    if (!container) return;
+
+    const reviews = currentModalProductReviews || [];
+
+    if (reviews.length === 0) {
+        container.innerHTML = '<div class="text-muted">Noch keine Bewertungen vorhanden.</div>';
+        return;
+    }
+
+    const visibleReviews = showAll
+        ? reviews
+        : reviews.slice(0, 3);
+
+    const reviewsHtml = visibleReviews.map(review => `
+        <div class="border-bottom pb-2 mb-2">
+            ${renderRatingStars(review.rating)}
+
+            <div class="small text-muted">
+                ${review.firstName || ''} ${review.lastName || ''}
+                · ${review.createdAt || ''}
+            </div>
+
+            <div>
+                ${review.reviewText || '<span class="text-muted">Keine Rezension geschrieben.</span>'}
+            </div>
+        </div>
+    `).join('');
+
+    const showAllButtonHtml = !showAll && reviews.length > 3
+        ? `
+            <button type="button"
+                class="btn btn-outline-primary btn-sm mt-2"
+                onclick="renderModalProductReviews(true)">
+                Alle Bewertungen anzeigen
+            </button>
+        `
+        : '';
+
+    container.innerHTML = reviewsHtml + showAllButtonHtml;
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -1694,3 +1764,21 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 });
+
+function calculateCartTotals(items) {
+    return items.reduce((totals, item) => {
+        const days = calculateRentalDays(item.rentalStart, item.rentalEnd);
+        const pricePerDay = Number(item.pricePerDay || 0);
+        const deposit = Number(item.deposit || 0);
+
+        const lineGross = days * pricePerDay;
+
+        totals.rentalTotalGross += lineGross;
+        totals.depositTotal += deposit;
+
+        return totals;
+    }, {
+        rentalTotalGross: 0,
+        depositTotal: 0
+    });
+}

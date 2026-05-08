@@ -4,40 +4,225 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Registrierung</title>
+    <title>Segnitz Rental - Registrierung</title>
 
     <link rel="stylesheet" href="css/bootstrap.min.css">
     <link rel="stylesheet" href="css/style.css">
     <link rel="stylesheet" href="css/bootstrap-icons-1.11.3/font/bootstrap-icons.min.css">
+    <link rel="stylesheet" href="css/fonts.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
+        rel="stylesheet">
+
+    <link rel="apple-touch-icon" sizes="180x180" href="img/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="img/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="img/favicon-16x16.png">
 </head>
 
 <body>
 
-    <div class="container mt-5" style="max-width: 600px;">
-        <h3>Konto erstellen</h3>
-
-        <div id="msg" class="alert d-none"></div>
-
-        <form id="registerForm">
-            <input class="form-control mt-2" placeholder="Vorname" id="firstName">
-            <input class="form-control mt-2" placeholder="Nachname" id="lastName">
-            <input class="form-control mt-2" placeholder="E-Mail" id="email">
-            <input class="form-control mt-2" placeholder="Telefon" id="phone">
-            <input class="form-control mt-2" placeholder="Adresse" id="address">
-            <input class="form-control mt-2" placeholder="PLZ" id="zip">
-            <input class="form-control mt-2" placeholder="Ort" id="city">
-
-            <input type="password" class="form-control mt-2" placeholder="Passwort" id="password">
-            <input type="password" class="form-control mt-2" placeholder="Passwort wiederholen" id="passwordRepeat">
-
-            <button class="btn btn-success mt-3 w-100">Registrieren</button>
-        </form>
-
-        <a href="/login.html" class="btn btn-outline-primary mt-3 w-100">
-            Bereits registriert? Login
-        </a>
+    <div id="globalAlertContainer" class="position-fixed top-0 start-50 translate-middle-x mt-3"
+        style="z-index: 3000; width: 90%; max-width: 520px;">
     </div>
 
+    <div class="container-fluid min-vh-100 p-0">
+        <div class="row g-0 min-vh-100">
+
+            <!-- SIDEBAR -->
+            <aside class="col-12 col-md-3 col-xl-2 bg-primary text-white p-4">
+                <div class="sidebar-brand text-center mb-4">
+                    <img src="img/logo.png" alt="Segnitz Rental Logo" class="img-fluid sidebar-logo mb-3">
+
+                    <h2 class="sidebar-title">Vermietung</h2>
+                </div>
+                <h5 class="mt-3">Registrierung</h5>
+                <h6>Kundenkonto</h6>
+
+                <p class="mt-4 mb-1">Kontakt</p>
+
+                <a href="/index.html">
+                    <button type="button" class="btn btn-light w-100 mt-4">
+                        <i class="bi bi-arrow-left-circle"></i>
+                        Zurück zur Startseite
+                    </button>
+                </a>
+
+                <a href="/login.html">
+                    <button type="button" class="btn btn-outline-light w-100 mt-2">
+                        <i class="bi bi-person-lock"></i>
+                        Zum Login
+                    </button>
+                </a>
+            </aside>
+
+            <!-- CONTENT -->
+            <main class="col-12 col-md-9 col-xl-10 p-4 p-lg-5">
+
+                <div id="qbox-container_form" class="w-100">
+
+                    <div id="steps-container">
+
+                        <div class="step d-block">
+
+                            <div class="mx-auto" style="max-width: 760px;">
+
+                                <div class="d-flex justify-content-between align-items-start flex-wrap gap-3 mb-4">
+
+                                    <div>
+                                        <h4 class="mb-1">Konto erstellen</h4>
+
+                                        <p class="text-muted mb-0">
+                                            Erstellen Sie Ihr Kundenkonto für schnellere
+                                            Bestellungen und Zugriff auf Ihre Mietvorgänge.
+                                        </p>
+                                    </div>
+
+                                    <span class="badge bg-primary">
+                                        <i class="bi bi-envelope-check"></i>
+                                        E-Mail bestätigen
+                                    </span>
+
+                                </div>
+
+                                <div id="msg" class="alert d-none"></div>
+
+                                <div class="card">
+
+                                    <div class="card-body p-4">
+
+                                        <form id="registerForm">
+
+                                            <div class="row g-3">
+
+                                                <div class="col-12 col-lg-6">
+                                                    <label class="form-label" for="firstName">
+                                                        Vorname
+                                                    </label>
+
+                                                    <input class="form-control" placeholder="Vorname" id="firstName">
+                                                </div>
+
+                                                <div class="col-12 col-lg-6">
+                                                    <label class="form-label" for="lastName">
+                                                        Nachname
+                                                    </label>
+
+                                                    <input class="form-control" placeholder="Nachname" id="lastName">
+                                                </div>
+
+                                                <div class="col-12">
+                                                    <label class="form-label" for="company">Firma</label>
+                                                    <input class="form-control" placeholder="Firma" id="company"
+                                                        autocomplete="organization">
+                                                </div>
+
+                                                <div class="col-12 col-lg-6">
+                                                    <label class="form-label" for="email">
+                                                        E-Mail
+                                                    </label>
+
+                                                    <input type="email" class="form-control"
+                                                        placeholder="name@beispiel.de" id="email">
+                                                </div>
+
+                                                <div class="col-12 col-lg-6">
+                                                    <label class="form-label" for="phone">
+                                                        Telefon
+                                                    </label>
+
+                                                    <input class="form-control" placeholder="Telefon" id="phone">
+                                                </div>
+
+                                                <div class="col-12">
+                                                    <label class="form-label" for="address">
+                                                        Adresse
+                                                    </label>
+
+                                                    <input class="form-control" placeholder="Adresse" id="address">
+                                                </div>
+
+                                                <div class="col-12 col-lg-4">
+                                                    <label class="form-label" for="zip">
+                                                        PLZ
+                                                    </label>
+
+                                                    <input class="form-control" placeholder="PLZ" id="zip">
+                                                </div>
+
+                                                <div class="col-12 col-lg-8">
+                                                    <label class="form-label" for="city">
+                                                        Ort
+                                                    </label>
+
+                                                    <input class="form-control" placeholder="Ort" id="city">
+                                                </div>
+
+                                                <div class="col-12">
+                                                    <hr class="my-2">
+                                                </div>
+
+                                                <div class="col-12 col-lg-6">
+                                                    <label class="form-label" for="password">
+                                                        Passwort
+                                                    </label>
+
+                                                    <input type="password" class="form-control" placeholder="Passwort"
+                                                        id="password">
+                                                </div>
+
+                                                <div class="col-12 col-lg-6">
+                                                    <label class="form-label" for="passwordRepeat">
+                                                        Passwort wiederholen
+                                                    </label>
+
+                                                    <input type="password" class="form-control"
+                                                        placeholder="Passwort wiederholen" id="passwordRepeat">
+                                                </div>
+
+                                                <div class="col-12">
+                                                    <button class="btn btn-success w-100 mt-2">
+                                                        <i class="bi bi-person-plus"></i>
+                                                        Registrieren
+                                                    </button>
+                                                </div>
+
+                                            </div>
+
+                                        </form>
+
+                                    </div>
+
+                                </div>
+
+                                <p class="text-center mt-3 mb-0">
+                                    Bereits registriert?
+                                    <a href="/login.html" class="link-primary">
+                                        Zum Login
+                                    </a>
+                                </p>
+
+                            </div>
+
+                        </div>
+
+                    </div>
+
+                </div>
+
+            </main>
+
+        </div>
+    </div>
+
+    <div id="preloader-wrapper">
+        <div id="preloader"></div>
+        <div class="preloader-section section-left"></div>
+        <div class="preloader-section section-right"></div>
+    </div>
+
+    <script src="js/bootstrap.bundle.min.js"></script>
+    <script src="js/alerts.js"></script>
     <script src="js/register_config.js"></script>
 
 </body>
