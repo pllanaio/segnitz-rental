@@ -1391,6 +1391,9 @@ function applyOrderItemReturnRules(itemId) {
     const isLate = lateDays > 0;
     const isDamaged = isDamagedInput.checked;
 
+    if (isLate) {
+        isLateInput.checked = true;
+    }
     if (isDamaged && isLate) {
         returnStatusInput.value = 'returned_late_damaged';
         depositDecisionInput.value = 'no_refund';
