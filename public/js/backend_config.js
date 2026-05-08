@@ -648,6 +648,29 @@ function renderOrderDetails(order) {
                                 rows="2">${item.returnNotes || ''}</textarea>
                         </div>
 
+                        <div class="col-12">
+    <label class="form-label">Rückgabefotos für diesen Artikel</label>
+    <input type="file"
+        class="form-control"
+        id="returnImageUpload-${item.id}"
+        accept="image/*"
+        multiple>
+
+    <button type="button"
+        class="btn btn-outline-secondary btn-sm mt-2"
+        onclick="uploadOrderItemReturnImages(${item.id}, ${order.id})">
+        Fotos hochladen
+    </button>
+
+    <div class="row g-2 mt-2">
+        ${(item.returnImages || []).map(image => `
+            <div class="col-6 col-md-3">
+                <img src="${image.imagePath}" class="img-fluid rounded border">
+            </div>
+        `).join('')}
+    </div>
+</div>
+
                         <div class="col-12 text-end">
 
                             <button type="button"
@@ -1358,8 +1381,12 @@ function applyOrderItemReturnRules(itemId) {
         option.disabled = false;
     });
 
-    if (isDamaged) {
-        depositDecisionInput.value = 'partial_refund';
+    if (isDamaged || isLate) {
+        if (isDamaged && isLate) {
+            depositDecisionInput.value = 'no_refund';
+        } else if (isDamaged) {
+            depositDecisionInput.value = 'partial_refund';
+        }
 
         [...depositDecisionInput.options].forEach(option => {
             if (!['partial_refund', 'no_refund'].includes(option.value)) {
@@ -1489,6 +1516,48 @@ async function saveOrderItemReturn(itemId, orderId) {
     } catch (error) {
         console.error('Fehler beim Speichern der Positionsrückgabe:', error);
         showAlert('Rückgabe konnte nicht gespeichert werden.', 'danger');
+    }
+}
+
+async function uploadOrderItemReturnImages(itemId, orderId) {
+    const input = document.getElementById(`returnImageUpload-${itemId}`);
+
+    if (!input || input.files.length === 0) {
+        showAlert('Bitte wählen Sie mindestens ein Foto aus.', 'warning');
+        return;
+    }
+
+    const formData = new FormData();
+
+    Array.from(input.files).forEach(file => {
+        formData.append('images', file);
+    });
+
+    try {
+        const response = await fetch(`/admin/order-items/${itemId}/return-images`, {
+            method: 'POST',
+            body: formData
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+            showAlert(result.error || 'Fotos konnten nicht hochgeladen werden.', 'danger');
+            return;
+        }
+
+        showAlert(result.message || 'Fotos wurden hochgeladen.', 'success');
+
+        const detailsResponse = await fetch(`/admin/orders/${orderId}`);
+        const updatedOrder = await detailsResponse.json();
+
+        if (detailsResponse.ok) {
+            renderOrderDetails(updatedOrder);
+        }
+
+    } catch (error) {
+        console.error('Fehler beim Foto-Upload:', error);
+        showAlert('Fotos konnten nicht hochgeladen werden.', 'danger');
     }
 }
 
