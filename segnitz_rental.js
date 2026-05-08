@@ -2700,7 +2700,7 @@ app.put('/admin/order-items/:itemId/return', checkAdmin, async (req, res) => {
         const processedByUserId = await getUserIdByEmail(connection, req.session.user);
 
         const [items] = await connection.execute(
-            `SELECT id, order_id, price_per_day, rental_start, rental_end
+            `SELECT id, order_id, price_per_day, rental_start, rental_end, deposit
              FROM rental_order_items
              WHERE id = ?
              LIMIT 1`,
