@@ -1,26 +1,47 @@
 /* GENERAL */
+:root {
+  --color-primary: #041c40;
+  --color-primary-light: #123d7c;
+  --color-accent: #fcdc31;
+  --color-accent-hover: #ffffff;
+  --color-button-text: #041c40;
+  --color-text-light: #ffffff;
+  --color-page-bg: #f7f9ff;
+  --color-body-text: #24344d;
+  --color-border-soft: rgba(4, 28, 64, 0.12);
+  --shadow-soft: 0 10px 30px rgba(4, 28, 64, 0.12);
+}
+
 a {
-  color: #ffffff;
+  color: var(--color-text-light);
   text-decoration: none;
 }
 
 body {
   background: #f7f9ff;
-  font-family: 'Josefin Sans', sans-serif;
+  font-family: 'Inter', sans-serif;
   font-size: 16px;
-  font-size: 1rem;
-  font-weight: 600;
-  line-height: 1.4;
-  color: #555;
+  line-height: 1.6;
+  font-weight: 500;
+  color: #041c40;
+  color: var(--color-body-text);
 }
 
 h1,
-h2,
 h3,
 h4,
 h5,
 h6 {
-  color: #00011c;
+  font-family: 'Inter', sans-serif;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: #041c40;
+}
+
+h2 {
+  font-family: 'Inter', sans-serif;
+  font-weight: 800;
+  color: var(--color-text-light);
 }
 
 p {
@@ -33,19 +54,19 @@ label {
   font-size: 1rem;
   font-weight: 600;
   margin-bottom: 5px;
-  color: #00011c;
+  color: var(--color-primary);
 }
 
 .btn-primary:hover {
   background-color: #0d6efd;
   /* Dies ist die Standardfarbe von Bootstrap für btn-primary */
-  border-color: #0d6efd;
+  border-color: var(--color-accent);
   /* Passen Sie diese Werte entsprechend Ihrer spezifischen Farbeinstellung an */
 }
 
 .form-select:focus,
 .form-control:focus {
-  border: 1px solid #007bff;
+  border: 1px solid var(--color-accent);
   border-radius: 5px;
   outline: 0px !important;
   -webkit-appearance: none;
@@ -69,8 +90,8 @@ label {
 #title-container {
   min-height: 460px;
   height: 100%;
-  color: #fff;
-  background-color: #007bff;
+  color: var(--color-text-light);
+  background-color: var(--color-primary);
   text-align: center;
   padding: 105px 28px 28px 28px;
   box-sizing: border-box;
@@ -83,7 +104,7 @@ label {
 #title-container h2 {
   font-size: 45px;
   font-weight: 800;
-  color: #fff;
+  color: var(--color-text-light);
   padding: 0;
   margin-bottom: 0px;
 }
@@ -91,7 +112,7 @@ label {
 #title-container h3 {
   font-size: 25px;
   font-weight: 600;
-  color: #ffffff;
+  color: var(--color-text-light);
   padding: 0;
 }
 
@@ -143,7 +164,7 @@ button#submit-btn {
   position: relative;
   width: 130px;
   height: 50px;
-  background: #007bff;
+  background: var(--color-accent);
   margin: 0 auto;
   margin-top: 40px;
   overflow: hidden;
@@ -151,7 +172,7 @@ button#submit-btn {
   cursor: pointer;
   transition: color .3s;
   text-align: center;
-  color: #fff;
+  color: var(--color-text-light);
   border: 0;
   -webkit-border-bottom-right-radius: 5px;
   -webkit-border-bottom-left-radius: 5px;
@@ -204,7 +225,7 @@ button#submit-btn:hover::after {
   line-height: 40px;
   border: 1px solid #ced4da;
   border-radius: 5px;
-  background-color: #fff;
+  background-color: var(--color-text-light);
   padding: 5px 20px 5px 50px;
   cursor: pointer;
   transition: all 0.15s ease-in-out;
@@ -226,7 +247,7 @@ button#submit-btn:hover::after {
   width: 26px;
   height: 26px;
   border-radius: 50%;
-  background-color: #fff;
+  background-color: var(--color-text-light);
   box-shadow: inset 0 0 0 1px #ced4da;
   -webkit-transition: all 0.15s ease-in-out;
   -moz-transition: all 0.15s ease-in-out;
@@ -251,7 +272,7 @@ button#submit-btn:hover::after {
 
 .form-check-input:checked,
 .form-check-input:focus {
-  background-color: #007bff !important;
+  background-color: var(--color-accent) !important;
   outline: none !important;
   border: none !important;
 }
@@ -281,7 +302,7 @@ input[type="email"] {
 
 input[type="text"]:focus,
 input[type="email"]:focus {
-  border: 1px solid #007bff;
+  border: 1px solid var(--color-accent);
   border-radius: 5px;
   outline: 0px !important;
   -webkit-appearance: none;
@@ -312,18 +333,18 @@ input[type="radio"]:hover {
 }
 
 #success h4 {
-  color: #00011c;
+  color: var(--color-primary);
 }
 
 .back-link {
   font-weight: 700;
-  color: #007bff;
+  color: var(--color-primary-light);
   text-decoration: none;
   font-size: 18px;
 }
 
 .back-link:hover {
-  color: #007bff;
+  color: var(--color-primary-light);
 }
 
 /* PRELOADER */
@@ -341,7 +362,7 @@ input[type="radio"]:hover {
   background-image: url();
   width: 120px;
   height: 119px;
-  border-top-color: #fff;
+  border-top-color: var(--color-text-light);
   border-radius: 100%;
   display: block;
   position: relative;
@@ -484,8 +505,8 @@ input[type="radio"]:hover {
 }
 
 .product-card.selected {
-  border-color: #0d6efd;
-  box-shadow: 0 0 0 3px rgba(13, 110, 253, 0.2);
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px rgba(252, 220, 49, 0.28);
 }
 
 .product-card img {
@@ -599,8 +620,8 @@ input[type="radio"]:hover {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  background: #fff200;
-  color: #000;
+  background: var(--color-accent);
+  color: var(--color-button-text);
   font-weight: 600;
   padding: 6px 18px;
   border-radius: 0;
@@ -612,26 +633,228 @@ input[type="radio"]:hover {
 }
 
 .category-btn {
-  color: #ffffff;
+  color: var(--color-text-light);
   border: 1px solid rgba(255, 255, 255, 0.2);
   background: transparent;
 }
 
 .category-btn:hover {
   background: rgba(255, 255, 255, 0.1);
-  color: #ffffff;
+  color: var(--color-text-light);
 }
 
 .category-btn.active {
-  background: #ffffff;
-  color: #000000;
-  border-color: #ffffff;
+  background: var(--color-accent);
+  color: var(--color-button-text);
+  border-color: var(--color-text-light);
 }
 
 .category-btn.active,
 .category-btn.active:hover,
 .category-btn.active:focus {
-    background-color: #ffffff !important;
-    color: #000000 !important;
-    border-color: #ffffff !important;
+  background-color: var(--color-accent) !important;
+  color: #000000 !important;
+  border-color: var(--color-accent) !important;
+}
+
+/* BRAND COLOR SYSTEM OVERRIDES */
+.bg-primary {
+  background-color: var(--color-primary) !important;
+}
+
+.text-primary,
+.link-primary,
+a.link-primary {
+  color: var(--color-primary-light) !important;
+}
+
+.text-white,
+aside .text-white,
+aside a {
+  color: var(--color-text-light) !important;
+}
+
+.btn-primary,
+.btn-success,
+button#prev-btn,
+button#next-btn,
+button#submit-btn {
+  background-color: var(--color-accent) !important;
+  border-color: var(--color-accent) !important;
+  color: var(--color-button-text) !important;
+  font-weight: 700;
+}
+
+.btn-primary:hover,
+.btn-primary:focus,
+.btn-primary:active,
+.btn-success:hover,
+.btn-success:focus,
+.btn-success:active,
+button#prev-btn:hover,
+button#next-btn:hover,
+button#submit-btn:hover {
+  background-color: var(--color-accent-hover) !important;
+  border-color: var(--color-accent) !important;
+  color: var(--color-primary) !important;
+  box-shadow: 0 0 0 0.2rem rgba(252, 220, 49, 0.28) !important;
+}
+
+.btn-light {
+  background-color: var(--color-accent) !important;
+  border-color: var(--color-accent) !important;
+  color: var(--color-button-text) !important;
+  font-weight: 700;
+}
+
+.btn-light:hover,
+.btn-light:focus {
+  background-color: var(--color-accent-hover) !important;
+  border-color: var(--color-accent) !important;
+  color: var(--color-primary) !important;
+}
+
+.btn-outline-primary {
+  border-color: var(--color-primary-light) !important;
+  color: var(--color-primary-light) !important;
+}
+
+.btn-outline-primary:hover,
+.btn-outline-primary:focus,
+.btn-outline-primary:active {
+  background-color: var(--color-accent) !important;
+  border-color: var(--color-accent) !important;
+  color: var(--color-button-text) !important;
+}
+
+.btn-outline-light {
+  border-color: rgba(255, 255, 255, 0.35) !important;
+  color: var(--color-text-light) !important;
+}
+
+.btn-outline-light:hover,
+.btn-outline-light:focus,
+.btn-outline-light.active {
+  background-color: var(--color-accent) !important;
+  border-color: var(--color-accent) !important;
+  color: var(--color-button-text) !important;
+}
+
+.progress-bar.bg-primary,
+.badge.bg-primary {
+  background-color: var(--color-primary-light) !important;
+}
+
+.badge.bg-warning,
+.alert-warning {
+  background-color: var(--color-accent) !important;
+  border-color: var(--color-accent) !important;
+  color: var(--color-button-text) !important;
+}
+
+.form-check-input:checked,
+.form-check-input:focus {
+  background-color: var(--color-accent) !important;
+  border-color: var(--color-accent) !important;
+}
+
+.form-select:focus,
+.form-control:focus,
+input[type="text"]:focus,
+input[type="email"]:focus,
+input[type="password"]:focus,
+input[type="tel"]:focus,
+input[type="number"]:focus,
+textarea:focus {
+  border-color: var(--color-accent) !important;
+  box-shadow: 0 0 0 0.2rem rgba(252, 220, 49, 0.28) !important;
+}
+
+.product-card {
+  border-color: var(--color-border-soft);
+  border-radius: 18px;
+}
+
+.product-card:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-soft);
+}
+
+.product-card.selected {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px rgba(252, 220, 49, 0.28);
+}
+
+.category-btn {
+  color: var(--color-text-light);
+  border-color: rgba(255, 255, 255, 0.25);
+  background: transparent;
+}
+
+.category-btn:hover,
+.category-btn.active,
+.category-btn.active:hover,
+.category-btn.active:focus {
+  background-color: var(--color-accent) !important;
+  color: var(--color-button-text) !important;
+  border-color: var(--color-accent) !important;
+}
+
+.opening-status-badge {
+  background: var(--color-accent);
+  color: var(--color-button-text);
+}
+
+.modal-header {
+  background-color: var(--color-primary);
+  color: var(--color-text-light);
+}
+
+.modal-header .modal-title {
+  color: var(--color-text-light);
+}
+
+.table thead {
+  background-color: var(--color-primary);
+  color: var(--color-text-light);
+}
+
+.sidebar-brand {
+  width: 100%;
+}
+
+.sidebar-logo {
+  max-width: 170px;
+  height: auto;
+  object-fit: contain;
+}
+
+.sidebar-title {
+  color: #ffffff;
+  font-size: 1.6rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  margin-bottom: 0;
+}
+
+aside {
+  background: linear-gradient(180deg,
+      #041c40 0%,
+      #123d7c 100%) !important;
+}
+
+.cart-item-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.cart-item-actions .btn {
+    min-height: 34px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
 }
