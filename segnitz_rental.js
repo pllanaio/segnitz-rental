@@ -264,19 +264,16 @@ async function checkProductAvailability(connection, productId, rentalStart, rent
          FROM rental_order_items roi
          JOIN rental_orders ro ON ro.id = roi.order_id
          WHERE roi.product_id = ?
-         AND ro.status IN ('reserved', 'paid', 'confirmed')
+         AND ro.status IN ('reserved', 'paid', 'confirmed', 'active')
          AND (ro.status != 'reserved' OR ro.reserved_until > NOW())
-         AND roi.rental_start <= ?
-         AND roi.rental_end >= ?
+         AND roi.returned_at IS NULL
+         AND COALESCE(roi.adjusted_rental_start, roi.rental_start) <= ?
+         AND COALESCE(roi.adjusted_rental_end, roi.rental_end) >= ?
          LIMIT 1`,
         [productId, rentalEnd, rentalStart]
     );
 
-    if (orderConflicts.length > 0) {
-        return false;
-    }
-
-    return true;
+    return orderConflicts.length === 0;
 }
 
 async function checkCartItemConflict(connection, cartId, productId, rentalStart, rentalEnd, excludeCartItemId = null) {
@@ -2069,14 +2066,15 @@ app.get('/products/:id/availability', async (req, res) => {
 
         const [blockedPeriods] = await connection.execute(
             `SELECT 
-                DATE_FORMAT(roi.rental_start, '%Y-%m-%d') AS rentalStart,
-                DATE_FORMAT(roi.rental_end, '%Y-%m-%d') AS rentalEnd
-            FROM rental_order_items roi
-            JOIN rental_orders ro ON ro.id = roi.order_id
-            WHERE roi.product_id = ?
-            AND ro.status IN ('reserved', 'paid', 'confirmed')
-            AND (ro.status != 'reserved' OR ro.reserved_until > NOW())
-            ORDER BY roi.rental_start ASC`,
+        DATE_FORMAT(COALESCE(roi.adjusted_rental_start, roi.rental_start), '%Y-%m-%d') AS rentalStart,
+        DATE_FORMAT(COALESCE(roi.adjusted_rental_end, roi.rental_end), '%Y-%m-%d') AS rentalEnd
+     FROM rental_order_items roi
+     JOIN rental_orders ro ON ro.id = roi.order_id
+     WHERE roi.product_id = ?
+     AND ro.status IN ('reserved', 'paid', 'confirmed', 'active')
+     AND (ro.status != 'reserved' OR ro.reserved_until > NOW())
+     AND roi.returned_at IS NULL
+     ORDER BY COALESCE(roi.adjusted_rental_start, roi.rental_start) ASC`,
             [req.params.id]
         );
 
