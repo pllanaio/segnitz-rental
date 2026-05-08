@@ -802,6 +802,7 @@ async function sendOrderEmail(recipients, orderSummary, customer, signatureDataU
         <h3>Kundendaten</h3>
         <p>
             ${escapeHtml(customer.firstName)} ${escapeHtml(customer.lastName)}<br>
+            ${customer.company ? `${escapeHtml(customer.company)}<br>` : ''}
             ${escapeHtml(customer.email)}<br>
             ${escapeHtml(customer.phone)}<br>
             ${escapeHtml(customer.address)}<br>
@@ -865,6 +866,7 @@ app.post('/data', async (req, res) => {
 
         const firstName = getFormValue(formData, 'FirstName');
         const lastName = getFormValue(formData, 'LastName');
+        const company = getFormValue(formData, 'CustomerCompany');
         const phone = getFormValue(formData, 'CustomerPhone');
         const address = getFormValue(formData, 'CustomerAddress');
         const zip = getFormValue(formData, 'CustomerZip');
@@ -921,8 +923,8 @@ app.post('/data', async (req, res) => {
         const [orderResult] = await connection.execute(
             `INSERT INTO rental_orders
             (order_no, cart_id, user_id, customer_email, customer_first_name, customer_last_name,
-            customer_phone, customer_address, customer_zip, customer_city, status, reserved_until, confirmation_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'reserved', DATE_ADD(NOW(), INTERVAL 15 MINUTE), ?)`,
+            customer_company, customer_phone, customer_address, customer_zip, customer_city, status, reserved_until, confirmation_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'reserved', DATE_ADD(NOW(), INTERVAL 15 MINUTE), ?)`,
             [
                 orderNo,
                 cartId,
@@ -930,6 +932,7 @@ app.post('/data', async (req, res) => {
                 email,
                 firstName,
                 lastName,
+                company,
                 phone,
                 address,
                 zip,
@@ -1018,6 +1021,7 @@ app.post('/data', async (req, res) => {
                 {
                     firstName,
                     lastName,
+                    company,
                     email,
                     phone,
                     address,
@@ -1177,6 +1181,7 @@ app.post('/register-customer', async (req, res) => {
     const {
         firstName,
         lastName,
+        company,
         email,
         phone,
         address,
@@ -1221,14 +1226,15 @@ app.post('/register-customer', async (req, res) => {
 
         await connection.execute(
             `INSERT INTO users 
-            (username, password, role, first_name, last_name, phone, address, zip, city, customer_no, email_verified, verification_token, verification_expires)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            (username, password, role, first_name, last_name, company, phone, address, zip, city, customer_no, email_verified, verification_token, verification_expires)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 email,
                 hashedPassword,
                 'user',
                 firstName,
                 lastName,
+                company || null,
                 phone,
                 address,
                 zip,
@@ -1452,6 +1458,7 @@ app.get('/my-profile', async (req, res) => {
                 username AS email,
                 first_name AS firstName,
                 last_name AS lastName,
+                company AS company,
                 phone,
                 address,
                 zip,
@@ -1485,7 +1492,7 @@ app.put('/my-profile', async (req, res) => {
         return res.status(401).json({ error: 'Nicht angemeldet.' });
     }
 
-    const { firstName, lastName, phone, address, zip, city } = req.body;
+    const { firstName, lastName, company, phone, address, zip, city } = req.body;
 
     if (!firstName || !lastName || !phone || !address || !zip || !city) {
         return res.status(400).json({ error: 'Pflichtfelder fehlen.' });
@@ -1515,12 +1522,13 @@ app.put('/my-profile', async (req, res) => {
             `UPDATE users
              SET first_name = ?,
                  last_name = ?,
+                 company = ?,
                  phone = ?,
                  address = ?,
                  zip = ?,
                  city = ?
              WHERE username = ?`,
-            [firstName, lastName, phone, address, zip, city, req.session.user]
+            [firstName, lastName, company, phone, address, zip, city, req.session.user]
         );
 
         res.json({ message: 'Profildaten wurden aktualisiert.' });
@@ -1661,6 +1669,7 @@ app.get('/my-orders/:id', async (req, res) => {
                 customer_email,
                 customer_first_name,
                 customer_last_name,
+                customer_company,
                 customer_phone,
                 customer_address,
                 customer_zip,
@@ -2370,6 +2379,7 @@ app.get('/admin/orders', checkAdmin, async (req, res) => {
                 customer_email,
                 customer_first_name,
                 customer_last_name,
+                customer_company,
                 customer_phone,
                 customer_address,
                 customer_zip,
