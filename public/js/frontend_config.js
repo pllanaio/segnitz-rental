@@ -510,6 +510,7 @@ async function loadUserProfileIntoForm() {
 
         document.getElementById('FirstName').value = user.firstName || '';
         document.getElementById('LastName').value = user.lastName || '';
+        document.getElementById('CustomerCompany').value = user.company || '';
         document.getElementById('CustomerEmail').value = user.email || '';
         prefillFinalEmailField(user.email);
         document.getElementById('CustomerPhone').value = user.phone || '';
@@ -646,8 +647,6 @@ function validateCustomerRequiredFields() {
             return false;
         }
     }
-
-    document.getElementById('CustomerCompany').value = user.company || '';
     const phone = document.getElementById('CustomerPhone').value.trim();
     const zip = document.getElementById('CustomerZip').value.trim();
     const address = document.getElementById('CustomerAddress').value.trim();
