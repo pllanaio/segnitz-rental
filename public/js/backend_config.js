@@ -1,6 +1,7 @@
 let products = [];
 let filteredProducts = [];
 let orders = [];
+let currentOrderItems = [];
 
 document.addEventListener('DOMContentLoaded', () => {
     const form = document.getElementById('productForm');
@@ -500,8 +501,11 @@ async function openOrderDetails(orderId) {
 
 function renderOrderDetails(order) {
     const body = document.getElementById('orderDetailsBody');
-
+    currentOrderItems = order.items || [];
     const itemsHtml = (order.items || []).map(item => {
+        const lateDays = calculateLateDays(item.actualReturnDate, item.adjustedRentalEnd || item.rentalEnd);
+        const isLate = lateDays > 0 || item.isLate;
+        const isDamaged = Boolean(item.isDamaged);
         const adjustedStart = item.adjustedRentalStart || item.rentalStart;
         const adjustedEnd = item.adjustedRentalEnd || item.actualReturnDate || item.rentalEnd;
         const adjustedPrice = item.adjustedPricePerDay || item.pricePerDay;
@@ -607,7 +611,7 @@ function renderOrderDetails(order) {
                         <div class="col-12 col-md-6">
                             <div class="form-check">
                                 <input class="form-check-input" type="checkbox"
-                                    id="isLate-${item.id}" ${item.isLate ? 'checked' : ''}>
+                                    id="isLate-${item.id}" ${isLate ? 'checked' : ''}>
                                 <label class="form-check-label">Verspätet</label>
                             </div>
                             <textarea class="form-control mt-2"
@@ -624,10 +628,10 @@ function renderOrderDetails(order) {
                         </div>
 
                         <div class="col-12 col-md-4">
-                            <label class="form-label">Kautionsabzug</label>
-                            <input type="number" step="0.01" min="0" class="form-control"
-                                id="depositDeductionAmount-${item.id}"
-                                value="${item.depositDeductionAmount || ''}">
+                            <label class="form-label">Kautionsabzug (%)</label>
+                            <input type="number" step="0.01" min="0" max="100" class="form-control"
+                                id="depositDeductionPercent-${item.id}"
+                                value="${item.depositDeductionPercent || ''}">
                         </div>
 
                         <div class="col-12 col-md-4">
@@ -739,6 +743,29 @@ function renderOrderDetails(order) {
             ${cancelHtml}
         </div>
     `;
+
+    currentOrderItems.forEach(item => {
+        [
+            `actualReturnDate-${item.id}`,
+            `adjustedRentalStart-${item.id}`,
+            `adjustedRentalEnd-${item.id}`,
+            `adjustedPricePerDay-${item.id}`,
+            `returnStatus-${item.id}`,
+            `depositDecision-${item.id}`,
+            `isDamaged-${item.id}`,
+            `isLate-${item.id}`,
+            `depositDeductionPercent-${item.id}`
+        ].forEach(id => {
+            const element = document.getElementById(id);
+            if (element) {
+                element.addEventListener('change', () => applyOrderItemReturnRules(item.id));
+                element.addEventListener('input', () => applyOrderItemReturnRules(item.id));
+            }
+        });
+
+        applyOrderItemReturnRules(item.id);
+    });
+
 }
 
 function toggleOrderItemReturnEditor(itemId) {
@@ -1250,7 +1277,114 @@ function normalizeDecimalInput(value) {
     return String(value).replace(',', '.');
 }
 
+function calculateRentalDays(startDate, endDate) {
+    if (!startDate || !endDate) return 0;
+
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+
+    return Math.max(
+        Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1,
+        0
+    );
+}
+
+function calculateLateDays(actualReturnDate, adjustedRentalEnd) {
+    if (!actualReturnDate || !adjustedRentalEnd) return 0;
+
+    const actual = new Date(actualReturnDate);
+    const end = new Date(adjustedRentalEnd);
+
+    if (actual <= end) return 0;
+
+    return Math.ceil((actual - end) / (1000 * 60 * 60 * 24));
+}
+
+function todayDateString() {
+    return new Date().toISOString().slice(0, 10);
+}
+
+function applyOrderItemReturnRules(itemId) {
+    const actualReturnDate = document.getElementById(`actualReturnDate-${itemId}`).value;
+    const adjustedStartInput = document.getElementById(`adjustedRentalStart-${itemId}`);
+    const adjustedEndInput = document.getElementById(`adjustedRentalEnd-${itemId}`);
+    const priceInput = document.getElementById(`adjustedPricePerDay-${itemId}`);
+    const returnStatusInput = document.getElementById(`returnStatus-${itemId}`);
+    const depositDecisionInput = document.getElementById(`depositDecision-${itemId}`);
+    const isDamagedInput = document.getElementById(`isDamaged-${itemId}`);
+    const isLateInput = document.getElementById(`isLate-${itemId}`);
+    const depositRefundInput = document.getElementById(`depositRefundAmount-${itemId}`);
+    const depositDeductionPercentInput = document.getElementById(`depositDeductionPercent-${itemId}`);
+    const depositDeductionReasonInput = document.getElementById(`depositDeductionReason-${itemId}`);
+
+    const item = currentOrderItems?.find(i => Number(i.id) === Number(itemId));
+    if (!item) return;
+
+    const today = todayDateString();
+
+    if (adjustedStartInput.value && adjustedStartInput.value < today) {
+        adjustedStartInput.value = today;
+        showAlert('Der angepasste Mietbeginn darf nicht in der Vergangenheit liegen.', 'warning');
+    }
+
+    const adjustedEnd = adjustedEndInput.value || item.rentalEnd;
+    const lateDays = calculateLateDays(actualReturnDate, adjustedEnd);
+
+    const isLate = lateDays > 0;
+    const isDamaged = isDamagedInput.checked;
+
+    if (isLate) {
+        isLateInput.checked = true;
+    }
+
+    if (isDamaged && isLate) {
+        returnStatusInput.value = 'returned_late_damaged';
+    } else if (isDamaged) {
+        returnStatusInput.value = 'returned_damaged';
+    } else if (isLate) {
+        returnStatusInput.value = 'returned_late';
+    } else if (actualReturnDate) {
+        returnStatusInput.value = 'returned_ok';
+    }
+
+    [...depositDecisionInput.options].forEach(option => {
+        option.disabled = false;
+    });
+
+    if (isDamaged) {
+        depositDecisionInput.value = 'partial_refund';
+
+        [...depositDecisionInput.options].forEach(option => {
+            if (!['partial_refund', 'no_refund'].includes(option.value)) {
+                option.disabled = true;
+            }
+        });
+    }
+
+    if (depositDecisionInput.value === 'full_refund') {
+        depositDeductionPercentInput.value = 0;
+    }
+
+    if (depositDecisionInput.value === 'no_refund') {
+        depositDeductionPercentInput.value = 100;
+    }
+
+    const deposit = Number(item.deposit || 0);
+    const deductionPercent = Number(depositDeductionPercentInput.value || 0);
+    const refundAmount = Math.max(deposit - (deposit * deductionPercent / 100), 0);
+
+    depositRefundInput.value = refundAmount.toFixed(2);
+
+    const reasons = [];
+
+    if (isDamaged) reasons.push('Beschädigt');
+    if (isLate) reasons.push('Verspätet');
+
+    depositDeductionReasonInput.value = reasons.join(', ');
+}
+
 async function saveOrderItemReturn(itemId, orderId) {
+    applyOrderItemReturnRules(itemId);
     const payload = {
         actualReturnDate: document.getElementById(`actualReturnDate-${itemId}`).value || null,
         adjustedRentalStart: document.getElementById(`adjustedRentalStart-${itemId}`).value || null,
@@ -1264,6 +1398,7 @@ async function saveOrderItemReturn(itemId, orderId) {
         isLate: document.getElementById(`isLate-${itemId}`).checked,
         lateDescription: document.getElementById(`lateDescription-${itemId}`).value.trim(),
         depositDecision: document.getElementById(`depositDecision-${itemId}`).value,
+        depositDeductionPercent: document.getElementById(`depositDeductionPercent-${itemId}`).value || null,
         depositRefundAmount: normalizeDecimalInput(
             document.getElementById(`depositRefundAmount-${itemId}`).value
         ),
