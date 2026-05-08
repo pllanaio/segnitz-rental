@@ -427,6 +427,7 @@ function renderOrders() {
         return [
             order.order_no,
             order.customer_email,
+            order.customer_company,
             order.customer_first_name,
             order.customer_last_name,
             order.customer_phone,
@@ -457,6 +458,7 @@ function renderOrders() {
                     <div>
                         <h5 class="mb-1">${order.order_no}</h5>
                         <div>${order.customer_first_name || ''} ${order.customer_last_name || ''}</div>
+                        ${order.customer_company ? `<div class="small text-muted">${order.customer_company}</div>` : ''}
                         <small>${order.customer_email || ''}</small><br>
                         ${getStatusBadge(order.status)}
                         ${getPaymentBadge(order.payment_status)}
@@ -499,14 +501,162 @@ async function openOrderDetails(orderId) {
 function renderOrderDetails(order) {
     const body = document.getElementById('orderDetailsBody');
 
-    const itemsHtml = (order.items || []).map(item => `
+    const itemsHtml = (order.items || []).map(item => {
+        const adjustedStart = item.adjustedRentalStart || item.rentalStart;
+        const adjustedEnd = item.adjustedRentalEnd || item.actualReturnDate || item.rentalEnd;
+        const adjustedPrice = item.adjustedPricePerDay || item.pricePerDay;
+        const adjustedTotal = item.adjustedRentalTotal;
+
+        return `
         <tr>
-            <td>${item.title}</td>
-            <td>${item.rentalStart} bis ${item.rentalEnd}</td>
-            <td>${Number(item.pricePerDay || 0).toFixed(2)} €</td>
+            <td>
+                <strong>${item.title}</strong><br>
+                <small class="text-muted">Position #${item.id}</small>
+            </td>
+
+            <td>
+                Ursprünglich: ${item.rentalStart} bis ${item.rentalEnd}<br>
+                <strong>Aktuell:</strong> ${adjustedStart || '-'} bis ${adjustedEnd || '-'}
+            </td>
+
+            <td>
+                ${Number(adjustedPrice || 0).toFixed(2)} €<br>
+                ${adjustedTotal ? `<small>Neu berechnet: ${Number(adjustedTotal).toFixed(2)} €</small>` : ''}
+            </td>
+
             <td>${Number(item.deposit || 0).toFixed(2)} €</td>
+
+            <td>
+                ${getReturnBadge(item.returnStatus || item.return_status || 'pending')}
+            </td>
+
+            <td class="text-end">
+                <button type="button"
+                    class="btn btn-outline-primary btn-sm"
+                    onclick="toggleOrderItemReturnEditor(${item.id})">
+                    Rückgabe bearbeiten
+                </button>
+            </td>
         </tr>
-    `).join('');
+
+        <tr id="orderItemReturnEditor-${item.id}" class="d-none">
+            <td colspan="6">
+                <div class="border rounded p-3 bg-light">
+                    <div class="row g-3">
+                        <div class="col-12 col-md-4">
+                            <label class="form-label">Tatsächliches Rückgabedatum</label>
+                            <input type="date" class="form-control"
+                                id="actualReturnDate-${item.id}"
+                                value="${item.actualReturnDate || ''}">
+                        </div>
+
+                        <div class="col-12 col-md-4">
+                            <label class="form-label">Angepasster Mietbeginn</label>
+                            <input type="date" class="form-control"
+                                id="adjustedRentalStart-${item.id}"
+                                value="${item.adjustedRentalStart || item.rentalStart || ''}">
+                        </div>
+
+                        <div class="col-12 col-md-4">
+                            <label class="form-label">Angepasstes Mietende</label>
+                            <input type="date" class="form-control"
+                                id="adjustedRentalEnd-${item.id}"
+                                value="${item.adjustedRentalEnd || item.actualReturnDate || item.rentalEnd || ''}">
+                        </div>
+
+                        <div class="col-12 col-md-4">
+                            <label class="form-label">Preis pro Tag</label>
+                            <input type="number" step="0.01" min="0" class="form-control"
+                                id="adjustedPricePerDay-${item.id}"
+                                value="${item.adjustedPricePerDay || item.pricePerDay || ''}">
+                        </div>
+
+                        <div class="col-12 col-md-4">
+                            <label class="form-label">Rückgabestatus</label>
+                            <select class="form-select" id="returnStatus-${item.id}">
+                                <option value="pending" ${!item.returnStatus || item.returnStatus === 'pending' ? 'selected' : ''}>Offen</option>
+                                <option value="returned_ok" ${item.returnStatus === 'returned_ok' ? 'selected' : ''}>Ordnungsgemäß zurückgegeben</option>
+                                <option value="returned_late" ${item.returnStatus === 'returned_late' ? 'selected' : ''}>Verspätet zurückgegeben</option>
+                                <option value="returned_damaged" ${item.returnStatus === 'returned_damaged' ? 'selected' : ''}>Beschädigt zurückgegeben</option>
+                                <option value="returned_late_damaged" ${item.returnStatus === 'returned_late_damaged' ? 'selected' : ''}>Verspätet und beschädigt</option>
+                            </select>
+                        </div>
+
+                        <div class="col-12 col-md-4">
+                            <label class="form-label">Kautionsentscheidung</label>
+                            <select class="form-select" id="depositDecision-${item.id}">
+                                <option value="pending" ${!item.depositDecision || item.depositDecision === 'pending' ? 'selected' : ''}>Noch offen</option>
+                                <option value="full_refund" ${item.depositDecision === 'full_refund' ? 'selected' : ''}>Vollständig zurückzahlen</option>
+                                <option value="partial_refund" ${item.depositDecision === 'partial_refund' ? 'selected' : ''}>Teilweise zurückzahlen</option>
+                                <option value="no_refund" ${item.depositDecision === 'no_refund' ? 'selected' : ''}>Nicht zurückzahlen</option>
+                            </select>
+                        </div>
+
+                        <div class="col-12 col-md-6">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox"
+                                    id="isDamaged-${item.id}" ${item.isDamaged ? 'checked' : ''}>
+                                <label class="form-check-label">Beschädigt</label>
+                            </div>
+                            <textarea class="form-control mt-2"
+                                id="damageDescription-${item.id}"
+                                rows="2"
+                                placeholder="Beschreibung der Beschädigung">${item.damageDescription || ''}</textarea>
+                        </div>
+
+                        <div class="col-12 col-md-6">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox"
+                                    id="isLate-${item.id}" ${item.isLate ? 'checked' : ''}>
+                                <label class="form-check-label">Verspätet</label>
+                            </div>
+                            <textarea class="form-control mt-2"
+                                id="lateDescription-${item.id}"
+                                rows="2"
+                                placeholder="Beschreibung der Verspätung">${item.lateDescription || ''}</textarea>
+                        </div>
+
+                        <div class="col-12 col-md-4">
+                            <label class="form-label">Rückzahlungsbetrag</label>
+                            <input type="number" step="0.01" min="0" class="form-control"
+                                id="depositRefundAmount-${item.id}"
+                                value="${item.depositRefundAmount || ''}">
+                        </div>
+
+                        <div class="col-12 col-md-4">
+                            <label class="form-label">Kautionsabzug</label>
+                            <input type="number" step="0.01" min="0" class="form-control"
+                                id="depositDeductionAmount-${item.id}"
+                                value="${item.depositDeductionAmount || ''}">
+                        </div>
+
+                        <div class="col-12 col-md-4">
+                            <label class="form-label">Grund für Abzug</label>
+                            <input type="text" class="form-control"
+                                id="depositDeductionReason-${item.id}"
+                                value="${item.depositDeductionReason || ''}">
+                        </div>
+
+                        <div class="col-12">
+                            <label class="form-label">Interne Notiz</label>
+                            <textarea class="form-control"
+                                id="returnNotes-${item.id}"
+                                rows="2">${item.returnNotes || ''}</textarea>
+                        </div>
+
+                        <div class="col-12 text-end">
+                            <button type="button"
+                                class="btn btn-success"
+                                onclick="saveOrderItemReturn(${item.id}, ${order.id})">
+                                Positionsrückgabe speichern
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </td>
+        </tr>
+    `;
+    }).join('');
 
     const status = String(order.status || '').trim().toLowerCase();
     const canShowReturnSection = status !== 'cancelled';
@@ -558,6 +708,7 @@ function renderOrderDetails(order) {
                 <h5>Kunde</h5>
                 <p>
                     <strong>${order.customer_first_name || ''} ${order.customer_last_name || ''}</strong><br>
+                    ${order.customer_company ? `${order.customer_company}<br>` : ''}
                     ${order.customer_email || ''}<br>
                     ${order.customer_phone || ''}<br>
                     ${order.customer_address || ''}<br>
@@ -575,138 +726,27 @@ function renderOrderDetails(order) {
                                 <th>Mietzeitraum</th>
                                 <th>Preis / Tag</th>
                                 <th>Kaution</th>
+                                <th>Rückgabe</th>
+                                <th></th>
                             </tr>
                         </thead>
                         <tbody>
-                            ${itemsHtml || '<tr><td colspan="4">Keine Artikel vorhanden.</td></tr>'}
+                            ${itemsHtml || '<tr><td colspan="6">Keine Artikel vorhanden.</td></tr>'}
                         </tbody>
                     </table>
                 </div>
             </div>
-
             ${cancelHtml}
-
-            ${canShowReturnSection ? `
-<div class="col-12">
-    <hr>
-    <h5>Rückgabe / Kaution bearbeiten</h5>
-    <p>
-        <strong>Zuletzt bearbeitet von:</strong> ${order.return_processed_by_username || '-'}<br>
-        <strong>Bearbeitet am:</strong> ${order.return_case_processed_at || '-'}
-    </p>
-
-    <div class="row g-3">
-        <div class="col-12 col-md-4">
-            <label class="form-label">Rückgabestatus</label>
-            <select class="form-select" id="returnStatus">
-                <option value="returned_ok" ${order.return_status === 'returned_ok' ? 'selected' : ''}>Ordnungsgemäß zurückgegeben</option>
-                <option value="returned_late" ${order.return_status === 'returned_late' ? 'selected' : ''}>Verspätet zurückgegeben</option>
-                <option value="returned_damaged" ${order.return_status === 'returned_damaged' ? 'selected' : ''}>Beschädigt zurückgegeben</option>
-                <option value="returned_late_damaged" ${order.return_status === 'returned_late_damaged' ? 'selected' : ''}>Verspätet und beschädigt</option>
-            </select>
-        </div>
-
-        <div class="col-12 col-md-4">
-            <label class="form-label">Kautionsentscheidung</label>
-            <select class="form-select" id="depositDecision">
-                <option value="full_refund" ${order.deposit_decision === 'full_refund' ? 'selected' : ''}>Vollständig zurückzahlen</option>
-                <option value="partial_refund" ${order.deposit_decision === 'partial_refund' ? 'selected' : ''}>Teilweise zurückzahlen</option>
-                <option value="no_refund" ${order.deposit_decision === 'no_refund' ? 'selected' : ''}>Nicht zurückzahlen</option>
-                <option value="pending" ${!order.deposit_decision || order.deposit_decision === 'pending' ? 'selected' : ''}>Noch offen</option>
-            </select>
-        </div>
-
-        <div class="col-12 col-md-4">
-            <label class="form-label">Rückzahlungsbetrag</label>
-            <input type="number" step="0.01" min="0" class="form-control" id="depositRefundAmount"
-                value="${order.deposit_refund_amount || ''}">
-        </div>
-
-        <div class="col-12 col-md-6">
-            <div class="form-check mt-2">
-                <input class="form-check-input" type="checkbox" id="isDamaged" ${order.is_damaged ? 'checked' : ''}>
-                <label class="form-check-label" for="isDamaged">Artikel beschädigt zurückgegeben</label>
-            </div>
-
-            <textarea class="form-control mt-2" id="damageDescription" rows="3"
-                placeholder="Beschreibung der Beschädigung">${order.damage_description || ''}</textarea>
-        </div>
-
-        <div class="col-12 col-md-6">
-            <div class="form-check mt-2">
-                <input class="form-check-input" type="checkbox" id="isLate" ${order.is_late ? 'checked' : ''}>
-                <label class="form-check-label" for="isLate">Artikel verspätet zurückgegeben</label>
-            </div>
-
-            <textarea class="form-control mt-2" id="lateDescription" rows="3"
-                placeholder="Beschreibung der Verspätung">${order.late_description || ''}</textarea>
-        </div>
-
-        <div class="col-12 col-md-4">
-            <label class="form-label">Kautionsabzug</label>
-            <input type="number" step="0.01" min="0" class="form-control" id="depositDeductionAmount"
-                value="${order.deposit_deduction_amount || ''}">
-        </div>
-
-        <div class="col-12 col-md-8">
-            <label class="form-label">Grund für Kautionsabzug</label>
-            <input type="text" class="form-control" id="depositDeductionReason"
-                value="${order.deposit_deduction_reason || ''}">
-        </div>
-
-        <div class="col-12">
-            <label class="form-label">Interne Rückgabe-Notiz</label>
-            <textarea class="form-control" id="returnNotes" rows="3">${order.return_notes || ''}</textarea>
-        </div>
-
-        <div class="col-12">
-            <label class="form-label">Rückgabefotos hochladen</label>
-            <input type="file" class="form-control" id="returnImageUpload" accept="image/*" multiple>
-            <small class="text-muted">Maximal 10 Bilder, je 5 MB.</small>
-        </div>
-
-        <div class="col-12">
-            <button type="button" class="btn btn-outline-primary" onclick="uploadReturnImages(${order.id})">
-                Fotos hochladen
-            </button>
-        </div>
-
-        <div class="col-12">
-            <h6 class="mt-3">Vorhandene Rückgabefotos</h6>
-            <div class="row g-2">
-                ${(order.returnImages || []).length === 0
-                ? '<div class="col-12 text-muted">Noch keine Fotos vorhanden.</div>'
-                : order.returnImages.map(image => `
-                        <div class="col-6 col-md-3">
-                            <div class="card h-100">
-                                <a href="/${image.imagePath}" target="_blank">
-                                    <img src="/${image.imagePath}" class="card-img-top"
-                                        style="height: 140px; object-fit: cover;">
-                                </a>
-                                <div class="card-body p-2">
-                                    <button type="button" class="btn btn-danger btn-sm w-100"
-                                        onclick="deleteReturnImage(${image.id}, ${order.id})">
-                                        Foto löschen
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    `).join('')
-            }
-            </div>
-        </div>
-
-        <div class="col-12">
-            <button type="button" class="btn btn-success" onclick="saveOrderReturn(${order.id})">
-                Rückgabe speichern
-            </button>
-        </div>
-    </div>
-</div>
-` : ''}
-
         </div>
     `;
+}
+
+function toggleOrderItemReturnEditor(itemId) {
+    const row = document.getElementById(`orderItemReturnEditor-${itemId}`);
+
+    if (!row) return;
+
+    row.classList.toggle('d-none');
 }
 
 async function saveOrderReturn(orderId) {
@@ -1199,6 +1239,73 @@ async function saveOpeningHours() {
     } catch (error) {
         console.error('Fehler beim Speichern der Öffnungszeiten:', error);
         showAlert('Öffnungszeiten konnten nicht gespeichert werden.', 'danger');
+    }
+}
+
+function normalizeDecimalInput(value) {
+    if (value === null || value === undefined || value === '') {
+        return null;
+    }
+
+    return String(value).replace(',', '.');
+}
+
+async function saveOrderItemReturn(itemId, orderId) {
+    const payload = {
+        actualReturnDate: document.getElementById(`actualReturnDate-${itemId}`).value || null,
+        adjustedRentalStart: document.getElementById(`adjustedRentalStart-${itemId}`).value || null,
+        adjustedRentalEnd: document.getElementById(`adjustedRentalEnd-${itemId}`).value || null,
+        adjustedPricePerDay: normalizeDecimalInput(
+            document.getElementById(`adjustedPricePerDay-${itemId}`).value
+        ),
+        returnStatus: document.getElementById(`returnStatus-${itemId}`).value,
+        isDamaged: document.getElementById(`isDamaged-${itemId}`).checked,
+        damageDescription: document.getElementById(`damageDescription-${itemId}`).value.trim(),
+        isLate: document.getElementById(`isLate-${itemId}`).checked,
+        lateDescription: document.getElementById(`lateDescription-${itemId}`).value.trim(),
+        depositDecision: document.getElementById(`depositDecision-${itemId}`).value,
+        depositRefundAmount: normalizeDecimalInput(
+            document.getElementById(`depositRefundAmount-${itemId}`).value
+        ),
+        depositDeductionAmount: normalizeDecimalInput(
+            document.getElementById(`depositDeductionAmount-${itemId}`).value
+        ),
+        depositDeductionReason: document.getElementById(`depositDeductionReason-${itemId}`).value.trim(),
+        returnNotes: document.getElementById(`returnNotes-${itemId}`).value.trim()
+    };
+
+    try {
+        const response = await fetch(`/admin/order-items/${itemId}/return`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+            showAlert(result.error || 'Rückgabe konnte nicht gespeichert werden.', 'danger');
+            return;
+        }
+
+        showAlert(result.message || 'Rückgabe gespeichert.', 'success');
+
+        await loadOrders();
+
+        if (orderId) {
+            const detailsResponse = await fetch(`/admin/orders/${orderId}`);
+            const updatedOrder = await detailsResponse.json();
+
+            if (detailsResponse.ok) {
+                renderOrderDetails(updatedOrder);
+            }
+        }
+
+    } catch (error) {
+        console.error('Fehler beim Speichern der Positionsrückgabe:', error);
+        showAlert('Rückgabe konnte nicht gespeichert werden.', 'danger');
     }
 }
 

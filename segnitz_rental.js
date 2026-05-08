@@ -2441,7 +2441,24 @@ app.get('/admin/orders/:id', checkAdmin, async (req, res) => {
                 DATE_FORMAT(roi.rental_start, '%Y-%m-%d') AS rentalStart,
                 DATE_FORMAT(roi.rental_end, '%Y-%m-%d') AS rentalEnd,
                 roi.price_per_day AS pricePerDay,
-                roi.deposit
+                roi.deposit,
+                roi.actual_return_date AS actualReturnDate,
+                roi.return_status AS returnStatus,
+                roi.is_damaged AS isDamaged,
+                roi.damage_description AS damageDescription,
+                roi.is_late AS isLate,
+                roi.late_description AS lateDescription,
+                DATE_FORMAT(roi.adjusted_rental_start, '%Y-%m-%d') AS adjustedRentalStart,
+                DATE_FORMAT(roi.adjusted_rental_end, '%Y-%m-%d') AS adjustedRentalEnd,
+                roi.adjusted_price_per_day AS adjustedPricePerDay,
+                roi.adjusted_rental_total AS adjustedRentalTotal,
+                roi.deposit_decision AS depositDecision,
+                roi.deposit_refund_amount AS depositRefundAmount,
+                roi.deposit_deduction_amount AS depositDeductionAmount,
+                roi.deposit_deduction_reason AS depositDeductionReason,
+                roi.return_notes AS returnNotes,
+                DATE_FORMAT(roi.returned_at, '%Y-%m-%d %H:%i:%s') AS returnedAt,
+                DATE_FORMAT(roi.return_case_processed_at, '%Y-%m-%d %H:%i:%s') AS returnCaseProcessedAt
              FROM rental_order_items roi
              JOIN rental_products p ON p.id = roi.product_id
              WHERE roi.order_id = ?
@@ -2657,6 +2674,133 @@ app.post('/admin/orders/:id/return-images', checkAdmin, uploadReturnImages.array
         if (connection) {
             await connection.end();
         }
+    }
+});
+
+app.put('/admin/order-items/:itemId/return', checkAdmin, async (req, res) => {
+    let connection;
+
+    try {
+        const {
+            actualReturnDate,
+            adjustedRentalStart,
+            adjustedRentalEnd,
+            adjustedPricePerDay,
+            returnStatus,
+            isDamaged,
+            damageDescription,
+            isLate,
+            lateDescription,
+            depositDecision,
+            depositRefundAmount,
+            depositDeductionAmount,
+            depositDeductionReason,
+            returnNotes
+        } = req.body;
+
+        connection = await mysql.createConnection(dbConfig);
+
+        const processedByUserId = await getUserIdByEmail(connection, req.session.user);
+
+        const [items] = await connection.execute(
+            `SELECT id, order_id, price_per_day, rental_start, rental_end
+             FROM rental_order_items
+             WHERE id = ?
+             LIMIT 1`,
+            [req.params.itemId]
+        );
+
+        if (items.length === 0) {
+            return res.status(404).json({ error: 'Bestellposition nicht gefunden.' });
+        }
+
+        const item = items[0];
+
+        const finalStart = adjustedRentalStart || item.rental_start;
+        const finalEnd = adjustedRentalEnd || actualReturnDate || item.rental_end;
+        const finalPricePerDay = Number(adjustedPricePerDay || item.price_per_day || 0);
+
+        const days = calculateRentalDays(finalStart, finalEnd);
+        const adjustedRentalTotal = days * finalPricePerDay;
+
+        await connection.execute(
+            `UPDATE rental_order_items
+             SET actual_return_date = ?,
+                 adjusted_rental_start = ?,
+                 adjusted_rental_end = ?,
+                 adjusted_price_per_day = ?,
+                 adjusted_rental_total = ?,
+                 return_status = ?,
+                 is_damaged = ?,
+                 damage_description = ?,
+                 is_late = ?,
+                 late_description = ?,
+                 deposit_decision = ?,
+                 deposit_refund_amount = ?,
+                 deposit_deduction_amount = ?,
+                 deposit_deduction_reason = ?,
+                 return_notes = ?,
+                 returned_at = NOW(),
+                 return_processed_by_user_id = ?,
+                 return_case_processed_at = NOW()
+             WHERE id = ?`,
+            [
+                actualReturnDate || null,
+                adjustedRentalStart || null,
+                adjustedRentalEnd || null,
+                finalPricePerDay,
+                adjustedRentalTotal,
+                returnStatus,
+                isDamaged ? 1 : 0,
+                damageDescription || null,
+                isLate ? 1 : 0,
+                lateDescription || null,
+                depositDecision || 'pending',
+                depositRefundAmount || null,
+                depositDeductionAmount || null,
+                depositDeductionReason || null,
+                returnNotes || null,
+                processedByUserId,
+                req.params.itemId
+            ]
+        );
+
+        const [remainingOpenItems] = await connection.execute(
+            `SELECT COUNT(*) AS count
+             FROM rental_order_items
+             WHERE order_id = ?
+             AND returned_at IS NULL`,
+            [item.order_id]
+        );
+
+        if (remainingOpenItems[0].count === 0) {
+            await connection.execute(
+                `UPDATE rental_orders
+                 SET status = 'returned',
+                     returned_at = NOW(),
+                     return_case_status = 'closed'
+                 WHERE id = ?`,
+                [item.order_id]
+            );
+        } else {
+            await connection.execute(
+                `UPDATE rental_orders
+                 SET return_case_status = 'partial'
+                 WHERE id = ?`,
+                [item.order_id]
+            );
+        }
+
+        res.json({
+            message: 'Rückgabe der Bestellposition wurde gespeichert.',
+            adjustedRentalTotal
+        });
+
+    } catch (error) {
+        console.error('Fehler bei Positionsrückgabe:', error);
+        res.status(500).json({ error: 'Positionsrückgabe konnte nicht gespeichert werden.' });
+    } finally {
+        if (connection) await connection.end();
     }
 });
 
