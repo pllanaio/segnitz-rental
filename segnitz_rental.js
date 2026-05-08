@@ -481,7 +481,7 @@ const productImageStorage = multer.diskStorage({
     },
     filename: (req, file, cb) => {
         const ext = path.extname(file.originalname).toLowerCase();
-        cb(null, `product_${Date.now()}_${Math.round(Math.random() * 1E9)}${ext}`);
+        cb(null, `return_item_${req.params.itemId}_${Date.now()}_${Math.round(Math.random() * 1E9)}${ext}`);
     }
 });
 
@@ -1736,10 +1736,14 @@ app.get('/my-orders/:id', async (req, res) => {
         }
 
         const [images] = await connection.execute(
-            `SELECT id, image_path AS imagePath, created_at
-             FROM rental_order_return_images
-             WHERE order_id = ?
-             ORDER BY id DESC`,
+            `SELECT
+    id,
+    order_item_id AS orderItemId,
+    image_path AS imagePath,
+    created_at
+FROM rental_order_return_images
+WHERE order_id = ?
+ORDER BY id DESC`,
             [req.params.id]
         );
 
@@ -1768,6 +1772,24 @@ app.get('/my-orders/:id', async (req, res) => {
         }));
 
         const { confirmation_json, ...safeOrder } = orders[0];
+
+        const imagesByItemId = images.reduce((map, image) => {
+            const itemId = Number(image.orderItemId);
+
+            if (!itemId) return map;
+
+            if (!map[itemId]) {
+                map[itemId] = [];
+            }
+
+            map[itemId].push(image);
+            return map;
+        }, {});
+
+        finalItems = finalItems.map(item => ({
+            ...item,
+            returnImages: imagesByItemId[Number(item.id)] || []
+        }));
 
         res.json({
             ...safeOrder,
@@ -2641,12 +2663,25 @@ app.put('/admin/orders/:id/return', checkAdmin, async (req, res) => {
     }
 });
 
-app.post('/admin/orders/:id/return-images', checkAdmin, uploadReturnImages.array('images', 10), async (req, res) => {
+app.post('/admin/order-items/:itemId/return-images', checkAdmin, uploadReturnImages.array('images', 10), async (req, res) => {
     let connection;
 
     try {
         connection = await mysql.createConnection(dbConfig);
 
+        const [items] = await connection.execute(
+            `SELECT id, order_id
+             FROM rental_order_items
+             WHERE id = ?
+             LIMIT 1`,
+            [req.params.itemId]
+        );
+
+        if (items.length === 0) {
+            return res.status(404).json({ error: 'Bestellposition nicht gefunden.' });
+        }
+
+        const item = items[0];
         const uploadedByUserId = await getUserIdByEmail(connection, req.session.user);
 
         for (const file of req.files) {
@@ -2654,24 +2689,19 @@ app.post('/admin/orders/:id/return-images', checkAdmin, uploadReturnImages.array
 
             await connection.execute(
                 `INSERT INTO rental_order_return_images
-                 (order_id, image_path, uploaded_by_user_id)
-                 VALUES (?, ?, ?)`,
-                [req.params.id, imagePath, uploadedByUserId]
+                 (order_id, order_item_id, image_path, uploaded_by_user_id)
+                 VALUES (?, ?, ?, ?)`,
+                [item.order_id, item.id, imagePath, uploadedByUserId]
             );
         }
 
-        res.json({
-            message: 'Rückgabefotos wurden hochgeladen.'
-        });
+        res.json({ message: 'Rückgabefotos für den Artikel wurden hochgeladen.' });
+
     } catch (error) {
-        console.error('Fehler beim Hochladen der Rückgabefotos:', error);
-        res.status(500).json({
-            error: 'Rückgabefotos konnten nicht hochgeladen werden.'
-        });
+        console.error('Fehler beim Hochladen der Artikel-Rückgabefotos:', error);
+        res.status(500).json({ error: 'Rückgabefotos konnten nicht hochgeladen werden.' });
     } finally {
-        if (connection) {
-            await connection.end();
-        }
+        if (connection) await connection.end();
     }
 });
 
