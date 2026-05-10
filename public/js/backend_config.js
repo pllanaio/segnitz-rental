@@ -565,6 +565,7 @@ function renderOrderDetails(order) {
             <div class="col-12">
                 <h5>Artikel</h5>
                 ${itemsHtml}
+                ${renderOrderFinancialSummary(order)}
             </div>
 
             ${cancelHtml}
@@ -574,10 +575,10 @@ function renderOrderDetails(order) {
 
 function renderOrderItemCard(order, item) {
     const itemStatus = item.itemStatus || item.item_status || 'active';
+    const financials = calculateOrderItemFinancials(item);
     const adjustedStart = item.adjustedRentalStart || item.rentalStart;
     const adjustedEnd = item.adjustedRentalEnd || item.actualReturnDate || item.rentalEnd;
     const adjustedPrice = item.adjustedPricePerDay || item.pricePerDay;
-
     const isCancelled = itemStatus === 'cancelled';
     const isReturned = String(itemStatus).startsWith('returned_');
     const canEdit = itemStatus === 'active';
@@ -658,6 +659,35 @@ function renderOrderItemCard(order, item) {
                         `).join('')}
                     </div>
                 ` : ''}
+
+                <div class="mt-3 p-2 border rounded bg-light">
+    <strong>Preisübersicht</strong><br>
+
+    Ursprüngliche Miete brutto:
+    ${financials.originalGross.toFixed(2)} €<br>
+
+    Aktuelle Miete brutto:
+    ${financials.adjustedGross.toFixed(2)} €<br>
+
+    Differenz Mietzeitraum:
+    <span class="${financials.rentalDeltaGross > 0 ? 'text-danger' : financials.rentalDeltaGross < 0 ? 'text-success' : ''}">
+        ${financials.rentalDeltaGross.toFixed(2)} €
+    </span><br>
+
+    Kaution:
+    ${financials.deposit.toFixed(2)} €<br>
+
+    Kaution zurück:
+    <span class="text-success">${financials.depositRefund.toFixed(2)} €</span><br>
+
+    Kaution einbehalten:
+    <span class="text-danger">${financials.depositRetained.toFixed(2)} €</span><br>
+
+    Reparaturkosten / Zusatzforderung:
+    <span class="text-danger">${financials.additionalCharge.toFixed(2)} €</span>
+    ${financials.additionalChargeReason ? `<br><small>${formatTextValue(financials.additionalChargeReason)}</small>` : ''}
+</div>
+
             </div>
         </div>
     `;
@@ -1323,7 +1353,6 @@ function openOrderItemReturnModal(orderId, itemId) {
 
     document.getElementById('returnOrderId').value = orderId;
     document.getElementById('returnItemId').value = itemId;
-
     document.getElementById('returnActualDate').value = item.actualReturnDate || todayDateString();
     document.getElementById('returnAdjustedStart').value = item.adjustedRentalStart || item.rentalStart || '';
     document.getElementById('returnAdjustedEnd').value = item.adjustedRentalEnd || item.actualReturnDate || item.rentalEnd || '';
@@ -1337,9 +1366,10 @@ function openOrderItemReturnModal(orderId, itemId) {
     document.getElementById('returnDepositDeductionPercent').value = item.depositDeductionPercent || '';
     document.getElementById('returnDepositRefundAmount').value = item.depositRefundAmount || '';
     document.getElementById('returnDepositDeductionReason').value = item.depositDeductionReason || '';
+    document.getElementById('returnAdditionalChargeReason').value = item.additionalChargeReason || '';
+    document.getElementById('returnAdditionalChargeAmount').value = item.additionalChargeAmount || '';
     document.getElementById('returnNotes').value = item.returnNotes || '';
     document.getElementById('returnImageUpload').value = '';
-
     document.getElementById('returnExistingImages').innerHTML = (item.returnImages || []).map(image => `
         <div class="col-6 col-md-3">
             <img src="${image.imagePath}" class="img-fluid rounded border">
@@ -1355,7 +1385,8 @@ function openOrderItemReturnModal(orderId, itemId) {
         'returnDepositDecision',
         'returnIsDamaged',
         'returnIsLate',
-        'returnDepositDeductionPercent'
+        'returnDepositDeductionPercent',
+        'returnAdditionalChargeAmount'
     ].forEach(id => {
         const element = document.getElementById(id);
         element.oninput = applyOrderItemReturnModalRules;
@@ -1384,13 +1415,24 @@ function applyOrderItemReturnModalRules() {
     const refundAmountInput = document.getElementById('returnDepositRefundAmount');
     const deductionReasonInput = document.getElementById('returnDepositDeductionReason');
 
-    const lateDays = calculateLateDays(actualReturnDate, adjustedEnd);
-    const isLate = lateDays > 0;
-    const isDamaged = isDamagedInput.checked;
+    const selectedStatus = returnStatusInput.value;
 
-    if (isLate) {
+    if (selectedStatus === 'returned_damaged' || selectedStatus === 'returned_late_damaged') {
+        isDamagedInput.checked = true;
+    }
+
+    if (selectedStatus === 'returned_late' || selectedStatus === 'returned_late_damaged') {
         isLateInput.checked = true;
     }
+
+    const lateDays = calculateLateDays(actualReturnDate, adjustedEnd);
+
+    if (lateDays > 0) {
+        isLateInput.checked = true;
+    }
+
+    const isLate = isLateInput.checked;
+    const isDamaged = isDamagedInput.checked;
 
     if (isDamaged && isLate) {
         returnStatusInput.value = 'returned_late_damaged';
@@ -1398,9 +1440,11 @@ function applyOrderItemReturnModalRules() {
         deductionPercentInput.value = 100;
     } else if (isDamaged) {
         returnStatusInput.value = 'returned_damaged';
+        depositDecisionInput.value = 'no_refund';
+        deductionPercentInput.value = 100;
     } else if (isLate) {
         returnStatusInput.value = 'returned_late';
-    } else if (!isDamaged) {
+    } else {
         returnStatusInput.value = 'returned_ok';
     }
 
@@ -1430,12 +1474,27 @@ function applyOrderItemReturnModalRules() {
     const net = days * price;
     const gross = net * 1.19;
 
+    const additionalCharge = Number(normalizeDecimalInput(
+        document.getElementById('returnAdditionalChargeAmount').value
+    ) || 0);
+
+    const customerAdditionalDue = additionalCharge;
+    const customerCredit = refundAmount;
+
     document.getElementById('returnPricePreview').innerHTML = `
-        Tage: ${days}<br>
-        Netto: ${net.toFixed(2)} €<br>
-        Brutto: ${gross.toFixed(2)} €<br>
-        Kautionsrückzahlung: ${refundAmount.toFixed(2)} €
-    `;
+    <strong>Preisübersicht für diesen Artikel</strong><br>
+    Miettage: ${days}<br>
+    Miete netto: ${net.toFixed(2)} €<br>
+    Miete brutto: ${gross.toFixed(2)} €<hr>
+
+    Kaution: ${deposit.toFixed(2)} €<br>
+    Kaution zurück: ${refundAmount.toFixed(2)} €<br>
+    Kaution einbehalten: ${(deposit - refundAmount).toFixed(2)} €<hr>
+
+    Zusätzliche Reparaturkosten: ${additionalCharge.toFixed(2)} €<br>
+    Kunde zusätzlich zu zahlen: ${customerAdditionalDue.toFixed(2)} €<br>
+    Kunde erhält zurück: ${customerCredit.toFixed(2)} €
+`;
 }
 
 async function saveOrderItemRentalAdjustment(itemId, orderId) {
@@ -1506,7 +1565,12 @@ async function saveOrderItemReturn(itemId, orderId) {
             document.getElementById('returnDepositRefundAmount').value
         ),
         depositDeductionReason: document.getElementById('returnDepositDeductionReason').value.trim(),
+        additionalChargeReason: document.getElementById('returnAdditionalChargeReason').value.trim(),
+        additionalChargeAmount: normalizeDecimalInput(
+            document.getElementById('returnAdditionalChargeAmount').value
+        ),
         returnNotes: document.getElementById('returnNotes').value.trim()
+
     };
 
     try {
@@ -1526,6 +1590,7 @@ async function saveOrderItemReturn(itemId, orderId) {
         }
 
         await uploadReturnImagesForCurrentReturn(itemId);
+        await sendReturnSummaryEmailForItem(itemId);
 
         bootstrap.Modal.getInstance(document.getElementById('orderItemReturnModal'))?.hide();
 
@@ -1577,6 +1642,133 @@ async function uploadReturnImagesForCurrentReturn(itemId) {
 
     if (!response.ok) {
         throw new Error(result.error || 'Fotos konnten nicht hochgeladen werden.');
+    }
+}
+
+function calculateOrderItemFinancials(item) {
+    const taxRate = 0.19;
+
+    const originalStart = item.rentalStart;
+    const originalEnd = item.rentalEnd;
+    const adjustedStart = item.adjustedRentalStart || item.rentalStart;
+    const adjustedEnd = item.adjustedRentalEnd || item.actualReturnDate || item.rentalEnd;
+
+    const originalDays = calculateRentalDays(originalStart, originalEnd);
+    const adjustedDays = calculateRentalDays(adjustedStart, adjustedEnd);
+
+    const originalPricePerDay = Number(item.pricePerDay || 0);
+    const adjustedPricePerDay = Number(item.adjustedPricePerDay || item.pricePerDay || 0);
+
+    const originalNet = originalDays * originalPricePerDay;
+    const adjustedNet = adjustedDays * adjustedPricePerDay;
+
+    const originalGross = originalNet * (1 + taxRate);
+    const adjustedGross = adjustedNet * (1 + taxRate);
+
+    const rentalDeltaGross = adjustedGross - originalGross;
+
+    const deposit = Number(item.deposit || 0);
+    const depositRefund = Number(item.depositRefundAmount || deposit);
+    const depositRetained = Math.max(deposit - depositRefund, 0);
+
+    const additionalCharge = Number(item.additionalChargeAmount || 0);
+
+    return {
+        originalDays,
+        adjustedDays,
+        originalNet,
+        adjustedNet,
+        originalGross,
+        adjustedGross,
+        rentalDeltaGross,
+        deposit,
+        depositRefund,
+        depositRetained,
+        additionalCharge,
+        additionalChargeReason: item.additionalChargeReason || '',
+        customerAdditionalDue: Math.max(rentalDeltaGross, 0) + additionalCharge,
+        customerCredit: Math.max(-rentalDeltaGross, 0) + depositRefund
+    };
+}
+
+function renderOrderFinancialSummary(order) {
+    const items = order.items || [];
+
+    const totals = items.reduce((sum, item) => {
+        const f = calculateOrderItemFinancials(item);
+
+        sum.originalGross += f.originalGross;
+        sum.adjustedGross += f.adjustedGross;
+        sum.rentalDeltaGross += f.rentalDeltaGross;
+        sum.deposit += f.deposit;
+        sum.depositRefund += f.depositRefund;
+        sum.depositRetained += f.depositRetained;
+        sum.additionalCharges += f.additionalCharge;
+        sum.customerAdditionalDue += f.customerAdditionalDue;
+        sum.customerCredit += f.customerCredit;
+
+        return sum;
+    }, {
+        originalGross: 0,
+        adjustedGross: 0,
+        rentalDeltaGross: 0,
+        deposit: 0,
+        depositRefund: 0,
+        depositRetained: 0,
+        additionalCharges: 0,
+        customerAdditionalDue: 0,
+        customerCredit: 0
+    });
+
+    return `
+        <div class="card mt-4">
+            <div class="card-header">
+                <strong>Gesamtpreisberechnung</strong>
+            </div>
+            <div class="card-body">
+                <div class="row g-3">
+                    <div class="col-12 col-md-6">
+                        <strong>Miete</strong><br>
+                        Ursprünglich brutto: ${totals.originalGross.toFixed(2)} €<br>
+                        Aktuell brutto: ${totals.adjustedGross.toFixed(2)} €<br>
+                        Differenz: ${totals.rentalDeltaGross.toFixed(2)} €
+                    </div>
+
+                    <div class="col-12 col-md-6">
+                        <strong>Kaution</strong><br>
+                        Gesamt: ${totals.deposit.toFixed(2)} €<br>
+                        Zurück an Kunden: ${totals.depositRefund.toFixed(2)} €<br>
+                        Einbehalten: ${totals.depositRetained.toFixed(2)} €
+                    </div>
+
+                    <div class="col-12 col-md-6">
+                        <strong>Zusatzforderungen</strong><br>
+                        Reparaturkosten / Schäden: ${totals.additionalCharges.toFixed(2)} €
+                    </div>
+
+                    <div class="col-12 col-md-6">
+                        <strong>Abrechnung</strong><br>
+                        Kunde zusätzlich zu zahlen:
+                        <span class="text-danger">${totals.customerAdditionalDue.toFixed(2)} €</span><br>
+
+                        Kunde erhält zurück / gutgeschrieben:
+                        <span class="text-success">${totals.customerCredit.toFixed(2)} €</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+async function sendReturnSummaryEmailForItem(itemId) {
+    const response = await fetch(`/admin/order-items/${itemId}/send-return-summary`, {
+        method: 'POST'
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+        throw new Error(result.error || 'Abschlussmail konnte nicht versendet werden.');
     }
 }
 
