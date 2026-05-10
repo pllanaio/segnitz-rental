@@ -861,6 +861,246 @@ async function sendOrderEmail(recipients, orderSummary, customer, signatureDataU
     return true;
 }
 
+async function getRentalOrderSnapshot(connection, orderId) {
+    const [orders] = await connection.execute(
+        `SELECT *
+         FROM rental_orders
+         WHERE id = ?
+         LIMIT 1`,
+        [orderId]
+    );
+
+    if (orders.length === 0) return null;
+
+    const [items] = await connection.execute(
+        `SELECT
+            roi.*,
+            p.title
+         FROM rental_order_items roi
+         JOIN rental_products p ON p.id = roi.product_id
+         WHERE roi.order_id = ?
+         ORDER BY roi.id ASC`,
+        [orderId]
+    );
+
+    const [images] = await connection.execute(
+        `SELECT
+            order_item_id AS orderItemId,
+            image_path AS imagePath
+         FROM rental_order_return_images
+         WHERE order_id = ?
+         ORDER BY id ASC`,
+        [orderId]
+    );
+
+    const imagesByItemId = images.reduce((map, image) => {
+        const itemId = Number(image.orderItemId);
+        if (!map[itemId]) map[itemId] = [];
+        map[itemId].push(image);
+        return map;
+    }, {});
+
+    return {
+        ...orders[0],
+        items: items.map(item => ({
+            ...item,
+            returnImages: imagesByItemId[Number(item.id)] || []
+        }))
+    };
+}
+
+function calculateMailRentalDays(startDate, endDate) {
+    if (!startDate || !endDate) return 0;
+
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+
+    return Math.max(
+        Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1,
+        0
+    );
+}
+
+function calculateMailItemFinancials(item) {
+    const taxRate = 0.19;
+
+    const originalDays = calculateMailRentalDays(item.rental_start, item.rental_end);
+    const adjustedDays = calculateMailRentalDays(
+        item.adjusted_rental_start || item.rental_start,
+        item.adjusted_rental_end || item.actual_return_date || item.rental_end
+    );
+
+    const originalGross = originalDays * Number(item.price_per_day || 0) * (1 + taxRate);
+    const adjustedGross = adjustedDays * Number(item.adjusted_price_per_day || item.price_per_day || 0) * (1 + taxRate);
+
+    const deposit = Number(item.deposit || 0);
+    const depositRefund = Number(item.deposit_refund_amount ?? deposit);
+    const additionalCharge = Number(item.additional_charge_amount || 0);
+
+    return {
+        originalGross,
+        adjustedGross,
+        rentalDeltaGross: adjustedGross - originalGross,
+        deposit,
+        depositRefund,
+        depositRetained: Math.max(deposit - depositRefund, 0),
+        additionalCharge
+    };
+}
+
+async function sendRentalAdjustmentEmail(connection, orderId, changedItemId) {
+    const order = await getRentalOrderSnapshot(connection, orderId);
+    if (!order || !order.customer_email) return;
+
+    const changedItem = order.items.find(item => Number(item.id) === Number(changedItemId));
+
+    const rows = order.items.map(item => {
+        const start = item.adjusted_rental_start || item.rental_start;
+        const end = item.adjusted_rental_end || item.rental_end;
+        const price = Number(item.adjusted_price_per_day || item.price_per_day || 0);
+
+        return `
+            <tr>
+                <td>${escapeHtml(item.title)}</td>
+                <td>${escapeHtml(start)} bis ${escapeHtml(end)}</td>
+                <td>${price.toFixed(2)} €</td>
+                <td>${Number(item.deposit || 0).toFixed(2)} €</td>
+            </tr>
+        `;
+    }).join('');
+
+    const transporter = nodemailer.createTransport({
+        host: process.env.SMTP_HOST || 'mail.your-server.de',
+        port: Number(process.env.SMTP_PORT || 465),
+        secure: true,
+        auth: {
+            user: process.env.SMTP_USER,
+            pass: process.env.SMTP_PASS
+        }
+    });
+
+    await transporter.sendMail({
+        from: `"Segnitz Rental" <${process.env.SMTP_USER}>`,
+        to: order.customer_email,
+        bcc: 'orders@segnitzbau.de',
+        subject: `Aktualisierter Mietauftrag ${order.order_no}`,
+        html: `
+            <h2>Aktualisierter Mietauftrag ${escapeHtml(order.order_no)}</h2>
+
+            <p>
+                Ihr Mietauftrag wurde aktualisiert.
+                ${changedItem ? `Geändert wurde der Mietzeitraum für: <strong>${escapeHtml(changedItem.title)}</strong>.` : ''}
+            </p>
+
+            <h3>Aktuelle Mietartikel</h3>
+            <table border="1" cellpadding="6" cellspacing="0">
+                <thead>
+                    <tr>
+                        <th>Artikel</th>
+                        <th>Mietzeitraum</th>
+                        <th>Preis / Tag</th>
+                        <th>Kaution</th>
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+
+            <p style="margin-top:20px;">
+                Dies ist die aktualisierte Fassung Ihres Mietauftrags.
+            </p>
+        `
+    });
+}
+
+async function sendReturnSummaryEmail(connection, orderId, returnedItemId) {
+    const order = await getRentalOrderSnapshot(connection, orderId);
+    if (!order || !order.customer_email) return;
+
+    const returnedItem = order.items.find(item => Number(item.id) === Number(returnedItemId));
+
+    const totals = order.items.reduce((sum, item) => {
+        const f = calculateMailItemFinancials(item);
+
+        sum.originalGross += f.originalGross;
+        sum.adjustedGross += f.adjustedGross;
+        sum.rentalDeltaGross += f.rentalDeltaGross;
+        sum.deposit += f.deposit;
+        sum.depositRefund += f.depositRefund;
+        sum.depositRetained += f.depositRetained;
+        sum.additionalCharges += f.additionalCharge;
+
+        return sum;
+    }, {
+        originalGross: 0,
+        adjustedGross: 0,
+        rentalDeltaGross: 0,
+        deposit: 0,
+        depositRefund: 0,
+        depositRetained: 0,
+        additionalCharges: 0
+    });
+
+    const finalBalance = totals.rentalDeltaGross + totals.additionalCharges - totals.depositRefund;
+    const finalLabel = finalBalance > 0
+        ? `Noch zu zahlen: ${finalBalance.toFixed(2)} €`
+        : finalBalance < 0
+            ? `Rückzahlung/Gutschrift: ${Math.abs(finalBalance).toFixed(2)} €`
+            : 'Ausgeglichen: 0,00 €';
+
+    const imageLinks = returnedItem && returnedItem.returnImages.length > 0
+        ? returnedItem.returnImages.map(image => `
+            <li>
+                <a href="${process.env.BASE_URL}/${image.imagePath}">
+                    Rückgabefoto ansehen
+                </a>
+            </li>
+        `).join('')
+        : '<li>Keine Rückgabefotos vorhanden.</li>';
+
+    const transporter = nodemailer.createTransport({
+        host: process.env.SMTP_HOST || 'mail.your-server.de',
+        port: Number(process.env.SMTP_PORT || 465),
+        secure: true,
+        auth: {
+            user: process.env.SMTP_USER,
+            pass: process.env.SMTP_PASS
+        }
+    });
+
+    await transporter.sendMail({
+        from: `"Segnitz Rental" <${process.env.SMTP_USER}>`,
+        to: order.customer_email,
+        bcc: 'orders@segnitzbau.de',
+        subject: `Abschlussdaten zu Mietauftrag ${order.order_no}`,
+        html: `
+            <h2>Abschlussdaten zu Mietauftrag ${escapeHtml(order.order_no)}</h2>
+
+            <p>
+                Die Rückgabe wurde erfasst.
+                ${returnedItem ? `Betroffener Artikel: <strong>${escapeHtml(returnedItem.title)}</strong>` : ''}
+            </p>
+
+            <h3>Abrechnung</h3>
+            <p>
+                Miete ursprünglich brutto: ${totals.originalGross.toFixed(2)} €<br>
+                Miete aktuell brutto: ${totals.adjustedGross.toFixed(2)} €<br>
+                Mietdifferenz: ${totals.rentalDeltaGross.toFixed(2)} €<br><br>
+
+                Kaution gesamt: ${totals.deposit.toFixed(2)} €<br>
+                Kaution zurück: ${totals.depositRefund.toFixed(2)} €<br>
+                Kaution einbehalten: ${totals.depositRetained.toFixed(2)} €<br><br>
+
+                Reparaturkosten / Zusatzforderungen: ${totals.additionalCharges.toFixed(2)} €<br><br>
+
+                <strong>${finalLabel}</strong>
+            </p>
+
+            <h3>Rückgabefotos</h3>
+            <ul>${imageLinks}</ul>
+        `
+    });
+}
+
 app.post('/data', async (req, res) => {
     let connection;
 
@@ -1660,6 +1900,8 @@ app.get('/my-orders', async (req, res) => {
                 roi.deposit_refund_amount AS depositRefundAmount,
                 roi.deposit_deduction_amount AS depositDeductionAmount,
                 roi.deposit_deduction_reason AS depositDeductionReason,
+                roi.additional_charge_reason AS additionalChargeReason,
+                roi.additional_charge_amount AS additionalChargeAmount,
                 DATE_FORMAT(roi.returned_at, '%Y-%m-%d %H:%i:%s') AS returnedAt,
                 DATE_FORMAT(roi.return_case_processed_at, '%Y-%m-%d %H:%i:%s') AS returnCaseProcessedAt
              FROM rental_order_items roi
@@ -1760,6 +2002,8 @@ app.get('/my-orders/:id', async (req, res) => {
                 roi.deposit_refund_amount AS depositRefundAmount,
                 roi.deposit_deduction_amount AS depositDeductionAmount,
                 roi.deposit_deduction_reason AS depositDeductionReason,
+                roi.additional_charge_reason AS additionalChargeReason,
+                roi.additional_charge_amount AS additionalChargeAmount,
                 roi.return_notes AS returnNotes,
                 DATE_FORMAT(roi.returned_at, '%Y-%m-%d %H:%i:%s') AS returnedAt,
                 DATE_FORMAT(roi.return_case_processed_at, '%Y-%m-%d %H:%i:%s') AS returnCaseProcessedAt
@@ -2571,6 +2815,8 @@ app.get('/admin/orders/:id', checkAdmin, async (req, res) => {
                 roi.deposit_refund_amount AS depositRefundAmount,
                 roi.deposit_deduction_amount AS depositDeductionAmount,
                 roi.deposit_deduction_reason AS depositDeductionReason,
+                roi.additional_charge_reason AS additionalChargeReason,
+                roi.additional_charge_amount AS additionalChargeAmount,
                 roi.return_notes AS returnNotes,
                 DATE_FORMAT(roi.returned_at, '%Y-%m-%d %H:%i:%s') AS returnedAt,
                 DATE_FORMAT(roi.return_case_processed_at, '%Y-%m-%d %H:%i:%s') AS returnCaseProcessedAt
@@ -2883,6 +3129,42 @@ app.post('/admin/order-items/:itemId/return-images', checkAdmin, uploadReturnIma
     }
 });
 
+app.post('/admin/order-items/:itemId/send-return-summary', checkAdmin, async (req, res) => {
+    let connection;
+
+    try {
+        connection = await mysql.createConnection(dbConfig);
+
+        const [items] = await connection.execute(
+            `SELECT id, order_id
+             FROM rental_order_items
+             WHERE id = ?
+             LIMIT 1`,
+            [req.params.itemId]
+        );
+
+        if (items.length === 0) {
+            return res.status(404).json({
+                error: 'Bestellposition nicht gefunden.'
+            });
+        }
+
+        await sendReturnSummaryEmail(connection, items[0].order_id, req.params.itemId);
+
+        res.json({
+            message: 'Abschlussmail wurde versendet.'
+        });
+
+    } catch (error) {
+        console.error('Fehler beim Versand der Rückgabe-Abschlussmail:', error);
+        res.status(500).json({
+            error: 'Abschlussmail konnte nicht versendet werden.'
+        });
+    } finally {
+        if (connection) await connection.end();
+    }
+});
+
 app.put('/admin/order-items/:itemId/rental-adjustment', checkAdmin, async (req, res) => {
     let connection;
 
@@ -2965,6 +3247,12 @@ app.put('/admin/order-items/:itemId/rental-adjustment', checkAdmin, async (req, 
             [item.order_id]
         );
 
+        try {
+            await sendRentalAdjustmentEmail(connection, item.order_id, req.params.itemId);
+        } catch (mailError) {
+            console.error('Mietzeitraum wurde gespeichert, aber Mailversand fehlgeschlagen:', mailError);
+        }
+
         res.json({
             message: 'Mietzeitraum wurde gespeichert.',
             adjustedRentalTotal
@@ -2997,6 +3285,8 @@ app.put('/admin/order-items/:itemId/return', checkAdmin, async (req, res) => {
             depositDecision,
             depositDeductionPercent,
             depositDeductionReason,
+            additionalChargeReason,
+            additionalChargeAmount,
             returnNotes
         } = req.body;
 
@@ -3032,7 +3322,9 @@ app.put('/admin/order-items/:itemId/return', checkAdmin, async (req, res) => {
         const deposit = Number(item.deposit || 0);
         const deductionPercent = Number(req.body.depositDeductionPercent || 0);
         const depositDeductionAmount = deposit * deductionPercent / 100;
-        const depositRefundAmount = Math.max(deposit - depositDeductionAmount, 0);
+
+        const calculatedDepositRefundAmount =
+            Math.max(deposit - depositDeductionAmount, 0);
 
         const validReturnStatuses = [
             'returned_ok',
@@ -3044,6 +3336,20 @@ app.put('/admin/order-items/:itemId/return', checkAdmin, async (req, res) => {
         if (!validReturnStatuses.includes(returnStatus)) {
             return res.status(400).json({
                 error: 'Ungültiger Rückgabestatus.'
+            });
+        }
+
+        const normalizedAdditionalChargeAmount =
+            additionalChargeAmount === null || additionalChargeAmount === undefined || additionalChargeAmount === ''
+                ? null
+                : Number(additionalChargeAmount);
+
+        if (
+            normalizedAdditionalChargeAmount !== null &&
+            (Number.isNaN(normalizedAdditionalChargeAmount) || normalizedAdditionalChargeAmount < 0)
+        ) {
+            return res.status(400).json({
+                error: 'Zusätzlicher Betrag ist ungültig.'
             });
         }
 
@@ -3065,6 +3371,8 @@ app.put('/admin/order-items/:itemId/return', checkAdmin, async (req, res) => {
                  deposit_deduction_amount = ?,
                  deposit_refund_amount = ?,
                  deposit_deduction_reason = ?,
+                 additional_charge_reason = ?,
+                 additional_charge_amount = ?,
                  return_notes = ?,
                  returned_at = NOW(),
                  return_processed_by_user_id = ?,
@@ -3085,8 +3393,10 @@ app.put('/admin/order-items/:itemId/return', checkAdmin, async (req, res) => {
                 depositDecision || 'pending',
                 deductionPercent,
                 depositDeductionAmount,
-                depositRefundAmount,
+                calculatedDepositRefundAmount,
                 depositDeductionReason || null,
+                additionalChargeReason || null,
+                normalizedAdditionalChargeAmount,
                 returnNotes || null,
                 processedByUserId,
                 req.params.itemId

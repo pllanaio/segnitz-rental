@@ -128,18 +128,11 @@ function cancelMyOrder(orderId) {
 function renderMyOrderDetails(order) {
     const body = document.getElementById('myOrderDetailsBody');
 
-    const itemsHtml = (order.items || []).map(item => `
-        <tr>
-            <td>${item.title}</td>
-            <td>${item.rentalStart} bis ${item.rentalEnd}</td>
-            <td>${Number(item.pricePerDay || 0).toFixed(2)} €</td>
-            <td>${Number(item.deposit || 0).toFixed(2)} €</td>
-        </tr>
-    `).join('');
+    const itemsHtml = (order.items || [])
+        .map(item => renderMyOrderItemCard(item))
+        .join('');
 
     const status = String(order.status || '').trim().toLowerCase();
-    const canShowReturnSection = status !== 'cancelled';
-
     const canReview = status === 'returned';
 
     const uniqueReviewItems = [];
@@ -169,104 +162,17 @@ function renderMyOrderDetails(order) {
     }
 
     const reviewButtonsHtml = canReview
-        ? uniqueReviewItems.map(item => {
-            if (item.review) {
-                return `
-                <div class="card mt-3">
-                    <div class="card-body">
-                        <h6>Ihre Bewertung für ${item.title}</h6>
-
-                        <div class="mb-2">
-                            <strong>Sterne:</strong>
-                            ${'★'.repeat(Number(item.review.rating))}
-                            ${'☆'.repeat(5 - Number(item.review.rating))}
-                        </div>
-
-                        <div class="mb-2">
-                            <strong>Kommentar:</strong><br>
-                            <div class="border rounded p-2 bg-light">
-                                ${item.review.reviewText || '<span class="text-muted">Kein Kommentar</span>'}
-                            </div>
-                        </div>
-
-                        <div class="text-muted small">
-                            Bewertet am: ${item.review.createdAt || '-'}
-                        </div>
-                    </div>
-                </div>
-            `;
-            }
-
-            return `
-            <div class="card mt-3">
-                <div class="card-body">
-                    <h6>Bewertung für ${item.title}</h6>
-
-                    <div class="alert alert-light border small mb-3">
-                        Dieses Produkt kann pro Bestellung einmal bewertet werden,
-                        auch wenn es in mehreren Mietzeiträumen gebucht wurde.
-                    </div>
-
-                    <div class="mb-2">
-                        <label class="form-label" for="rating-${item.productId}">
-                            Sterne
-                        </label>
-
-                        <select class="form-select form-select-sm" id="rating-${item.productId}">
-                            <option value="">Bitte auswählen</option>
-                            <option value="5">5 Sterne</option>
-                            <option value="4">4 Sterne</option>
-                            <option value="3">3 Sterne</option>
-                            <option value="2">2 Sterne</option>
-                            <option value="1">1 Stern</option>
-                        </select>
-                    </div>
-
-                    <div class="mb-2">
-                        <label class="form-label" for="reviewText-${item.productId}">
-                            Kommentar
-                        </label>
-
-                        <textarea
-                            class="form-control form-control-sm"
-                            id="reviewText-${item.productId}"
-                            rows="2"></textarea>
-                    </div>
-
-                    <button
-                        type="button"
-                        class="btn btn-outline-success btn-sm"
-                        onclick="submitProductReview(${item.productId}, ${order.id})">
-
-                        Bewertung speichern
-                    </button>
-                </div>
-            </div>
-        `;
-        }).join('')
+        ? uniqueReviewItems.map(item => renderReviewCard(item, order.id)).join('')
         : '';
 
     const cancelButtonHtml = canCancelOrder(order)
         ? `
-        <button type="button" class="btn btn-outline-danger btn-sm mt-3"
-            onclick="cancelMyOrder(${order.id})">
-            Bestellung stornieren
-        </button>
-    `
+            <button type="button" class="btn btn-outline-danger btn-sm mt-3"
+                onclick="cancelMyOrder(${order.id})">
+                Bestellung stornieren
+            </button>
+        `
         : '';
-
-    const imagesHtml = (order.returnImages || []).length === 0
-        ? '<div class="text-muted">Keine Rückgabefotos vorhanden.</div>'
-        : `<div class="row g-2">
-            ${order.returnImages.map(image => `
-                <div class="col-6 col-md-3">
-                    <a href="/${image.imagePath}" target="_blank">
-                        <img src="/${image.imagePath}" class="img-fluid rounded border"
-                            style="height: 140px; object-fit: cover; width: 100%;">
-                    </a>
-                </div>
-            `).join('')}
-        </div>`;
 
     body.innerHTML = `
         <div class="row g-4">
@@ -275,14 +181,14 @@ function renderMyOrderDetails(order) {
                 <p>
                     <strong>Bestellnummer:</strong> ${order.order_no}<br>
                     <strong>Status:</strong> ${getStatusBadge(order.status)}<br>
-                        ${order.status === 'cancelled' ? `
-        <strong>Storniert am:</strong> ${order.cancelled_at || '-'}<br>
-        <strong>Stornogrund:</strong><br>
-        <span class="text-danger">${formatTextValue(order.cancel_reason)}</span><br>
-    ` : ''}
 
-                    <strong>Zahlung:</strong> ${getPaymentBadge(order.payment_status)}<br>
-                    <strong>Rückgabe:</strong> ${getReturnBadge(order.return_status, order.status)}
+                    ${order.status === 'cancelled' ? `
+                        <strong>Storniert am:</strong> ${order.cancelled_at || '-'}<br>
+                        <strong>Stornogrund:</strong><br>
+                        <span class="text-danger">${formatTextValue(order.cancel_reason)}</span><br>
+                    ` : ''}
+
+                    <strong>Zahlung:</strong> ${getPaymentBadge(order.payment_status)}
                 </p>
             </div>
 
@@ -299,50 +205,329 @@ function renderMyOrderDetails(order) {
 
             <div class="col-12">
                 <h5>Artikel</h5>
-                <div class="table-responsive">
-                    <table class="table table-sm table-striped">
-                        <thead>
-                            <tr>
-                                <th>Artikel</th>
-                                <th>Mietzeitraum</th>
-                                <th>Preis / Tag</th>
-                                <th>Kaution</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${itemsHtml || '<tr><td colspan="4">Keine Artikel vorhanden.</td></tr>'}
-                        </tbody>
-                    </table>
+                ${itemsHtml || '<div class="alert alert-info">Keine Artikel vorhanden.</div>'}
+            </div>
+
+            <div class="col-12">
+                ${renderMyOrderFinancialSummary(order)}
+            </div>
+
+            ${canReview ? `
+                <div class="col-12">
+                    <h5>Produkte bewerten</h5>
+                    ${reviewButtonsHtml}
+                </div>
+            ` : ''}
+
+            ${cancelButtonHtml}
+        </div>
+    `;
+}
+
+function renderReviewCard(item, orderId) {
+    if (item.review) {
+        return `
+            <div class="card mt-3">
+                <div class="card-body">
+                    <h6>Ihre Bewertung für ${item.title}</h6>
+                    <div class="mb-2">
+                        <strong>Sterne:</strong>
+                        ${'★'.repeat(Number(item.review.rating))}
+                        ${'☆'.repeat(5 - Number(item.review.rating))}
+                    </div>
+                    <div class="mb-2">
+                        <strong>Kommentar:</strong><br>
+                        <div class="border rounded p-2 bg-light">
+                            ${item.review.reviewText || '<span class="text-muted">Kein Kommentar</span>'}
+                        </div>
+                    </div>
+                    <div class="text-muted small">
+                        Bewertet am: ${item.review.createdAt || '-'}
+                    </div>
                 </div>
             </div>
-            ${canReview ? `
-    <div class="col-12">
-        <h5>Produkte bewerten</h5>
-        ${reviewButtonsHtml}
-    </div>
-` : ''}
-            ${cancelButtonHtml}
+        `;
+    }
 
-${canShowReturnSection ? `
-    <div class="col-12">
-        <h5>Rückgabe / Kaution</h5>
-        <p>
-            <strong>Beschädigt:</strong> ${order.is_damaged ? 'Ja' : 'Nein'}<br>
-            <strong>Beschreibung Schaden:</strong> ${order.damage_description || '-'}<br>
-            <strong>Verspätet:</strong> ${order.is_late ? 'Ja' : 'Nein'}<br>
-            <strong>Beschreibung Verspätung:</strong> ${order.late_description || '-'}<br>
-            <strong>Kautionsentscheidung:</strong> ${order.deposit_decision || 'pending'}<br>
-            <strong>Rückzahlung:</strong> ${order.deposit_refund_amount || '-'} €<br>
-            <strong>Abzug:</strong> ${order.deposit_deduction_amount || '-'} €<br>
-            <strong>Grund für Abzug:</strong> ${order.deposit_deduction_reason || '-'}
-        </p>
-    </div>
+    return `
+        <div class="card mt-3">
+            <div class="card-body">
+                <h6>Bewertung für ${item.title}</h6>
 
-    <div class="col-12">
-        <h5>Rückgabefotos</h5>
-        ${imagesHtml}
-    </div>
-` : ''}
+                <div class="mb-2">
+                    <label class="form-label" for="rating-${item.productId}">
+                        Sterne
+                    </label>
+                    <select class="form-select form-select-sm" id="rating-${item.productId}">
+                        <option value="">Bitte auswählen</option>
+                        <option value="5">5 Sterne</option>
+                        <option value="4">4 Sterne</option>
+                        <option value="3">3 Sterne</option>
+                        <option value="2">2 Sterne</option>
+                        <option value="1">1 Stern</option>
+                    </select>
+                </div>
+
+                <div class="mb-2">
+                    <label class="form-label" for="reviewText-${item.productId}">
+                        Kommentar
+                    </label>
+                    <textarea class="form-control form-control-sm"
+                        id="reviewText-${item.productId}" rows="2"></textarea>
+                </div>
+
+                <button type="button"
+                    class="btn btn-outline-success btn-sm"
+                    onclick="submitProductReview(${item.productId}, ${orderId})">
+                    Bewertung speichern
+                </button>
+            </div>
+        </div>
+    `;
+}
+
+function renderMyOrderItemCard(item) {
+    const financials = calculateOrderItemFinancials(item);
+
+    const imagesHtml = (item.returnImages || []).length === 0
+        ? '<div class="text-muted small">Keine Rückgabefotos zu diesem Artikel vorhanden.</div>'
+        : `
+            <div class="row g-2 mt-2">
+                ${(item.returnImages || []).map(image => `
+                    <div class="col-6 col-md-3">
+                        <a href="/${image.imagePath}" target="_blank">
+                            <img src="/${image.imagePath}" class="img-fluid rounded border"
+                                style="height: 120px; object-fit: cover; width: 100%;">
+                        </a>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+
+    return `
+        <div class="card mb-3">
+            <div class="card-body">
+                <h6 class="mb-1">${item.title}</h6>
+                <div class="small text-muted mb-2">Position #${item.id}</div>
+
+                <div>
+                    <strong>Mietzeitraum:</strong>
+                    ${item.rentalStart || '-'} bis ${item.rentalEnd || '-'}
+                </div>
+
+                ${(item.adjustedRentalStart || item.adjustedRentalEnd || item.actualReturnDate) ? `
+                    <div>
+                        <strong>Aktueller Zeitraum:</strong>
+                        ${item.adjustedRentalStart || item.rentalStart || '-'} bis
+                        ${item.adjustedRentalEnd || item.actualReturnDate || item.rentalEnd || '-'}
+                    </div>
+                ` : ''}
+
+                <div>
+                    <strong>Rückgabe:</strong> ${getReturnBadge(item.returnStatus, item.itemStatus)}
+                </div>
+
+                <div class="mt-3 p-2 border rounded bg-light">
+                    <strong>Preisübersicht</strong><br>
+                    Ursprüngliche Miete brutto: ${financials.originalGross.toFixed(2)} €<br>
+                    Aktuelle Miete brutto: ${financials.adjustedGross.toFixed(2)} €<br>
+                    Mietdifferenz:
+                    <span class="${financials.rentalDeltaGross > 0 ? 'text-danger' : financials.rentalDeltaGross < 0 ? 'text-success' : ''}">
+                        ${financials.rentalDeltaGross.toFixed(2)} €
+                    </span><hr>
+
+                    Kaution: ${financials.deposit.toFixed(2)} €<br>
+                    Kaution zurück:
+                    <span class="text-success">${financials.depositRefund.toFixed(2)} €</span><br>
+                    Kaution einbehalten:
+                    <span class="text-danger">${financials.depositRetained.toFixed(2)} €</span><hr>
+
+                    Reparaturkosten / Zusatzforderung:
+                    <span class="text-danger">${financials.additionalCharge.toFixed(2)} €</span>
+                    ${financials.additionalChargeReason ? `<br><small>${formatTextValue(financials.additionalChargeReason)}</small>` : ''}
+                </div>
+
+                <div class="mt-3">
+                    <strong>Rückgabefotos</strong>
+                    ${imagesHtml}
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function calculateRentalDays(startDate, endDate) {
+    if (!startDate || !endDate) return 0;
+
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+
+    return Math.max(
+        Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1,
+        0
+    );
+}
+
+function calculateOrderItemFinancials(item) {
+    const taxRate = 0.19;
+
+    const originalDays = calculateRentalDays(item.rentalStart, item.rentalEnd);
+    const adjustedDays = calculateRentalDays(
+        item.adjustedRentalStart || item.rentalStart,
+        item.adjustedRentalEnd || item.actualReturnDate || item.rentalEnd
+    );
+
+    const originalGross = originalDays * Number(item.pricePerDay || 0) * (1 + taxRate);
+    const adjustedGross = adjustedDays * Number(item.adjustedPricePerDay || item.pricePerDay || 0) * (1 + taxRate);
+    const rentalDeltaGross = adjustedGross - originalGross;
+
+    const deposit = Number(item.deposit || 0);
+    const depositRefund = Number(item.depositRefundAmount ?? deposit);
+    const depositRetained = Math.max(deposit - depositRefund, 0);
+    const additionalCharge = Number(item.additionalChargeAmount || 0);
+
+    return {
+        originalGross,
+        adjustedGross,
+        rentalDeltaGross,
+        deposit,
+        depositRefund,
+        depositRetained,
+        additionalCharge,
+        additionalChargeReason: item.additionalChargeReason || '',
+        customerAdditionalDue: Math.max(rentalDeltaGross, 0) + additionalCharge,
+        customerCredit: Math.max(-rentalDeltaGross, 0) + depositRefund
+    };
+}
+
+function renderMyOrderFinancialSummary(order) {
+    const taxRate = 0.19;
+
+    const totals = (order.items || []).reduce((sum, item) => {
+        const f = calculateOrderItemFinancials(item);
+
+        sum.originalGross += f.originalGross;
+        sum.adjustedGross += f.adjustedGross;
+        sum.rentalDeltaGross += f.rentalDeltaGross;
+
+        sum.deposit += f.deposit;
+        sum.depositRefund += f.depositRefund;
+        sum.depositRetained += f.depositRetained;
+
+        sum.additionalCharges += f.additionalCharge;
+
+        return sum;
+    }, {
+        originalGross: 0,
+        adjustedGross: 0,
+        rentalDeltaGross: 0,
+
+        deposit: 0,
+        depositRefund: 0,
+        depositRetained: 0,
+
+        additionalCharges: 0
+    });
+
+    const adjustedNet = totals.adjustedGross / (1 + taxRate);
+    const vatAmount = totals.adjustedGross - adjustedNet;
+
+    /*
+        Endsaldo:
+        + Mietdifferenz
+        + Zusatzforderungen
+        - Kautionsrückzahlung
+    */
+
+    const finalBalance =
+        totals.rentalDeltaGross +
+        totals.additionalCharges -
+        totals.depositRefund;
+
+    const finalBalanceClass =
+        finalBalance > 0
+            ? 'text-danger'
+            : finalBalance < 0
+                ? 'text-success'
+                : 'text-muted';
+
+    const finalBalanceLabel =
+        finalBalance > 0
+            ? 'Kunde muss zusätzlich zahlen'
+            : finalBalance < 0
+                ? 'Kunde erhält Rückzahlung'
+                : 'Bestellung vollständig ausgeglichen';
+
+    return `
+        <div class="card mt-4">
+            <div class="card-header">
+                <strong>Gesamtpreisberechnung</strong>
+            </div>
+
+            <div class="card-body">
+
+                <div class="row g-4">
+
+                    <div class="col-12 col-lg-6">
+                        <h6>Miete</h6>
+
+                        Ursprüngliche Miete brutto:
+                        ${totals.originalGross.toFixed(2)} €<br>
+
+                        Aktuelle Miete netto:
+                        ${adjustedNet.toFixed(2)} €<br>
+
+                        MwSt. (19 %):
+                        ${vatAmount.toFixed(2)} €<br>
+
+                        Aktuelle Miete brutto:
+                        <strong>${totals.adjustedGross.toFixed(2)} €</strong><br>
+
+                        Mietdifferenz:
+                        <span class="${totals.rentalDeltaGross > 0 ? 'text-danger' : totals.rentalDeltaGross < 0 ? 'text-success' : ''}">
+                            ${totals.rentalDeltaGross.toFixed(2)} €
+                        </span>
+                    </div>
+
+                    <div class="col-12 col-lg-6">
+                        <h6>Kaution & Schäden</h6>
+
+                        Kaution gesamt:
+                        ${totals.deposit.toFixed(2)} €<br>
+
+                        Kaution zurück:
+                        <span class="text-success">
+                            ${totals.depositRefund.toFixed(2)} €
+                        </span><br>
+
+                        Kaution einbehalten:
+                        <span class="text-danger">
+                            ${totals.depositRetained.toFixed(2)} €
+                        </span><br>
+
+                        Reparaturkosten / Zusatzforderungen:
+                        <span class="text-danger">
+                            ${totals.additionalCharges.toFixed(2)} €
+                        </span>
+                    </div>
+
+                    <div class="col-12">
+                        <hr>
+
+                        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                            <div>
+                                <strong>${finalBalanceLabel}</strong>
+                            </div>
+
+                            <div class="fs-4 fw-bold ${finalBalanceClass}">
+                                ${Math.abs(finalBalance).toFixed(2)} €
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+
+            </div>
         </div>
     `;
 }
