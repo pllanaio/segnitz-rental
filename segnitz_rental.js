@@ -2022,7 +2022,7 @@ app.get('/my-orders/:id', async (req, res) => {
                 roi.item_status AS itemStatus,
                 DATE_FORMAT(roi.cancelled_at, '%Y-%m-%d %H:%i:%s') AS cancelledAt,
                 roi.cancel_reason AS cancelReason,
-                roi.actual_return_date AS actualReturnDate,
+                DATE_FORMAT(roi.actual_return_date, '%Y-%m-%d') AS actualReturnDate,
                 roi.return_status AS returnStatus,
                 roi.is_damaged AS isDamaged,
                 roi.damage_description AS damageDescription,
@@ -2835,7 +2835,7 @@ app.get('/admin/orders/:id', checkAdmin, async (req, res) => {
                 DATE_FORMAT(roi.rental_end, '%Y-%m-%d') AS rentalEnd,
                 roi.price_per_day AS pricePerDay,
                 roi.deposit,
-                roi.actual_return_date AS actualReturnDate,
+                DATE_FORMAT(roi.actual_return_date, '%Y-%m-%d') AS actualReturnDate,
                 roi.return_status AS returnStatus,
                 roi.is_damaged AS isDamaged,
                 roi.damage_description AS damageDescription,
@@ -3344,6 +3344,12 @@ app.put('/admin/order-items/:itemId/return', checkAdmin, async (req, res) => {
         if (item.item_status === 'cancelled') {
             return res.status(409).json({
                 error: 'Stornierte Artikel können nicht zurückgegeben werden.'
+            });
+        }
+
+        if (String(item.item_status || '').startsWith('returned_')) {
+            return res.status(409).json({
+                error: 'Diese Rückgabe wurde bereits festgeschrieben und kann nicht erneut geändert werden.'
             });
         }
 

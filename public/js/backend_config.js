@@ -582,7 +582,7 @@ function renderOrderItemCard(order, item) {
     const isCancelled = itemStatus === 'cancelled';
     const isReturned = String(itemStatus).startsWith('returned_');
     const canEdit = itemStatus === 'active';
-    const canReturn = !isCancelled;
+    const canReturn = !isCancelled && !isReturned;
 
     return `
         <div class="card mb-3">
@@ -1614,12 +1614,25 @@ async function saveOrderItemReturn(itemId, orderId) {
 }
 
 async function submitOrderItemReturn() {
+    showAlert(
+        'Achtung: Die Rückgabe wird beim Speichern festgeschrieben und kann danach nicht mehr rückgängig gemacht werden.',
+        'warning'
+    );
+
+    const confirmed = await showConfirm(
+        'Die Rückgabe wird festgeschrieben und kann danach nicht mehr geändert oder rückgängig gemacht werden. Möchten Sie fortfahren?',
+        'Rückgabe festschreiben'
+    );
+
+    if (!confirmed) {
+        return;
+    }
+
     const orderId = document.getElementById('returnOrderId').value;
     const itemId = document.getElementById('returnItemId').value;
 
     await saveOrderItemReturn(itemId, orderId);
 }
-
 async function uploadReturnImagesForCurrentReturn(itemId) {
     const input = document.getElementById('returnImageUpload');
 
