@@ -1012,6 +1012,40 @@ async function sendRentalAdjustmentEmail(connection, orderId, changedItemId) {
     });
 }
 
+function getReadableReturnStatus(status) {
+    switch (String(status || '').trim()) {
+        case 'returned_ok':
+            return 'Ordnungsgemäß zurückgegeben';
+
+        case 'returned_late':
+            return 'Verspätet zurückgegeben';
+
+        case 'returned_damaged':
+            return 'Beschädigt zurückgegeben';
+
+        case 'returned_late_damaged':
+            return 'Verspätet und beschädigt zurückgegeben';
+
+        case 'pending':
+            return 'Rückgabe offen';
+
+        default:
+            return status || '-';
+    }
+}
+
+function formatGermanDate(dateValue) {
+    if (!dateValue) return '-';
+
+    const date = new Date(dateValue);
+
+    if (Number.isNaN(date.getTime())) {
+        return '-';
+    }
+
+    return date.toLocaleDateString('de-DE');
+}
+
 async function sendReturnSummaryEmail(connection, orderId, returnedItemId) {
     const order = await getRentalOrderSnapshot(connection, orderId);
     if (!order || !order.customer_email) return;
@@ -1070,8 +1104,10 @@ async function sendReturnSummaryEmail(connection, orderId, returnedItemId) {
 
             <h3>Rückgabe</h3>
             <p>
-                Rückgabestatus: ${escapeHtml(returnedItem.return_status || '-')}<br>
-                Rückgabedatum: ${escapeHtml(returnedItem.actual_return_date || '-')}<br>
+                Rückgabestatus:
+                ${escapeHtml(getReadableReturnStatus(returnedItem.return_status))}<br>
+                Rückgabedatum:
+                ${escapeHtml(formatGermanDate(returnedItem.actual_return_date))}<br>
                 Beschädigt: ${returnedItem.is_damaged ? 'Ja' : 'Nein'}<br>
                 Verspätet: ${returnedItem.is_late ? 'Ja' : 'Nein'}<br>
                 ${returnedItem.damage_description ? `Schaden: ${escapeHtml(returnedItem.damage_description)}<br>` : ''}
