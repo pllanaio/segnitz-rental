@@ -258,20 +258,30 @@ async function mergeGuestCartIntoUserCart(connection, req, userEmail) {
     );
 }
 
-async function checkProductAvailability(connection, productId, rentalStart, rentalEnd, excludeCartItemId = null) {
-    const [orderConflicts] = await connection.execute(
-        `SELECT roi.id
-         FROM rental_order_items roi
-         JOIN rental_orders ro ON ro.id = roi.order_id
-         WHERE roi.product_id = ?
-         AND ro.status IN ('reserved', 'paid', 'confirmed', 'active')
-         AND (ro.status != 'reserved' OR ro.reserved_until > NOW())
-         AND roi.returned_at IS NULL
-         AND COALESCE(roi.adjusted_rental_start, roi.rental_start) <= ?
-         AND COALESCE(roi.adjusted_rental_end, roi.rental_end) >= ?
-         LIMIT 1`,
-        [productId, rentalEnd, rentalStart]
-    );
+async function checkProductAvailability(connection, productId, rentalStart, rentalEnd, excludeOrderItemId = null) {
+    let sql = `
+        SELECT roi.id
+        FROM rental_order_items roi
+        JOIN rental_orders ro ON ro.id = roi.order_id
+        WHERE roi.product_id = ?
+        AND ro.status IN ('reserved', 'paid', 'confirmed', 'active')
+        AND (ro.status != 'reserved' OR ro.reserved_until > NOW())
+        AND roi.returned_at IS NULL
+        AND COALESCE(roi.item_status, 'active') != 'cancelled'
+        AND COALESCE(roi.adjusted_rental_start, roi.rental_start) <= ?
+        AND COALESCE(roi.adjusted_rental_end, roi.rental_end) >= ?
+    `;
+
+    const params = [productId, rentalEnd, rentalStart];
+
+    if (excludeOrderItemId) {
+        sql += ` AND roi.id != ?`;
+        params.push(excludeOrderItemId);
+    }
+
+    sql += ` LIMIT 1`;
+
+    const [orderConflicts] = await connection.execute(sql, params);
 
     return orderConflicts.length === 0;
 }
@@ -1622,25 +1632,59 @@ app.get('/my-orders', async (req, res) => {
                 status,
                 payment_method,
                 payment_status,
-                return_status,
-                is_damaged,
-                damage_description,
-                is_late,
-                late_description,
-                deposit_decision,
-                deposit_refund_amount,
-                deposit_deduction_amount,
-                deposit_deduction_reason,
                 DATE_FORMAT(reserved_until, '%Y-%m-%d %H:%i:%s') AS reserved_until,
-                DATE_FORMAT(returned_at, '%Y-%m-%d %H:%i:%s') AS returned_at,
-                DATE_FORMAT(return_case_processed_at, '%Y-%m-%d %H:%i:%s') AS return_case_processed_at
+                DATE_FORMAT(returned_at, '%Y-%m-%d %H:%i:%s') AS returned_at
              FROM rental_orders
              WHERE customer_email = ?
              ORDER BY id DESC`,
             [req.session.user]
         );
 
-        res.json(orders);
+        const orderIds = orders.map(order => order.id);
+
+        if (orderIds.length === 0) {
+            return res.json([]);
+        }
+
+        const placeholders = orderIds.map(() => '?').join(',');
+
+        const [items] = await connection.execute(
+            `SELECT
+                roi.id,
+                roi.order_id AS orderId,
+                roi.item_status AS itemStatus,
+                roi.return_status AS returnStatus,
+                roi.is_damaged AS isDamaged,
+                roi.is_late AS isLate,
+                roi.deposit_decision AS depositDecision,
+                roi.deposit_refund_amount AS depositRefundAmount,
+                roi.deposit_deduction_amount AS depositDeductionAmount,
+                roi.deposit_deduction_reason AS depositDeductionReason,
+                DATE_FORMAT(roi.returned_at, '%Y-%m-%d %H:%i:%s') AS returnedAt,
+                DATE_FORMAT(roi.return_case_processed_at, '%Y-%m-%d %H:%i:%s') AS returnCaseProcessedAt
+             FROM rental_order_items roi
+             WHERE roi.order_id IN (${placeholders})
+             ORDER BY roi.id ASC`,
+            orderIds
+        );
+
+        const itemsByOrderId = items.reduce((map, item) => {
+            const orderId = Number(item.orderId);
+
+            if (!map[orderId]) {
+                map[orderId] = [];
+            }
+
+            map[orderId].push(item);
+            return map;
+        }, {});
+
+        const ordersWithItems = orders.map(order => ({
+            ...order,
+            items: itemsByOrderId[Number(order.id)] || []
+        }));
+
+        res.json(ordersWithItems);
     } catch (error) {
         console.error('Fehler beim Laden der Kundenbestellungen:', error);
         res.status(500).json({ error: 'Bestellungen konnten nicht geladen werden.' });
@@ -1674,18 +1718,8 @@ app.get('/my-orders/:id', async (req, res) => {
                 status,
                 payment_method,
                 payment_status,
-                return_status,
-                is_damaged,
-                damage_description,
-                is_late,
-                late_description,
-                deposit_decision,
-                deposit_refund_amount,
-                deposit_deduction_amount,
-                deposit_deduction_reason,
                 DATE_FORMAT(reserved_until, '%Y-%m-%d %H:%i:%s') AS reserved_until,
                 DATE_FORMAT(returned_at, '%Y-%m-%d %H:%i:%s') AS returned_at,
-                DATE_FORMAT(return_case_processed_at, '%Y-%m-%d %H:%i:%s') AS return_case_processed_at,
                 confirmation_json,
                 cancel_reason,
                 DATE_FORMAT(cancelled_at, '%Y-%m-%d %H:%i:%s') AS cancelled_at
@@ -1708,7 +1742,27 @@ app.get('/my-orders/:id', async (req, res) => {
                 DATE_FORMAT(roi.rental_start, '%Y-%m-%d') AS rentalStart,
                 DATE_FORMAT(roi.rental_end, '%Y-%m-%d') AS rentalEnd,
                 roi.price_per_day AS pricePerDay,
-                roi.deposit
+                roi.deposit AS deposit,
+                roi.item_status AS itemStatus,
+                DATE_FORMAT(roi.cancelled_at, '%Y-%m-%d %H:%i:%s') AS cancelledAt,
+                roi.cancel_reason AS cancelReason,
+                roi.actual_return_date AS actualReturnDate,
+                roi.return_status AS returnStatus,
+                roi.is_damaged AS isDamaged,
+                roi.damage_description AS damageDescription,
+                roi.is_late AS isLate,
+                roi.late_description AS lateDescription,
+                DATE_FORMAT(roi.adjusted_rental_start, '%Y-%m-%d') AS adjustedRentalStart,
+                DATE_FORMAT(roi.adjusted_rental_end, '%Y-%m-%d') AS adjustedRentalEnd,
+                roi.adjusted_price_per_day AS adjustedPricePerDay,
+                roi.adjusted_rental_total AS adjustedRentalTotal,
+                roi.deposit_decision AS depositDecision,
+                roi.deposit_refund_amount AS depositRefundAmount,
+                roi.deposit_deduction_amount AS depositDeductionAmount,
+                roi.deposit_deduction_reason AS depositDeductionReason,
+                roi.return_notes AS returnNotes,
+                DATE_FORMAT(roi.returned_at, '%Y-%m-%d %H:%i:%s') AS returnedAt,
+                DATE_FORMAT(roi.return_case_processed_at, '%Y-%m-%d %H:%i:%s') AS returnCaseProcessedAt
              FROM rental_order_items roi
              JOIN rental_products p ON p.id = roi.product_id
              WHERE roi.order_id = ?
@@ -1853,6 +1907,16 @@ app.post('/my-orders/:id/cancel', async (req, res) => {
             [orderId]
         );
 
+        await connection.execute(
+            `UPDATE rental_order_items
+             SET item_status = 'cancelled',
+                 cancelled_at = NOW(),
+                 cancel_reason = 'Storniert durch Kunde'
+             WHERE order_id = ?
+             AND COALESCE(item_status, 'active') = 'active'`,
+            [orderId]
+        );
+
         await connection.commit();
 
         return res.json({
@@ -1944,8 +2008,8 @@ app.post('/products/:id/reviews', async (req, res) => {
              JOIN rental_order_items roi ON roi.order_id = ro.id
              WHERE ro.id = ?
              AND ro.customer_email = ?
-             AND ro.status = 'returned'
              AND roi.product_id = ?
+             AND roi.item_status LIKE 'returned_%'
              LIMIT 1`,
             [orderId, req.session.user, productId]
         );
@@ -2096,6 +2160,7 @@ app.get('/products/:id/availability', async (req, res) => {
      AND ro.status IN ('reserved', 'paid', 'confirmed', 'active')
      AND (ro.status != 'reserved' OR ro.reserved_until > NOW())
      AND roi.returned_at IS NULL
+     AND COALESCE(roi.item_status, 'active') != 'cancelled'
      ORDER BY COALESCE(roi.adjusted_rental_start, roi.rental_start) ASC`,
             [req.params.id]
         );
@@ -2394,28 +2459,55 @@ app.get('/admin/orders', checkAdmin, async (req, res) => {
 
         const [orders] = await connection.execute(
             `SELECT
-                id,
-                order_no,
-                customer_email,
-                customer_first_name,
-                customer_last_name,
-                customer_company,
-                customer_phone,
-                customer_address,
-                customer_zip,
-                customer_city,
-                status,
-                payment_method,
-                payment_status,
-                return_status,
-                deposit_decision,
-                DATE_FORMAT(reserved_until, '%Y-%m-%d %H:%i:%s') AS reserved_until,
-                DATE_FORMAT(returned_at, '%Y-%m-%d %H:%i:%s') AS returned_at
-             FROM rental_orders
-             ORDER BY id DESC`
+        id,
+        order_no,
+        customer_email,
+        customer_first_name,
+        customer_last_name,
+        customer_company,
+        customer_phone,
+        customer_address,
+        customer_zip,
+        customer_city,
+        status,
+        payment_method,
+        payment_status,
+        return_status,
+        deposit_decision,
+        DATE_FORMAT(reserved_until, '%Y-%m-%d %H:%i:%s') AS reserved_until,
+        DATE_FORMAT(returned_at, '%Y-%m-%d %H:%i:%s') AS returned_at
+     FROM rental_orders
+     ORDER BY id DESC`
         );
 
-        res.json(orders);
+        const [items] = await connection.execute(
+            `SELECT
+        roi.id,
+        roi.order_id AS orderId,
+        roi.item_status AS itemStatus,
+        roi.return_status AS returnStatus,
+        DATE_FORMAT(roi.returned_at, '%Y-%m-%d %H:%i:%s') AS returnedAt
+     FROM rental_order_items roi
+     ORDER BY roi.id ASC`
+        );
+
+        const itemsByOrderId = items.reduce((map, item) => {
+            const orderId = Number(item.orderId);
+
+            if (!map[orderId]) {
+                map[orderId] = [];
+            }
+
+            map[orderId].push(item);
+            return map;
+        }, {});
+
+        const ordersWithItems = orders.map(order => ({
+            ...order,
+            items: itemsByOrderId[Number(order.id)] || []
+        }));
+
+        res.json(ordersWithItems);
     } catch (error) {
         console.error('Fehler beim Laden der Bestellungen:', error);
         res.status(500).json({
@@ -2457,6 +2549,9 @@ app.get('/admin/orders/:id', checkAdmin, async (req, res) => {
             `SELECT
                 roi.id,
                 roi.product_id AS productId,
+                roi.item_status AS itemStatus,
+                DATE_FORMAT(roi.cancelled_at, '%Y-%m-%d %H:%i:%s') AS cancelledAt,
+                roi.cancel_reason AS cancelReason,
                 p.title,
                 DATE_FORMAT(roi.rental_start, '%Y-%m-%d') AS rentalStart,
                 DATE_FORMAT(roi.rental_end, '%Y-%m-%d') AS rentalEnd,
@@ -2561,6 +2656,7 @@ app.put('/admin/orders/:id/cancel', checkAdmin, async (req, res) => {
         }
 
         connection = await mysql.createConnection(dbConfig);
+        await connection.beginTransaction();
 
         const [orders] = await connection.execute(
             `SELECT id, status
@@ -2601,11 +2697,36 @@ app.put('/admin/orders/:id/cancel', checkAdmin, async (req, res) => {
             ]
         );
 
+        await connection.execute(
+            `UPDATE rental_order_items
+             SET item_status = 'cancelled',
+                 cancelled_at = NOW(),
+                 cancelled_by_user_id = ?,
+                 cancel_reason = ?
+             WHERE order_id = ?
+             AND COALESCE(item_status, 'active') = 'active'`,
+            [
+                cancelledByUserId,
+                cancelReason.trim(),
+                req.params.id
+            ]
+        );
+
+        await connection.commit();
+
         res.json({
             message: 'Bestellung wurde storniert.'
         });
 
     } catch (error) {
+        if (connection) {
+            try {
+                await connection.rollback();
+            } catch (rollbackError) {
+                console.error('Rollback fehlgeschlagen:', rollbackError);
+            }
+        }
+
         console.error('Fehler beim Stornieren der Bestellung:', error);
         res.status(500).json({
             error: 'Bestellung konnte nicht storniert werden.'
@@ -2615,73 +2736,108 @@ app.put('/admin/orders/:id/cancel', checkAdmin, async (req, res) => {
     }
 });
 
-app.put('/admin/orders/:id/return', checkAdmin, async (req, res) => {
+app.put('/admin/order-items/:itemId/cancel', checkAdmin, async (req, res) => {
     let connection;
 
     try {
-        const {
-            returnStatus,
-            isDamaged,
-            damageDescription,
-            isLate,
-            lateDescription,
-            depositDecision,
-            depositRefundAmount,
-            depositDeductionAmount,
-            depositDeductionReason,
-            returnNotes
-        } = req.body;
+        const { cancelReason } = req.body;
+
+        if (!cancelReason || !cancelReason.trim()) {
+            return res.status(400).json({
+                error: 'Ein Stornogrund ist erforderlich.'
+            });
+        }
 
         connection = await mysql.createConnection(dbConfig);
+        await connection.beginTransaction();
 
-        const processedByUserId = await getUserIdByEmail(connection, req.session.user);
+        const [items] = await connection.execute(
+            `SELECT id, order_id, item_status
+             FROM rental_order_items
+             WHERE id = ?
+             LIMIT 1`,
+            [req.params.itemId]
+        );
+
+        if (items.length === 0) {
+            await connection.rollback();
+            return res.status(404).json({
+                error: 'Bestellposition nicht gefunden.'
+            });
+        }
+
+        const item = items[0];
+
+        if (item.item_status !== 'active') {
+            await connection.rollback();
+            return res.status(409).json({
+                error: 'Nur aktive Artikel können storniert werden.'
+            });
+        }
+
+        const cancelledByUserId = await getUserIdByEmail(connection, req.session.user);
 
         await connection.execute(
-            `UPDATE rental_orders
-             SET status = 'returned',
-                 return_status = ?,
-                 returned_at = NOW(),
-                 return_processed_by_user_id = ?,
-                 return_notes = ?,
-                 is_damaged = ?,
-                 damage_description = ?,
-                 is_late = ?,
-                 late_description = ?,
-                 deposit_decision = ?,
-                 deposit_refund_amount = ?,
-                 deposit_deduction_amount = ?,
-                 deposit_deduction_reason = ?,
-                 return_case_status = 'closed',
-                 return_case_processed_at = NOW()
+            `UPDATE rental_order_items
+             SET item_status = 'cancelled',
+                 cancelled_at = NOW(),
+                 cancelled_by_user_id = ?,
+                 cancel_reason = ?
              WHERE id = ?`,
             [
-                returnStatus,
-                processedByUserId,
-                returnNotes || null,
-                isDamaged ? 1 : 0,
-                damageDescription || null,
-                isLate ? 1 : 0,
-                lateDescription || null,
-                depositDecision,
-                depositRefundAmount || null,
-                depositDeductionAmount || null,
-                depositDeductionReason || null,
-                req.params.id
+                cancelledByUserId,
+                cancelReason.trim(),
+                req.params.itemId
             ]
         );
 
+        const [openItems] = await connection.execute(
+            `SELECT COUNT(*) AS count
+             FROM rental_order_items
+             WHERE order_id = ?
+             AND COALESCE(item_status, 'active') = 'active'`,
+            [item.order_id]
+        );
+
+        if (openItems[0].count === 0) {
+            await connection.execute(
+                `UPDATE rental_orders
+                 SET status = 'cancelled',
+                     return_case_status = 'closed'
+                 WHERE id = ?
+                 AND status NOT IN ('returned', 'expired')`,
+                [item.order_id]
+            );
+        } else {
+            await connection.execute(
+                `UPDATE rental_orders
+                 SET return_case_status = 'partial'
+                 WHERE id = ?`,
+                [item.order_id]
+            );
+        }
+
+        await connection.commit();
+
         res.json({
-            message: 'Rückgabe wurde gespeichert.'
+            message: 'Artikel wurde storniert.'
         });
+
     } catch (error) {
-        console.error('Fehler beim Speichern der Rückgabe:', error);
+        if (connection) {
+            try {
+                await connection.rollback();
+            } catch (rollbackError) {
+                console.error('Rollback fehlgeschlagen:', rollbackError);
+            }
+        }
+
+        console.error('Fehler beim Stornieren der Bestellposition:', error);
         res.status(500).json({
-            error: 'Rückgabe konnte nicht gespeichert werden.'
+            error: 'Artikel konnte nicht storniert werden.'
         });
     } finally {
-        if (connection) {
-            await connection.end();
-        }
+        if (connection) await connection.end();
     }
 });
 
@@ -2740,7 +2896,7 @@ app.put('/admin/order-items/:itemId/rental-adjustment', checkAdmin, async (req, 
         connection = await mysql.createConnection(dbConfig);
 
         const [items] = await connection.execute(
-            `SELECT id, order_id, price_per_day, rental_start, rental_end
+            `SELECT id, order_id, product_id, price_per_day, rental_start, rental_end, item_status
              FROM rental_order_items
              WHERE id = ?
              LIMIT 1`,
@@ -2752,6 +2908,11 @@ app.put('/admin/order-items/:itemId/rental-adjustment', checkAdmin, async (req, 
         }
 
         const item = items[0];
+        if (item.item_status !== 'active') {
+            return res.status(409).json({
+                error: 'Nur aktive Artikel können geändert werden.'
+            });
+        }
 
         const finalStart = adjustedRentalStart || item.rental_start;
         const finalEnd = adjustedRentalEnd || item.rental_end;
@@ -2765,6 +2926,20 @@ app.put('/admin/order-items/:itemId/rental-adjustment', checkAdmin, async (req, 
 
         const days = calculateRentalDays(finalStart, finalEnd);
         const adjustedRentalTotal = days * finalPricePerDay;
+
+        const available = await checkProductAvailability(
+            connection,
+            item.product_id,
+            finalStart,
+            finalEnd,
+            req.params.itemId
+        );
+
+        if (!available) {
+            return res.status(409).json({
+                error: 'Das Produkt ist im gewählten Zeitraum nicht verfügbar.'
+            });
+        }
 
         await connection.execute(
             `UPDATE rental_order_items
@@ -2830,7 +3005,7 @@ app.put('/admin/order-items/:itemId/return', checkAdmin, async (req, res) => {
         const processedByUserId = await getUserIdByEmail(connection, req.session.user);
 
         const [items] = await connection.execute(
-            `SELECT id, order_id, price_per_day, rental_start, rental_end, deposit
+            `SELECT id, order_id, price_per_day, rental_start, rental_end, deposit, item_status
              FROM rental_order_items
              WHERE id = ?
              LIMIT 1`,
@@ -2842,6 +3017,11 @@ app.put('/admin/order-items/:itemId/return', checkAdmin, async (req, res) => {
         }
 
         const item = items[0];
+        if (item.item_status === 'cancelled') {
+            return res.status(409).json({
+                error: 'Stornierte Artikel können nicht zurückgegeben werden.'
+            });
+        }
 
         const finalStart = adjustedRentalStart || item.rental_start;
         const finalEnd = adjustedRentalEnd || actualReturnDate || item.rental_end;
@@ -2854,6 +3034,19 @@ app.put('/admin/order-items/:itemId/return', checkAdmin, async (req, res) => {
         const depositDeductionAmount = deposit * deductionPercent / 100;
         const depositRefundAmount = Math.max(deposit - depositDeductionAmount, 0);
 
+        const validReturnStatuses = [
+            'returned_ok',
+            'returned_late',
+            'returned_damaged',
+            'returned_late_damaged'
+        ];
+
+        if (!validReturnStatuses.includes(returnStatus)) {
+            return res.status(400).json({
+                error: 'Ungültiger Rückgabestatus.'
+            });
+        }
+
         await connection.execute(
             `UPDATE rental_order_items
              SET actual_return_date = ?,
@@ -2861,6 +3054,7 @@ app.put('/admin/order-items/:itemId/return', checkAdmin, async (req, res) => {
                  adjusted_rental_end = ?,
                  adjusted_price_per_day = ?,
                  adjusted_rental_total = ?,
+                 item_status = ?,
                  return_status = ?,
                  is_damaged = ?,
                  damage_description = ?,
@@ -2883,6 +3077,7 @@ app.put('/admin/order-items/:itemId/return', checkAdmin, async (req, res) => {
                 finalPricePerDay,
                 adjustedRentalTotal,
                 returnStatus,
+                returnStatus,
                 isDamaged ? 1 : 0,
                 damageDescription || null,
                 isLate ? 1 : 0,
@@ -2902,7 +3097,7 @@ app.put('/admin/order-items/:itemId/return', checkAdmin, async (req, res) => {
             `SELECT COUNT(*) AS count
              FROM rental_order_items
              WHERE order_id = ?
-             AND returned_at IS NULL`,
+             AND COALESCE(item_status, 'active') = 'active'`,
             [item.order_id]
         );
 
@@ -3178,8 +3373,7 @@ app.put('/cart/items/:id', async (req, res) => {
             connection,
             items[0].product_id,
             rentalStart,
-            rentalEnd,
-            req.params.id
+            rentalEnd
         );
 
         if (!isAvailable) {
