@@ -1018,36 +1018,24 @@ async function sendReturnSummaryEmail(connection, orderId, returnedItemId) {
 
     const returnedItem = order.items.find(item => Number(item.id) === Number(returnedItemId));
 
-    const totals = order.items.reduce((sum, item) => {
-        const f = calculateMailItemFinancials(item);
+    if (!returnedItem) {
+        throw new Error('Zurückgegebener Artikel wurde nicht gefunden.');
+    }
 
-        sum.originalGross += f.originalGross;
-        sum.adjustedGross += f.adjustedGross;
-        sum.rentalDeltaGross += f.rentalDeltaGross;
-        sum.deposit += f.deposit;
-        sum.depositRefund += f.depositRefund;
-        sum.depositRetained += f.depositRetained;
-        sum.additionalCharges += f.additionalCharge;
+    const itemFinancials = calculateMailItemFinancials(returnedItem);
 
-        return sum;
-    }, {
-        originalGross: 0,
-        adjustedGross: 0,
-        rentalDeltaGross: 0,
-        deposit: 0,
-        depositRefund: 0,
-        depositRetained: 0,
-        additionalCharges: 0
-    });
+    const finalBalance =
+        itemFinancials.rentalDeltaGross +
+        itemFinancials.additionalCharge -
+        itemFinancials.depositRefund;
 
-    const finalBalance = totals.rentalDeltaGross + totals.additionalCharges - totals.depositRefund;
     const finalLabel = finalBalance > 0
-        ? `Noch zu zahlen: ${finalBalance.toFixed(2)} €`
+        ? `Noch zu zahlen für diesen Artikel: ${finalBalance.toFixed(2)} €`
         : finalBalance < 0
-            ? `Rückzahlung/Gutschrift: ${Math.abs(finalBalance).toFixed(2)} €`
-            : 'Ausgeglichen: 0,00 €';
+            ? `Rückzahlung/Gutschrift für diesen Artikel: ${Math.abs(finalBalance).toFixed(2)} €`
+            : 'Dieser Artikel ist ausgeglichen: 0,00 €';
 
-    const imageLinks = returnedItem && returnedItem.returnImages.length > 0
+    const imageLinks = returnedItem.returnImages.length > 0
         ? returnedItem.returnImages.map(image => `
             <li>
                 <a href="${process.env.BASE_URL}/${image.imagePath}">
@@ -1071,31 +1059,41 @@ async function sendReturnSummaryEmail(connection, orderId, returnedItemId) {
         from: `"Segnitz Rental" <${process.env.SMTP_USER}>`,
         to: order.customer_email,
         bcc: 'orders@segnitzbau.de',
-        subject: `Abschlussdaten zu Mietauftrag ${order.order_no}`,
+        subject: `Abschlussdaten zu Artikel "${returnedItem.title}" aus Mietauftrag ${order.order_no}`,
         html: `
-            <h2>Abschlussdaten zu Mietauftrag ${escapeHtml(order.order_no)}</h2>
+            <h2>Abschlussdaten zu Ihrem Mietartikel</h2>
 
             <p>
-                Die Rückgabe wurde erfasst.
-                ${returnedItem ? `Betroffener Artikel: <strong>${escapeHtml(returnedItem.title)}</strong>` : ''}
+                Mietauftrag: <strong>${escapeHtml(order.order_no)}</strong><br>
+                Artikel: <strong>${escapeHtml(returnedItem.title)}</strong>
             </p>
 
-            <h3>Abrechnung</h3>
+            <h3>Rückgabe</h3>
             <p>
-                Miete ursprünglich brutto: ${totals.originalGross.toFixed(2)} €<br>
-                Miete aktuell brutto: ${totals.adjustedGross.toFixed(2)} €<br>
-                Mietdifferenz: ${totals.rentalDeltaGross.toFixed(2)} €<br><br>
+                Rückgabestatus: ${escapeHtml(returnedItem.return_status || '-')}<br>
+                Rückgabedatum: ${escapeHtml(returnedItem.actual_return_date || '-')}<br>
+                Beschädigt: ${returnedItem.is_damaged ? 'Ja' : 'Nein'}<br>
+                Verspätet: ${returnedItem.is_late ? 'Ja' : 'Nein'}<br>
+                ${returnedItem.damage_description ? `Schaden: ${escapeHtml(returnedItem.damage_description)}<br>` : ''}
+                ${returnedItem.late_description ? `Verspätung: ${escapeHtml(returnedItem.late_description)}<br>` : ''}
+            </p>
 
-                Kaution gesamt: ${totals.deposit.toFixed(2)} €<br>
-                Kaution zurück: ${totals.depositRefund.toFixed(2)} €<br>
-                Kaution einbehalten: ${totals.depositRetained.toFixed(2)} €<br><br>
+            <h3>Abrechnung für diesen Artikel</h3>
+            <p>
+                Miete ursprünglich brutto: ${itemFinancials.originalGross.toFixed(2)} €<br>
+                Miete aktuell brutto: ${itemFinancials.adjustedGross.toFixed(2)} €<br>
+                Mietdifferenz: ${itemFinancials.rentalDeltaGross.toFixed(2)} €<br><br>
 
-                Reparaturkosten / Zusatzforderungen: ${totals.additionalCharges.toFixed(2)} €<br><br>
+                Kaution: ${itemFinancials.deposit.toFixed(2)} €<br>
+                Kaution zurück: ${itemFinancials.depositRefund.toFixed(2)} €<br>
+                Kaution einbehalten: ${itemFinancials.depositRetained.toFixed(2)} €<br><br>
+
+                Reparaturkosten / Zusatzforderung: ${itemFinancials.additionalCharge.toFixed(2)} €<br><br>
 
                 <strong>${finalLabel}</strong>
             </p>
 
-            <h3>Rückgabefotos</h3>
+            <h3>Rückgabefotos zu diesem Artikel</h3>
             <ul>${imageLinks}</ul>
         `
     });
