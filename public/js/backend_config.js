@@ -775,6 +775,10 @@ function showConfirm(message, title = 'Aktion bestätigen') {
         modalElement.addEventListener('hidden.bs.modal', onCancel, { once: true });
 
         modal.show();
+        setTimeout(() => {
+            document.querySelectorAll('.modal-backdrop')
+                .forEach(backdrop => backdrop.style.zIndex = '3080');
+        }, 50);
     });
 }
 
@@ -1604,6 +1608,11 @@ async function saveOrderItemReturn(itemId, orderId) {
 
             if (detailsResponse.ok) {
                 renderOrderDetails(updatedOrder);
+
+                setTimeout(() => {
+                    const detailsModalElement = document.getElementById('orderDetailsModal');
+                    bootstrap.Modal.getOrCreateInstance(detailsModalElement).show();
+                }, 300);
             }
         }
 
