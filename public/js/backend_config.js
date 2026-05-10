@@ -776,9 +776,16 @@ function showConfirm(message, title = 'Aktion bestätigen') {
 
         modal.show();
         setTimeout(() => {
-            document.querySelectorAll('.modal-backdrop')
-                .forEach(backdrop => backdrop.style.zIndex = '3080');
+            const backdrops = document.querySelectorAll('.modal-backdrop');
+            const latestBackdrop = backdrops[backdrops.length - 1];
+
+            if (latestBackdrop) {
+                latestBackdrop.style.zIndex = '3080';
+            }
+
+            modalElement.style.zIndex = '3090';
         }, 50);
+
     });
 }
 
@@ -1597,6 +1604,7 @@ async function saveOrderItemReturn(itemId, orderId) {
         await sendReturnSummaryEmailForItem(itemId);
 
         bootstrap.Modal.getInstance(document.getElementById('orderItemReturnModal'))?.hide();
+        setTimeout(restoreOrderDetailsModalLayer, 300);
 
         showAlert(result.message || 'Rückgabe gespeichert.', 'success');
 
@@ -1791,6 +1799,18 @@ async function sendReturnSummaryEmailForItem(itemId) {
 
     if (!response.ok) {
         throw new Error(result.error || 'Abschlussmail konnte nicht versendet werden.');
+    }
+}
+
+function restoreOrderDetailsModalLayer() {
+    const detailsModal = document.getElementById('orderDetailsModal');
+
+    document.querySelectorAll('.modal-backdrop').forEach(backdrop => {
+        backdrop.style.zIndex = '';
+    });
+
+    if (detailsModal && detailsModal.classList.contains('show')) {
+        document.body.classList.add('modal-open');
     }
 }
 
