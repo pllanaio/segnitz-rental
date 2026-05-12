@@ -8,6 +8,8 @@ const dbConfig = require('../config/db');
 const { checkAdmin } = require('../middleware/auth');
 const { syncProductCategories } = require('../utils/categories');
 const { uploadProductImages } = require('../utils/uploads');
+const { runDatabaseCleanup } = require('../utils/cleanup');
+const { checkProductAvailability } = require('../utils/availability');
 
 module.exports = router;
 
@@ -310,7 +312,7 @@ router.delete('/products/:id', checkAdmin, async (req, res) => {
 
         // 3. Dateien auf der Festplatte löschen
         for (const image of images) {
-            const filePath = path.join(__dirname, 'public', image.image_path);
+            const filePath = path.join(__dirname, '..', 'public', image.image_path);
 
             try {
                 if (fs.existsSync(filePath)) {
