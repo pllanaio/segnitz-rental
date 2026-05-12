@@ -10,15 +10,6 @@ function escapeHtml(value) {
 }
 // hier deine Mail-Funktionen einfügen
 
-function escapeHtml(value) {
-    return String(value || '')
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;');
-}
-
 async function sendOrderEmail(recipients, orderSummary, customer, signatureDataUrl) {
     if (!recipients || recipients.length === 0) {
         return false;
@@ -464,20 +455,13 @@ Falls Sie diese Anfrage nicht gestellt haben, ignorieren Sie diese E-Mail.`,
     });
 }
 
-
-
-
-
-
-
-
-const nodemailer = require('nodemailer');
-
-function escapeHtml(value) {
-    return String(value || '')
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;');
-}
+module.exports = {
+    escapeHtml,
+    sendOrderEmail,
+    getRentalOrderSnapshot,
+    sendRentalAdjustmentEmail,
+    sendReturnSummaryEmail,
+    sendVerificationEmail,
+    sendPasswordChangedEmail,
+    sendPasswordResetEmail
+};

@@ -47,6 +47,7 @@ const {
 } = require('./services/cartService');
 
 const cartRoutes = require('./routes/cartRoutes');
+const { checkProductAvailability } = require('./utils/availability');
 
 
 async function cleanupOnStartup() {
