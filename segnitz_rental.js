@@ -16,6 +16,7 @@ const fsp = require("fs").promises;
 const fs = require('fs');
 const mysql = require('mysql2/promise');
 const dbConfig = require('./config/db');
+const crypto = require('crypto');
 const multer = require('multer');
 const { checkAdmin } = require('./middleware/auth');
 const { syncProductCategories } = require('./utils/categories');
