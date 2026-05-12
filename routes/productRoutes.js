@@ -431,7 +431,7 @@ router.delete('/product-images/:id', checkAdmin, async (req, res) => {
             return res.status(404).json({ error: 'Bild nicht gefunden.' });
         }
 
-        const imagePath = path.join(__dirname, 'public', rows[0].image_path);
+        const imagePath = path.join(__dirname, '..', 'public', rows[0].image_path);
 
         await connection.execute(
             'DELETE FROM rental_product_images WHERE id = ?',
