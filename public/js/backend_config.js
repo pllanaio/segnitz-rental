@@ -121,7 +121,7 @@ async function saveProduct(event) {
     event.preventDefault();
 
     const productId = document.getElementById('productId').value;
-
+    const categories = getSelectedCategories();
     const payload = {
         productKey: document.getElementById('productKey').value.trim(),
         title: document.getElementById('title').value.trim(),
@@ -129,11 +129,8 @@ async function saveProduct(event) {
         pricePerDay: Number(document.getElementById('pricePerDay').value),
         deposit: Number(document.getElementById('deposit').value),
         imagePath: '',
-        category: document.getElementById('category').value,
-        categories: document.getElementById('category').value
-            .split(',')
-            .map(item => item.trim())
-            .filter(Boolean),
+        category: categories[0] || '',
+        categories,
         isActive: document.getElementById('isActive').checked
     };
 
@@ -192,12 +189,15 @@ function editProduct(id) {
     document.getElementById('description').value = product.description || '';
     document.getElementById('pricePerDay').value = product.price_per_day;
     document.getElementById('deposit').value = product.deposit;
-    setSelectedCategories(
-        (product.category || '')
-            .split(',')
-            .map(item => item.trim())
-            .filter(Boolean)
-    );
+    const categoryNames = Array.isArray(product.categories)
+        ? product.categories.map(category =>
+            typeof category === 'string'
+                ? category
+                : category.name
+        )
+        : [];
+
+    setSelectedCategories(categoryNames);
     document.getElementById('isActive').checked = product.is_active === 1;
     renderExistingImages(product);
 
@@ -405,6 +405,7 @@ function resetForm() {
     document.getElementById('cancelEditBtn').classList.add('d-none');
     document.getElementById('existingImagesWrapper').classList.add('d-none');
     document.getElementById('existingImages').innerHTML = '';
+    setSelectedCategories([]);
 }
 
 async function loadOrders() {
