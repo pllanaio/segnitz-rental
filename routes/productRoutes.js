@@ -535,7 +535,6 @@ router.get('/products/:id/current-availability', async (req, res) => {
     }
 });
 
-
 router.get('/products/:id/reviews', async (req, res) => {
     let connection;
 
