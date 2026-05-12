@@ -11,7 +11,7 @@ const { uploadProductImages } = require('../utils/uploads');
 
 module.exports = router;
 
-app.get('/categories', async (req, res) => {
+router.get('/categories', async (req, res) => {
     let connection;
 
     try {
@@ -40,7 +40,7 @@ app.get('/categories', async (req, res) => {
     }
 });
 
-app.get('/products', async (req, res) => {
+router.get('/products', async (req, res) => {
     let connection;
 
     try {
@@ -121,7 +121,7 @@ app.get('/products', async (req, res) => {
     }
 });
 
-app.get('/products/:id/availability', async (req, res) => {
+router.get('/products/:id/availability', async (req, res) => {
     let connection;
 
     try {
@@ -156,7 +156,7 @@ app.get('/products/:id/availability', async (req, res) => {
     }
 });
 
-app.post('/products', checkAdmin, async (req, res) => {
+router.post('/products', checkAdmin, async (req, res) => {
     const { productKey, title, description, pricePerDay, deposit, imagePath, category, categories } = req.body;
 
     const normalizedPricePerDay = Number(String(pricePerDay).replace(',', '.'));
@@ -221,7 +221,7 @@ app.post('/products', checkAdmin, async (req, res) => {
     }
 });
 
-app.put('/products/:id', checkAdmin, async (req, res) => {
+router.put('/products/:id', checkAdmin, async (req, res) => {
     const { title, description, pricePerDay, deposit, imagePath, isActive, category, categories } = req.body;
 
     const normalizedPricePerDay = Number(String(pricePerDay).replace(',', '.'));
@@ -290,7 +290,7 @@ app.put('/products/:id', checkAdmin, async (req, res) => {
     }
 });
 
-app.delete('/products/:id', checkAdmin, async (req, res) => {
+router.delete('/products/:id', checkAdmin, async (req, res) => {
     let connection;
 
     try {
@@ -336,7 +336,7 @@ app.delete('/products/:id', checkAdmin, async (req, res) => {
     }
 });
 
-app.post('/products/:id/images', checkAdmin, uploadProductImages.array('images', 10), async (req, res) => {
+router.post('/products/:id/images', checkAdmin, uploadProductImages.array('images', 10), async (req, res) => {
     const productId = req.params.id;
 
     let connection;
@@ -379,7 +379,7 @@ app.post('/products/:id/images', checkAdmin, uploadProductImages.array('images',
     }
 });
 
-app.put('/products/:id/images/order', checkAdmin, async (req, res) => {
+router.put('/products/:id/images/order', checkAdmin, async (req, res) => {
     const productId = req.params.id;
     const { imageIds } = req.body;
 
@@ -414,7 +414,7 @@ app.put('/products/:id/images/order', checkAdmin, async (req, res) => {
     }
 });
 
-app.delete('/product-images/:id', checkAdmin, async (req, res) => {
+router.delete('/product-images/:id', checkAdmin, async (req, res) => {
     let connection;
 
     try {
@@ -449,7 +449,7 @@ app.delete('/product-images/:id', checkAdmin, async (req, res) => {
     }
 });
 
-app.get('/products/bestsellers', async (req, res) => {
+router.get('/products/bestsellers', async (req, res) => {
     let connection;
 
     try {
@@ -500,7 +500,7 @@ app.get('/products/bestsellers', async (req, res) => {
     }
 });
 
-app.get('/products/:id/current-availability', async (req, res) => {
+router.get('/products/:id/current-availability', async (req, res) => {
     let connection;
 
     try {
@@ -536,7 +536,7 @@ app.get('/products/:id/current-availability', async (req, res) => {
 });
 
 
-app.get('/products/:id/reviews', async (req, res) => {
+router.get('/products/:id/reviews', async (req, res) => {
     let connection;
 
     try {
@@ -569,7 +569,7 @@ app.get('/products/:id/reviews', async (req, res) => {
     }
 });
 
-app.post('/products/:id/reviews', async (req, res) => {
+router.post('/products/:id/reviews', async (req, res) => {
     if (!req.session.user) {
         return res.status(401).json({ error: 'Nicht angemeldet.' });
     }
@@ -648,7 +648,7 @@ app.post('/products/:id/reviews', async (req, res) => {
     }
 });
 
-app.get('/my-reviews', async (req, res) => {
+router.get('/my-reviews', async (req, res) => {
     if (!req.session.user) {
         return res.status(401).json({ error: 'Nicht angemeldet.' });
     }

@@ -22,7 +22,6 @@ const multer = require('multer');
 const { checkAdmin } = require('./middleware/auth');
 const { syncProductCategories } = require('./utils/categories');
 const productRoutes = require('./routes/productRoutes');
-app.use('/', productRoutes);
 
 async function cleanupOnStartup() {
     let connection;
@@ -568,6 +567,9 @@ app.use(session({
         maxAge: 30 * 60 * 1000
     }
 }));
+
+app.use('/', productRoutes);
+
 // Spezifische Route für die Startseite
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
