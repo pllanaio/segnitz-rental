@@ -25,3 +25,7 @@ async function checkProductAvailability(connection, productId, rentalStart, rent
 
     return orderConflicts.length === 0;
 }
+
+module.exports = {
+    checkProductAvailability
+};
