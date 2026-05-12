@@ -22,6 +22,7 @@ const multer = require('multer');
 const { checkAdmin } = require('./middleware/auth');
 const { syncProductCategories } = require('./utils/categories');
 const productRoutes = require('./routes/productRoutes');
+const { runDatabaseCleanup } = require('./utils/cleanup');
 
 async function cleanupOnStartup() {
     let connection;
