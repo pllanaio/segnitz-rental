@@ -129,7 +129,11 @@ async function saveProduct(event) {
         pricePerDay: Number(document.getElementById('pricePerDay').value),
         deposit: Number(document.getElementById('deposit').value),
         imagePath: '',
-        category: document.getElementById('category').value.trim(),
+        category: document.getElementById('category').value,
+        categories: document.getElementById('category').value
+            .split(',')
+            .map(item => item.trim())
+            .filter(Boolean),
         isActive: document.getElementById('isActive').checked
     };
 
@@ -188,7 +192,12 @@ function editProduct(id) {
     document.getElementById('description').value = product.description || '';
     document.getElementById('pricePerDay').value = product.price_per_day;
     document.getElementById('deposit').value = product.deposit;
-    document.getElementById('category').value = product.category || '';
+    setSelectedCategories(
+        (product.category || '')
+            .split(',')
+            .map(item => item.trim())
+            .filter(Boolean)
+    );
     document.getElementById('isActive').checked = product.is_active === 1;
     renderExistingImages(product);
 
@@ -1813,6 +1822,132 @@ function restoreOrderDetailsModalLayer() {
         document.body.classList.add('modal-open');
     }
 }
+
+function normalizeCategoryName(value) {
+    return String(value || '')
+        .trim()
+        .replace(/\s+/g, ' ');
+}
+
+function getCategoriesFromValue(value) {
+    return String(value || '')
+        .split(',')
+        .map(normalizeCategoryName)
+        .filter(Boolean);
+}
+
+function getSelectedCategories() {
+    const input = document.getElementById('category');
+
+    return getCategoriesFromValue(input.value);
+}
+
+function setSelectedCategories(categories) {
+    const input = document.getElementById('category');
+
+    const unique = [...new Set(
+        categories.map(c => c.toLowerCase())
+    )];
+
+    const finalCategories = unique.map(lower =>
+        categories.find(c => c.toLowerCase() === lower)
+    );
+
+    input.value = finalCategories.join(', ');
+
+    renderCategoryTags(finalCategories);
+}
+
+function addCategory(category) {
+    category = normalizeCategoryName(category);
+
+    if (!category) return;
+
+    const categories = getSelectedCategories();
+
+    if (
+        categories.some(
+            item => item.toLowerCase() === category.toLowerCase()
+        )
+    ) {
+        return;
+    }
+
+    categories.push(category);
+
+    setSelectedCategories(categories);
+}
+
+function removeCategory(category) {
+    const categories = getSelectedCategories()
+        .filter(item =>
+            item.toLowerCase() !== category.toLowerCase()
+        );
+
+    setSelectedCategories(categories);
+}
+
+function renderCategoryTags(categories) {
+    const container = document.getElementById('categoryTags');
+
+    container.innerHTML = '';
+
+    if (categories.length === 0) {
+        container.innerHTML =
+            '<span class="text-muted small">Keine Kategorien ausgewählt</span>';
+        return;
+    }
+
+    categories.forEach(category => {
+        const badge = document.createElement('span');
+
+        badge.className =
+            'badge rounded-pill bg-primary d-inline-flex align-items-center gap-2 px-3 py-2';
+
+        badge.innerHTML = `
+            <span>${category}</span>
+            <button
+                type="button"
+                class="btn-close btn-close-white"
+                aria-label="Entfernen">
+            </button>
+        `;
+
+        badge.querySelector('button')
+            .addEventListener('click', () => {
+                removeCategory(category);
+            });
+
+        container.appendChild(badge);
+    });
+}
+
+function initCategoryUi() {
+    const input = document.getElementById('categoryInput');
+    const addBtn = document.getElementById('addCategoryBtn');
+
+    const addFromInput = () => {
+        addCategory(input.value);
+        input.value = '';
+        input.focus();
+    };
+
+    addBtn.addEventListener('click', addFromInput);
+
+    input.addEventListener('keydown', event => {
+        if (event.key === 'Enter' || event.key === ',') {
+            event.preventDefault();
+            addFromInput();
+        }
+    });
+
+    renderCategoryTags(getSelectedCategories());
+}
+
+document.addEventListener(
+    'DOMContentLoaded',
+    initCategoryUi
+);
 
 function logout() {
     fetch('/logout', {

@@ -117,9 +117,29 @@
                                 </div>
 
                                 <div class="col-12 col-lg-4">
-                                    <label class="form-label" for="category">Kategorie</label>
-                                    <input type="text" class="form-control" id="category"
-                                        placeholder="z.B. Bautrocknung">
+                                    <label class="form-label">Kategorien</label>
+
+                                    <input type="hidden" id="category">
+
+                                    <div class="card p-3">
+                                        <div id="categoryTags" class="d-flex flex-wrap gap-2 mb-3">
+                                        </div>
+
+                                        <div class="input-group">
+                                            <input type="text" class="form-control" id="categoryInput"
+                                                list="categorySuggestions" placeholder="Kategorie hinzufügen">
+
+                                            <button type="button" class="btn btn-outline-primary" id="addCategoryBtn">
+                                                Hinzufügen
+                                            </button>
+                                        </div>
+
+                                        <datalist id="categorySuggestions"></datalist>
+
+                                        <small class="text-muted mt-2">
+                                            Mehrere Kategorien möglich.
+                                        </small>
+                                    </div>
                                 </div>
 
                                 <div class="col-12 col-lg-4">
