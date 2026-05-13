@@ -1521,40 +1521,83 @@ async function loadOpeningStatus() {
 
 document.addEventListener('DOMContentLoaded', loadOpeningStatus);
 
+function getProductCategoryNames(product) {
+    if (!Array.isArray(product.categories)) {
+        return [];
+    }
+
+    return product.categories
+        .map(category =>
+            typeof category === 'string'
+                ? category
+                : category.name
+        )
+        .filter(Boolean);
+}
+
 function renderCategoryFilters() {
-    const container = document.getElementById('categoryFilterList');
+    const container = document.getElementById('categoryFilters');
+
     if (!container) return;
 
-    const categories = [...new Set(
-        rentalProducts
-            .map(product => product.category)
-            .filter(Boolean)
-    )].sort();
+    const categoryMap = new Map();
 
-    const countForCategory = category => {
-        if (category === 'all') return rentalProducts.length;
-        return rentalProducts.filter(product => product.category === category).length;
-    };
+    rentalProducts.forEach(product => {
+        getProductCategoryNames(product).forEach(categoryName => {
+            categoryMap.set(
+                categoryName,
+                (categoryMap.get(categoryName) || 0) + 1
+            );
+        });
+    });
 
-    container.innerHTML = `
-        <button type="button"
-            class="btn btn-sm text-start category-btn ${selectedCategory === 'all' ? 'active' : ''}"
-            onclick="selectCategoryFilter('all')">
-            <i class="bi bi-grid"></i>
-            Alle Produkte
-            <span class="float-end">${countForCategory('all')}</span>
-        </button>
+    const categories = [...categoryMap.entries()]
+        .sort((a, b) => a[0].localeCompare(b[0], 'de'));
 
-        ${categories.map(category => `
-            <button type="button"
-                class="btn btn-sm text-start category-btn ${selectedCategory === category ? 'active' : ''}"
-                onclick="selectCategoryFilter('${category.replace(/'/g, "\\'")}')">
-                <i class="bi bi-tag"></i>
-                ${category}
-                <span class="float-end">${countForCategory(category)}</span>
-            </button>
-        `).join('')}
+    container.innerHTML = '';
+
+    const allButton = createCategoryFilterButton(
+        'all',
+        'Alle Produkte',
+        rentalProducts.length
+    );
+
+    container.appendChild(allButton);
+
+    categories.forEach(([categoryName, count]) => {
+        container.appendChild(
+            createCategoryFilterButton(
+                categoryName,
+                categoryName,
+                count
+            )
+        );
+    });
+}
+
+function createCategoryFilterButton(categoryValue, label, count) {
+    const button = document.createElement('button');
+
+    button.type = 'button';
+    button.className =
+        categoryValue === selectedCategory
+            ? 'btn btn-warning w-100 text-start d-flex justify-content-between align-items-center mb-2'
+            : 'btn btn-outline-light w-100 text-start d-flex justify-content-between align-items-center mb-2';
+
+    button.innerHTML = `
+        <span>
+            <i class="bi ${categoryValue === 'all' ? 'bi-grid' : 'bi-tag'}"></i>
+            ${label}
+        </span>
+        <span>${count}</span>
     `;
+
+    button.addEventListener('click', () => {
+        selectedCategory = categoryValue;
+        applyProductFilters();
+    });
+
+    return button;
 }
 
 function selectCategoryFilter(category) {
@@ -1566,42 +1609,31 @@ function selectCategoryFilter(category) {
 }
 
 function applyProductFilters() {
-    const searchInput = document.getElementById('productSearchInput');
-    const query = searchInput ? searchInput.value.trim().toLowerCase() : '';
-
-    filteredRentalProducts = rentalProducts.filter(product => {
-        const matchesCategory =
-            selectedCategory === 'all' ||
-            product.category === selectedCategory;
-
-        const matchesSearch = [
-            product.title,
-            product.description,
-            product.product_key,
-            product.category,
-            product.price_per_day,
-            product.deposit
-        ].join(' ').toLowerCase().includes(query);
-
-        return matchesCategory && matchesSearch;
-    });
+    if (selectedCategory === 'all') {
+        filteredRentalProducts = [...rentalProducts];
+    } else {
+        filteredRentalProducts = rentalProducts.filter(product =>
+            getProductCategoryNames(product)
+                .some(category =>
+                    category.toLowerCase() === selectedCategory.toLowerCase()
+                )
+        );
+    }
 
     currentProductPage = 1;
+    renderCategoryFilters();
     renderProductPage();
+    updateProductSectionTitle();
 }
 
 function updateProductSectionTitle() {
     const title = document.getElementById('productSectionTitle');
+
     if (!title) return;
 
-    if (selectedCategory === 'all') {
-        title.textContent = 'Produkte zur Vermietung auswählen';
-    } else {
-        title.textContent =
-            selectedCategory === 'all'
-                ? 'Alle Produkte'
-                : selectedCategory;
-    }
+    title.textContent = selectedCategory === 'all'
+        ? 'Produkte zur Vermietung'
+        : `Produkte zur Vermietung: ${selectedCategory}`;
 }
 
 async function loadBestsellers() {
@@ -1642,7 +1674,11 @@ function renderBestsellers() {
     if (!grid || !section) return;
 
     const visibleBestsellers = bestsellerProducts.filter(product => {
-        return selectedCategory === 'all' || product.category === selectedCategory;
+        return selectedCategory === 'all'
+            || getProductCategoryNames(product)
+                .some(category =>
+                    category.toLowerCase() === selectedCategory.toLowerCase()
+                );
     });
 
     if (visibleBestsellers.length === 0) {
