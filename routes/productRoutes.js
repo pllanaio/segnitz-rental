@@ -10,6 +10,10 @@ const { syncProductCategories } = require('../utils/categories');
 const { uploadProductImages } = require('../utils/uploads');
 const { runDatabaseCleanup } = require('../utils/cleanup');
 const { checkProductAvailability } = require('../utils/availability');
+const {
+    syncProductCategories,
+    deleteUnusedCategories
+} = require('../utils/categories');
 
 module.exports = router;
 
@@ -207,6 +211,7 @@ router.post('/products', checkAdmin, async (req, res) => {
         );
 
         await syncProductCategories(connection, result.insertId, normalizedCategories);
+        await deleteUnusedCategories(connection);
 
         await connection.commit();
 
@@ -279,6 +284,7 @@ router.put('/products/:id', checkAdmin, async (req, res) => {
         );
 
         await syncProductCategories(connection, req.params.id, normalizedCategories);
+        await deleteUnusedCategories(connection);
 
         await connection.commit();
 
@@ -309,6 +315,8 @@ router.delete('/products/:id', checkAdmin, async (req, res) => {
             'DELETE FROM rental_products WHERE id = ?',
             [req.params.id]
         );
+
+        await deleteUnusedCategories(connection);
 
         // 3. Dateien auf der Festplatte löschen
         for (const image of images) {

@@ -12,6 +12,7 @@ document.addEventListener('DOMContentLoaded', () => {
     loadBackendUser();
     loadProducts();
     loadCategories();
+    initCategoryUi();
 
     form.addEventListener('submit', saveProduct);
     cancelEditBtn.addEventListener('click', resetForm);

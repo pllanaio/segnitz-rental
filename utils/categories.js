@@ -49,8 +49,19 @@ async function syncProductCategories(connection, productId, categories) {
     }
 }
 
+async function deleteUnusedCategories(connection) {
+    await connection.execute(`
+        DELETE c
+        FROM rental_categories c
+        LEFT JOIN rental_product_categories rpc
+            ON rpc.category_id = c.id
+        WHERE rpc.category_id IS NULL
+    `);
+}
+
 module.exports = {
     normalizeCategoryName,
     createCategorySlug,
-    syncProductCategories
+    syncProductCategories,
+    deleteUnusedCategories
 };
