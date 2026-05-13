@@ -992,7 +992,8 @@ function getReturnBadge(status, orderStatus = null) {
         returned_ok: 'success',
         returned_late: 'warning',
         returned_damaged: 'danger',
-        returned_late_damaged: 'danger'
+        returned_late_damaged: 'danger',
+        not_required: 'dark'
     };
 
     const labels = {
@@ -1000,7 +1001,8 @@ function getReturnBadge(status, orderStatus = null) {
         returned_ok: 'OK',
         returned_late: 'Verspätet',
         returned_damaged: 'Beschädigt',
-        returned_late_damaged: 'Verspätet + beschädigt'
+        returned_late_damaged: 'Verspätet + beschädigt',
+        not_required: 'Geschlossen'
     };
 
     return `<span class="badge bg-${map[status] || 'secondary'}">
