@@ -1471,6 +1471,7 @@ async function saveCartItemRentalPeriod() {
         showAlert('Mietzeitraum konnte nicht geändert werden.', 'danger');
     }
 }
+
 function allowOnlyDigits(input) {
     input.value = input.value.replace(/[^0-9]/g, '');
 }
