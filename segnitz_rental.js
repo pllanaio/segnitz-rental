@@ -68,26 +68,29 @@ async function cleanupOnStartup() {
 }
 
 async function expireOldReservations(connection) {
-    const [deletedItems] = await connection.execute(
-        `DELETE roi
-         FROM rental_order_items roi
-         JOIN rental_orders ro ON ro.id = roi.order_id
-         WHERE ro.status = 'reserved'
-         AND ro.reserved_until IS NOT NULL
-         AND ro.reserved_until < NOW()`
+    const [updatedItems] = await connection.execute(
+        `UPDATE rental_order_items roi
+     JOIN rental_orders ro ON ro.id = roi.order_id
+     SET roi.item_status = 'expired',
+         roi.return_status = 'not_required'
+     WHERE ro.status = 'reserved'
+     AND ro.reserved_until IS NOT NULL
+     AND ro.reserved_until < NOW()`
     );
 
     const [updatedOrders] = await connection.execute(
         `UPDATE rental_orders
-         SET status = 'expired'
-         WHERE status = 'reserved'
-         AND reserved_until IS NOT NULL
-         AND reserved_until < NOW()`
+     SET status = 'expired',
+         return_status = 'not_required',
+         return_case_status = 'closed'
+     WHERE status = 'reserved'
+     AND reserved_until IS NOT NULL
+     AND reserved_until < NOW()`
     );
 
-    if (updatedOrders.affectedRows > 0 || deletedItems.affectedRows > 0) {
+    if (updatedOrders.affectedRows > 0 || updatedItems.affectedRows > 0) {
         console.log(
-            `${new Date().toISOString()} - Cleanup: ${updatedOrders.affectedRows} Orders expired, ${deletedItems.affectedRows} Order-Items gelöscht`
+            `${new Date().toISOString()} - Cleanup: ${updatedOrders.affectedRows} Orders expired, ${updatedItems.affectedRows} Order-Items gelöscht`
         );
     }
 }
