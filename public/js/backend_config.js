@@ -2,6 +2,7 @@ let products = [];
 let filteredProducts = [];
 let orders = [];
 let currentOrderItems = [];
+let availableCategories = [];
 
 document.addEventListener('DOMContentLoaded', () => {
     const form = document.getElementById('productForm');
@@ -10,6 +11,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     loadBackendUser();
     loadProducts();
+    loadCategories();
 
     form.addEventListener('submit', saveProduct);
     cancelEditBtn.addEventListener('click', resetForm);
@@ -1830,65 +1832,83 @@ function normalizeCategoryName(value) {
         .replace(/\s+/g, ' ');
 }
 
-function getCategoriesFromValue(value) {
-    return String(value || '')
-        .split(',')
-        .map(normalizeCategoryName)
-        .filter(Boolean);
+async function loadCategories() {
+    try {
+        const response = await fetch('/categories');
+        const result = await response.json();
+
+        if (!response.ok) {
+            throw new Error(result.error || 'Kategorien konnten nicht geladen werden.');
+        }
+
+        availableCategories = result.map(category => category.name);
+        renderCategorySuggestions();
+    } catch (error) {
+        console.error('Fehler beim Laden der Kategorien:', error);
+        availableCategories = [];
+    }
 }
 
 function getSelectedCategories() {
     const input = document.getElementById('category');
 
-    return getCategoriesFromValue(input.value);
+    return String(input.value || '')
+        .split(',')
+        .map(normalizeCategoryName)
+        .filter(Boolean);
 }
 
 function setSelectedCategories(categories) {
     const input = document.getElementById('category');
 
-    const unique = [...new Set(
-        categories.map(c => c.toLowerCase())
-    )];
+    const uniqueCategories = [];
+    const seen = new Set();
 
-    const finalCategories = unique.map(lower =>
-        categories.find(c => c.toLowerCase() === lower)
-    );
+    categories
+        .map(normalizeCategoryName)
+        .filter(Boolean)
+        .forEach(category => {
+            const key = category.toLowerCase();
 
-    input.value = finalCategories.join(', ');
+            if (!seen.has(key)) {
+                seen.add(key);
+                uniqueCategories.push(category);
+            }
+        });
 
-    renderCategoryTags(finalCategories);
+    input.value = uniqueCategories.join(', ');
+
+    renderCategoryTags(uniqueCategories);
+    renderCategorySuggestions();
 }
 
 function addCategory(category) {
-    category = normalizeCategoryName(category);
+    const normalized = normalizeCategoryName(category);
 
-    if (!category) return;
+    if (!normalized) return;
 
     const categories = getSelectedCategories();
 
-    if (
-        categories.some(
-            item => item.toLowerCase() === category.toLowerCase()
-        )
-    ) {
-        return;
-    }
+    setSelectedCategories([
+        ...categories,
+        normalized
+    ]);
 
-    categories.push(category);
-
-    setSelectedCategories(categories);
+    const input = document.getElementById('categoryInput');
+    input.value = '';
+    input.focus();
 }
 
 function removeCategory(category) {
+    const key = normalizeCategoryName(category).toLowerCase();
+
     const categories = getSelectedCategories()
-        .filter(item =>
-            item.toLowerCase() !== category.toLowerCase()
-        );
+        .filter(item => item.toLowerCase() !== key);
 
     setSelectedCategories(categories);
 }
 
-function renderCategoryTags(categories) {
+function renderCategoryTags(categories = getSelectedCategories()) {
     const container = document.getElementById('categoryTags');
 
     container.innerHTML = '';
@@ -1905,21 +1925,54 @@ function renderCategoryTags(categories) {
         badge.className =
             'badge rounded-pill bg-primary d-inline-flex align-items-center gap-2 px-3 py-2';
 
-        badge.innerHTML = `
-            <span>${category}</span>
-            <button
-                type="button"
-                class="btn-close btn-close-white"
-                aria-label="Entfernen">
-            </button>
-        `;
+        const label = document.createElement('span');
+        label.textContent = category;
 
-        badge.querySelector('button')
-            .addEventListener('click', () => {
-                removeCategory(category);
-            });
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'btn-close btn-close-white';
+        button.setAttribute('aria-label', 'Entfernen');
+        button.addEventListener('click', () => removeCategory(category));
+
+        badge.appendChild(label);
+        badge.appendChild(button);
 
         container.appendChild(badge);
+    });
+}
+
+function renderCategorySuggestions() {
+    const container = document.getElementById('categorySuggestionList');
+
+    if (!container) return;
+
+    const query = normalizeCategoryName(
+        document.getElementById('categoryInput')?.value || ''
+    ).toLowerCase();
+
+    const selected = getSelectedCategories()
+        .map(category => category.toLowerCase());
+
+    const suggestions = availableCategories
+        .filter(category => !selected.includes(category.toLowerCase()))
+        .filter(category =>
+            !query || category.toLowerCase().includes(query)
+        )
+        .sort((a, b) => a.localeCompare(b, 'de'));
+
+    container.innerHTML = '';
+
+    suggestions.forEach(category => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'btn btn-outline-secondary btn-sm me-2 mb-2';
+        button.textContent = category;
+
+        button.addEventListener('click', () => {
+            addCategory(category);
+        });
+
+        container.appendChild(button);
     });
 }
 
@@ -1927,28 +1980,23 @@ function initCategoryUi() {
     const input = document.getElementById('categoryInput');
     const addBtn = document.getElementById('addCategoryBtn');
 
-    const addFromInput = () => {
-        addCategory(input.value);
-        input.value = '';
-        input.focus();
-    };
+    if (!input || !addBtn) return;
 
-    addBtn.addEventListener('click', addFromInput);
+    addBtn.addEventListener('click', () => {
+        addCategory(input.value);
+    });
 
     input.addEventListener('keydown', event => {
         if (event.key === 'Enter' || event.key === ',') {
             event.preventDefault();
-            addFromInput();
+            addCategory(input.value);
         }
     });
 
-    renderCategoryTags(getSelectedCategories());
-}
+    input.addEventListener('input', renderCategorySuggestions);
 
-document.addEventListener(
-    'DOMContentLoaded',
-    initCategoryUi
-);
+    renderCategoryTags();
+}
 
 function logout() {
     fetch('/logout', {
