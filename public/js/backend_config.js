@@ -594,11 +594,13 @@ function renderOrderItemCard(order, item) {
     const adjustedPrice = item.adjustedPricePerDay || item.pricePerDay;
     const isCancelled = itemStatus === 'cancelled';
     const isReturned = String(itemStatus).startsWith('returned_');
-    const canEdit = itemStatus === 'active';
-    const canReturn = !isCancelled && !isReturned;
+    const orderStatus = String(order.status || '').trim().toLowerCase();
+    const isExpired = orderStatus === 'expired';
+    const canEdit = itemStatus === 'active' && !isExpired;
+    const canReturn = !isCancelled && !isReturned && !isExpired;
 
     return `
-        <div class="card mb-3">
+        <div class="card mb-3 ${isExpired ? 'opacity-50 bg-light' : ''}">
             <div class="card-body">
                 <div class="d-flex justify-content-between gap-3 flex-wrap">
                     <div>
