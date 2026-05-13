@@ -126,7 +126,8 @@
                                         </div>
 
                                         <div class="input-group">
-                                            <input type="text" class="form-control" id="categoryInput" placeholder="Kategorie hinzufügen">
+                                            <input type="text" class="form-control" id="categoryInput"
+                                                placeholder="Kategorie hinzufügen">
                                             <button type="button" class="btn btn-outline-primary" id="addCategoryBtn">
                                                 Hinzufügen
                                             </button>
@@ -489,6 +490,11 @@
                             <input type="file" class="form-control" id="returnImageUpload" accept="image/*" multiple>
                             <div id="returnExistingImages" class="row g-2 mt-2"></div>
                         </div>
+
+                        <button type="button" class="btn btn-outline-primary btn-sm mt-2"
+                            onclick="uploadReturnImagesBeforeSave()">
+                            Fotos hochladen
+                        </button>
 
                         <div class="col-12">
                             <div class="alert alert-secondary mb-0" id="returnPricePreview">
