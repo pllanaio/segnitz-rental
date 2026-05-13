@@ -1882,21 +1882,50 @@ function setSelectedCategories(categories) {
     renderCategorySuggestions();
 }
 
+function categoryExists(categoryName) {
+    const key = normalizeCategoryName(categoryName).toLowerCase();
+
+    return availableCategories.some(category =>
+        normalizeCategoryName(category).toLowerCase() === key
+    );
+}
+
+function selectedCategoryExists(categoryName) {
+    const key = normalizeCategoryName(categoryName).toLowerCase();
+
+    return getSelectedCategories().some(category =>
+        normalizeCategoryName(category).toLowerCase() === key
+    );
+}
+
 function addCategory(category) {
     const normalized = normalizeCategoryName(category);
 
     if (!normalized) return;
 
-    const categories = getSelectedCategories();
+    if (selectedCategoryExists(normalized)) {
+        showAlert('Diese Kategorie ist diesem Produkt bereits zugeordnet.', 'warning');
+        return;
+    }
 
     setSelectedCategories([
-        ...categories,
+        ...getSelectedCategories(),
         normalized
     ]);
 
+    if (!categoryExists(normalized)) {
+        availableCategories.push(normalized);
+        availableCategories.sort((a, b) => a.localeCompare(b, 'de'));
+    }
+
     const input = document.getElementById('categoryInput');
-    input.value = '';
-    input.focus();
+
+    if (input) {
+        input.value = '';
+        input.focus();
+    }
+
+    renderCategorySuggestions();
 }
 
 function removeCategory(category) {
@@ -1996,6 +2025,7 @@ function initCategoryUi() {
     input.addEventListener('input', renderCategorySuggestions);
 
     renderCategoryTags();
+    renderCategorySuggestions();
 }
 
 function logout() {

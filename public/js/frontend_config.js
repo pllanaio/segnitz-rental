@@ -1536,7 +1536,7 @@ function getProductCategoryNames(product) {
 }
 
 function renderCategoryFilters() {
-    const container = document.getElementById('categoryFilters');
+    const container = document.getElementById('categoryFilterList');
 
     if (!container) return;
 
