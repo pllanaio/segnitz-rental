@@ -30,19 +30,12 @@ body {
 h1,
 h3,
 h4,
-h5 {
-  font-family: 'Inter', sans-serif;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  color: #041c40;
-}
-
-
+h5,
 h6 {
   font-family: 'Inter', sans-serif;
   font-weight: 700;
   letter-spacing: -0.02em;
-  color: #ffffff;
+  color: #041c40;
 }
 
 h2 {
