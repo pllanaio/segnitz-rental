@@ -330,7 +330,7 @@ async function sendReturnSummaryEmail(connection, orderId, returnedItemId) {
     await transporter.sendMail({
         from: `"Segnitz Rental" <${process.env.SMTP_USER}>`,
         to: order.customer_email,
-        bcc: 'orders@segnitzbau.de',
+        /*bcc: 'orders@segnitzbau.de',*/
         subject: `Abschlussdaten zu Artikel "${returnedItem.title}" aus Mietauftrag ${order.order_no}`,
         html: `
             <h2>Abschlussdaten zu Ihrem Mietartikel</h2>
