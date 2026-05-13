@@ -1283,8 +1283,21 @@ function openRentalPeriodModal(orderId, itemId) {
 
     ['rentalPeriodStart', 'rentalPeriodEnd', 'rentalPeriodPricePerDay'].forEach(id => {
         const element = document.getElementById(id);
-        element.oninput = updateRentalPeriodPreview;
-        element.onchange = updateRentalPeriodPreview;
+        element.oninput = () => {
+            applyOrderItemReturnModalRules(
+                id === 'returnActualDate' || id === 'returnAdjustedEnd'
+                    ? 'date'
+                    : 'manual'
+            );
+        };
+
+        element.onchange = () => {
+            applyOrderItemReturnModalRules(
+                id === 'returnActualDate' || id === 'returnAdjustedEnd'
+                    ? 'date'
+                    : 'manual'
+            );
+        };
     });
 
     new bootstrap.Modal(document.getElementById('orderItemRentalPeriodModal')).show();
@@ -1422,7 +1435,7 @@ function openOrderItemReturnModal(orderId, itemId) {
     new bootstrap.Modal(document.getElementById('orderItemReturnModal')).show();
 }
 
-function applyOrderItemReturnModalRules() {
+function applyOrderItemReturnModalRules(triggerSource = 'auto') {
     const itemId = document.getElementById('returnItemId').value;
     const item = findCurrentOrderItem(itemId);
 
@@ -1439,35 +1452,37 @@ function applyOrderItemReturnModalRules() {
     const refundAmountInput = document.getElementById('returnDepositRefundAmount');
     const deductionReasonInput = document.getElementById('returnDepositDeductionReason');
 
-    const selectedStatus = returnStatusInput.value;
+    /*
+     * Nur beim automatischen Datumscheck verspätet setzen.
+     * Nicht mehr bei jedem Klick erneut erzwingen.
+     */
+    if (triggerSource === 'date') {
+        const lateDays = calculateLateDays(actualReturnDate, adjustedEnd);
 
-    if (selectedStatus === 'returned_damaged' || selectedStatus === 'returned_late_damaged') {
-        isDamagedInput.checked = true;
-    }
-
-    if (selectedStatus === 'returned_late' || selectedStatus === 'returned_late_damaged') {
-        isLateInput.checked = true;
-    }
-
-    const lateDays = calculateLateDays(actualReturnDate, adjustedEnd);
-
-    if (lateDays > 0) {
-        isLateInput.checked = true;
+        if (lateDays > 0) {
+            isLateInput.checked = true;
+        }
     }
 
     const isLate = isLateInput.checked;
     const isDamaged = isDamagedInput.checked;
 
+    /*
+     * Status ausschließlich aus Checkboxen ableiten
+     */
     if (isDamaged && isLate) {
         returnStatusInput.value = 'returned_late_damaged';
         depositDecisionInput.value = 'no_refund';
         deductionPercentInput.value = 100;
+
     } else if (isDamaged) {
         returnStatusInput.value = 'returned_damaged';
         depositDecisionInput.value = 'no_refund';
         deductionPercentInput.value = 100;
+
     } else if (isLate) {
         returnStatusInput.value = 'returned_late';
+
     } else {
         returnStatusInput.value = 'returned_ok';
     }
@@ -1482,43 +1497,52 @@ function applyOrderItemReturnModalRules() {
 
     const deposit = Number(item.deposit || 0);
     const deductionPercent = Number(deductionPercentInput.value || 0);
-    const refundAmount = Math.max(deposit - (deposit * deductionPercent / 100), 0);
+
+    const refundAmount = Math.max(
+        deposit - (deposit * deductionPercent / 100),
+        0
+    );
 
     refundAmountInput.value = refundAmount.toFixed(2);
 
     const reasons = [];
-    if (isDamagedInput.checked) reasons.push('Beschädigt');
-    if (isLateInput.checked) reasons.push('Verspätet');
+
+    if (isDamaged) reasons.push('Beschädigt');
+    if (isLate) reasons.push('Verspätet');
+
     deductionReasonInput.value = reasons.join(', ');
 
     const start = document.getElementById('returnAdjustedStart').value || item.rentalStart;
     const end = document.getElementById('returnAdjustedEnd').value || actualReturnDate || item.rentalEnd;
-    const price = Number(normalizeDecimalInput(document.getElementById('returnPricePerDay').value) || 0);
+
+    const price = Number(
+        normalizeDecimalInput(document.getElementById('returnPricePerDay').value) || 0
+    );
+
     const days = calculateRentalDays(start, end);
     const net = days * price;
     const gross = net * 1.19;
 
-    const additionalCharge = Number(normalizeDecimalInput(
-        document.getElementById('returnAdditionalChargeAmount').value
-    ) || 0);
-
-    const customerAdditionalDue = additionalCharge;
-    const customerCredit = refundAmount;
+    const additionalCharge = Number(
+        normalizeDecimalInput(
+            document.getElementById('returnAdditionalChargeAmount').value
+        ) || 0
+    );
 
     document.getElementById('returnPricePreview').innerHTML = `
-    <strong>Preisübersicht für diesen Artikel</strong><br>
-    Miettage: ${days}<br>
-    Miete netto: ${net.toFixed(2)} €<br>
-    Miete brutto: ${gross.toFixed(2)} €<hr>
+        <strong>Preisübersicht für diesen Artikel</strong><br>
+        Miettage: ${days}<br>
+        Miete netto: ${net.toFixed(2)} €<br>
+        Miete brutto: ${gross.toFixed(2)} €<hr>
 
-    Kaution: ${deposit.toFixed(2)} €<br>
-    Kaution zurück: ${refundAmount.toFixed(2)} €<br>
-    Kaution einbehalten: ${(deposit - refundAmount).toFixed(2)} €<hr>
+        Kaution: ${deposit.toFixed(2)} €<br>
+        Kaution zurück: ${refundAmount.toFixed(2)} €<br>
+        Kaution einbehalten: ${(deposit - refundAmount).toFixed(2)} €<hr>
 
-    Zusätzliche Reparaturkosten: ${additionalCharge.toFixed(2)} €<br>
-    Kunde zusätzlich zu zahlen: ${customerAdditionalDue.toFixed(2)} €<br>
-    Kunde erhält zurück: ${customerCredit.toFixed(2)} €
-`;
+        Zusätzliche Reparaturkosten: ${additionalCharge.toFixed(2)} €<br>
+        Kunde zusätzlich zu zahlen: ${additionalCharge.toFixed(2)} €<br>
+        Kunde erhält zurück: ${refundAmount.toFixed(2)} €
+    `;
 }
 
 async function saveOrderItemRentalAdjustment(itemId, orderId) {
@@ -1616,6 +1640,14 @@ async function saveOrderItemReturn(itemId, orderId) {
         await uploadReturnImagesForCurrentReturn(itemId);
         await sendReturnSummaryEmailForItem(itemId);
 
+        const detailsResponse = await fetch(`/admin/orders/${orderId}`);
+        const updatedOrder = await detailsResponse.json();
+
+        if (detailsResponse.ok) {
+            currentOrderItems = updatedOrder.items || [];
+            renderOrderDetails(updatedOrder);
+        }
+
         bootstrap.Modal.getInstance(document.getElementById('orderItemReturnModal'))?.hide();
         setTimeout(restoreOrderDetailsModalLayer, 300);
 
@@ -1663,6 +1695,7 @@ async function submitOrderItemReturn() {
 
     await saveOrderItemReturn(itemId, orderId);
 }
+
 async function uploadReturnImagesForCurrentReturn(itemId) {
     const input = document.getElementById('returnImageUpload');
 
@@ -1686,6 +1719,8 @@ async function uploadReturnImagesForCurrentReturn(itemId) {
     if (!response.ok) {
         throw new Error(result.error || 'Fotos konnten nicht hochgeladen werden.');
     }
+
+    input.value = '';
 }
 
 function calculateOrderItemFinancials(item) {
