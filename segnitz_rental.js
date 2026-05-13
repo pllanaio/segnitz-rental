@@ -176,7 +176,7 @@ const sessionStore = new MySQLStore({
         }
     }
 });
-app.set('trust proxy', 1);
+/*app.set('trust proxy', 1);*/
 
 app.use(session({
     key: 'segnitz.sid',
@@ -186,7 +186,7 @@ app.use(session({
     saveUninitialized: false,
     rolling: true,
     cookie: {
-        secure: true,
+        secure: false,
         httpOnly: true,
         sameSite: 'lax',
         maxAge: 30 * 60 * 1000
