@@ -1637,7 +1637,6 @@ async function saveOrderItemReturn(itemId, orderId) {
             return;
         }
 
-        await uploadReturnImagesForCurrentReturn(itemId);
         await sendReturnSummaryEmailForItem(itemId);
 
         const detailsResponse = await fetch(`/admin/orders/${orderId}`);
@@ -2062,6 +2061,44 @@ function initCategoryUi() {
 
     renderCategoryTags();
     renderCategorySuggestions();
+}
+
+async function uploadReturnImagesBeforeSave() {
+    const itemId = document.getElementById('returnItemId').value;
+    const orderId = document.getElementById('returnOrderId').value;
+
+    if (!itemId || !orderId) {
+        showAlert('Artikel wurde nicht gefunden.', 'danger');
+        return;
+    }
+
+    try {
+        await uploadReturnImagesForCurrentReturn(itemId);
+
+        const detailsResponse = await fetch(`/admin/orders/${orderId}`);
+        const updatedOrder = await detailsResponse.json();
+
+        if (detailsResponse.ok) {
+            currentOrderItems = updatedOrder.items || [];
+
+            const updatedItem = currentOrderItems.find(
+                item => Number(item.id) === Number(itemId)
+            );
+
+            document.getElementById('returnExistingImages').innerHTML =
+                (updatedItem?.returnImages || []).map(image => `
+                    <div class="col-6 col-md-3">
+                        <img src="${image.imagePath}" class="img-fluid rounded border">
+                    </div>
+                `).join('');
+        }
+
+        showAlert('Rückgabefotos wurden hochgeladen.', 'success');
+
+    } catch (error) {
+        console.error('Fehler beim Hochladen der Rückgabefotos:', error);
+        showAlert('Rückgabefotos konnten nicht hochgeladen werden.', 'danger');
+    }
 }
 
 function logout() {
