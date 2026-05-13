@@ -6,7 +6,6 @@ const fs = require('fs');
 
 const dbConfig = require('../config/db');
 const { checkAdmin } = require('../middleware/auth');
-const { syncProductCategories } = require('../utils/categories');
 const { uploadProductImages } = require('../utils/uploads');
 const { runDatabaseCleanup } = require('../utils/cleanup');
 const { checkProductAvailability } = require('../utils/availability');
