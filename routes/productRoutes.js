@@ -458,26 +458,52 @@ router.get('/products/bestsellers', async (req, res) => {
         connection = await mysql.createConnection(dbConfig);
 
         const [products] = await connection.execute(`
-    SELECT
-        p.*,
-        COALESCE(ROUND(AVG(pr.rating), 1), 0) AS average_rating,
-        COUNT(pr.id) AS review_count
-    FROM rental_products p
-    LEFT JOIN product_reviews pr ON pr.product_id = p.id
-    WHERE p.is_active = 1
-    AND COALESCE(p.times_ordered, 0) > 0
-    GROUP BY p.id
-    ORDER BY p.times_ordered DESC
-    LIMIT 6
-`);
+            SELECT
+                p.*,
+                COALESCE(ROUND(AVG(pr.rating), 1), 0) AS average_rating,
+                COUNT(pr.id) AS review_count
+            FROM rental_products p
+            LEFT JOIN product_reviews pr ON pr.product_id = p.id
+            WHERE p.is_active = 1
+            AND COALESCE(p.times_ordered, 0) > 0
+            GROUP BY p.id
+            ORDER BY p.times_ordered DESC
+            LIMIT 6
+        `);
 
-        const [images] = await connection.execute(
-            `SELECT id, product_id, image_path, sort_order
-             FROM rental_product_images
-             ORDER BY product_id ASC, sort_order ASC, id ASC`
-        );
+        const [images] = await connection.execute(`
+            SELECT id, product_id, image_path, sort_order
+            FROM rental_product_images
+            ORDER BY product_id ASC, sort_order ASC, id ASC
+        `);
 
-        const productsWithImages = products.map(product => {
+        const [categoryRows] = await connection.execute(`
+            SELECT
+                rpc.product_id,
+                c.id,
+                c.name,
+                c.slug
+            FROM rental_product_categories rpc
+            JOIN rental_categories c
+                ON c.id = rpc.category_id
+            ORDER BY c.name ASC
+        `);
+
+        const categoriesByProductId = {};
+
+        categoryRows.forEach(row => {
+            if (!categoriesByProductId[row.product_id]) {
+                categoriesByProductId[row.product_id] = [];
+            }
+
+            categoriesByProductId[row.product_id].push({
+                id: row.id,
+                name: row.name,
+                slug: row.slug
+            });
+        });
+
+        const productsWithImagesAndCategories = products.map(product => {
             const productImages = images
                 .filter(image => image.product_id === product.id)
                 .map(image => ({
@@ -485,18 +511,24 @@ router.get('/products/bestsellers', async (req, res) => {
                     path: image.image_path
                 }));
 
+            const categories = categoriesByProductId[product.id] || [];
+
             return {
                 ...product,
                 images: productImages,
-                image_path: productImages[0]?.path || product.image_path || ''
+                image_path: productImages[0]?.path || product.image_path || '',
+                categories,
+                category: categories[0]?.name || product.category || ''
             };
         });
 
-        res.json(productsWithImages);
+        res.json(productsWithImagesAndCategories);
 
     } catch (error) {
         console.error('Fehler beim Laden der Bestseller:', error);
-        res.status(500).json({ error: 'Bestseller konnten nicht geladen werden.' });
+        res.status(500).json({
+            error: 'Bestseller konnten nicht geladen werden.'
+        });
     } finally {
         if (connection) await connection.end();
     }
