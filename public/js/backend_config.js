@@ -1287,21 +1287,8 @@ function openRentalPeriodModal(orderId, itemId) {
 
     ['rentalPeriodStart', 'rentalPeriodEnd', 'rentalPeriodPricePerDay'].forEach(id => {
         const element = document.getElementById(id);
-        element.oninput = () => {
-            applyOrderItemReturnModalRules(
-                id === 'returnActualDate' || id === 'returnAdjustedEnd'
-                    ? 'date'
-                    : 'manual'
-            );
-        };
-
-        element.onchange = () => {
-            applyOrderItemReturnModalRules(
-                id === 'returnActualDate' || id === 'returnAdjustedEnd'
-                    ? 'date'
-                    : 'manual'
-            );
-        };
+        element.oninput = updateRentalPeriodPreview;
+        element.onchange = updateRentalPeriodPreview;
     });
 
     new bootstrap.Modal(document.getElementById('orderItemRentalPeriodModal')).show();
