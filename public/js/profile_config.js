@@ -76,7 +76,7 @@ function renderMyOrders() {
                     <strong>${order.order_no}</strong><br>
                     ${getStatusBadge(order.status)}
                     ${getPaymentBadge(order.payment_status)}
-                    ${getReturnBadge(order.return_status, order.status)}
+                    ${getReturnBadge(deriveMyOrderReturnStatus(order), order.status)}
                 </div>
 
                 <div class="d-flex gap-2 flex-wrap justify-content-end">
@@ -576,6 +576,30 @@ function getPaymentBadge(status) {
     return `<span class="badge bg-${map[status] || 'secondary'} me-1">
         Zahlung: ${labels[status] || status || '-'}
     </span>`;
+}
+
+function deriveMyOrderReturnStatus(order) {
+    const items = order.items || [];
+
+    if (!items.length) return 'pending';
+
+    if (items.some(item => item.returnStatus === 'returned_late_damaged')) {
+        return 'returned_late_damaged';
+    }
+
+    if (items.some(item => item.returnStatus === 'returned_damaged')) {
+        return 'returned_damaged';
+    }
+
+    if (items.some(item => item.returnStatus === 'returned_late')) {
+        return 'returned_late';
+    }
+
+    if (items.every(item => item.returnStatus === 'returned_ok')) {
+        return 'returned_ok';
+    }
+
+    return 'pending';
 }
 
 function getReturnBadge(status, orderStatus = null) {
