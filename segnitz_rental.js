@@ -2098,19 +2098,40 @@ app.put('/admin/order-items/:itemId/return', checkAdmin, async (req, res) => {
         );
 
         if (remainingOpenItems[0].count === 0) {
+            const [returnStatusRows] = await connection.execute(
+                `SELECT return_status AS returnStatus
+         FROM rental_order_items
+         WHERE order_id = ?
+         AND item_status LIKE 'returned_%'`,
+                [item.order_id]
+            );
+
+            const itemReturnStatuses = returnStatusRows.map(row => row.returnStatus);
+
+            let finalOrderReturnStatus = 'returned_ok';
+
+            if (itemReturnStatuses.includes('returned_late_damaged')) {
+                finalOrderReturnStatus = 'returned_late_damaged';
+            } else if (itemReturnStatuses.includes('returned_damaged')) {
+                finalOrderReturnStatus = 'returned_damaged';
+            } else if (itemReturnStatuses.includes('returned_late')) {
+                finalOrderReturnStatus = 'returned_late';
+            }
+
             await connection.execute(
                 `UPDATE rental_orders
-                 SET status = 'returned',
-                     returned_at = NOW(),
-                     return_case_status = 'closed'
-                 WHERE id = ?`,
-                [item.order_id]
+         SET status = 'returned',
+             return_status = ?,
+             returned_at = NOW(),
+             return_case_status = 'closed'
+         WHERE id = ?`,
+                [finalOrderReturnStatus, item.order_id]
             );
         } else {
             await connection.execute(
                 `UPDATE rental_orders
-                 SET return_case_status = 'partial'
-                 WHERE id = ?`,
+         SET return_case_status = 'partial'
+         WHERE id = ?`,
                 [item.order_id]
             );
         }
