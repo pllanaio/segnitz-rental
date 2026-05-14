@@ -475,6 +475,7 @@ function renderOrders() {
                         <small>${order.customer_email || ''}</small><br>
                         ${getOrderDisplayBadge(order)}
                         ${getPaymentBadge(order.payment_status)}
+                        ${getReturnBadge(order.return_status, order.status)}
                     </div>
 
                     <button class="btn btn-primary btn-sm"
