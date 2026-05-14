@@ -1435,7 +1435,6 @@ function applyOrderItemReturnModalRules(triggerSource = 'auto') {
 
     const actualReturnDate = document.getElementById('returnActualDate').value;
     const adjustedEnd = document.getElementById('returnAdjustedEnd').value || item.rentalEnd;
-
     const isDamagedInput = document.getElementById('returnIsDamaged');
     const isLateInput = document.getElementById('returnIsLate');
     const returnStatusInput = document.getElementById('returnStatus');
@@ -1474,9 +1473,13 @@ function applyOrderItemReturnModalRules(triggerSource = 'auto') {
 
     } else if (isLate) {
         returnStatusInput.value = 'returned_late';
+        depositDecisionInput.value = 'full_refund';
+        deductionPercentInput.value = 0;
 
     } else {
         returnStatusInput.value = 'returned_ok';
+        depositDecisionInput.value = 'full_refund';
+        deductionPercentInput.value = 0;
     }
 
     if (depositDecisionInput.value === 'full_refund') {
