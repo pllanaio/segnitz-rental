@@ -16,8 +16,8 @@ async function sendOrderEmail(recipients, orderSummary, customer, signatureDataU
     }
 
     const transporter = nodemailer.createTransport({
-        host: 'mail.your-server.de',
-        port: 465,
+        host: process.env.SMTP_HOST || 'mail.your-server.de',
+        port: Number(process.env.SMTP_PORT || 465),
         secure: true,
         auth: {
             user: process.env.SMTP_USER,
