@@ -2,7 +2,12 @@ const express = require("express");
 const app = express();
 const path = require("path");
 const bcrypt = require('bcrypt');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 require('dotenv').config();
+app.use(helmet({
+    contentSecurityPolicy: false
+}));
 app.use(express.json({
     limit: '1mb'
 }));
@@ -223,7 +228,15 @@ app.get('/backend.html', checkAdmin, (req, res) => {
 // Statische Dateien bereitstellen
 app.use(express.static("public"));
 
-app.post('/login', async (req, res) => {
+const loginLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 5,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: 'Zu viele Login-Versuche. Bitte versuche es in 15 Minuten erneut.'
+});
+
+app.post('/login', loginLimiter, async (req, res) => {
     const { username, password } = req.body;
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -609,7 +622,7 @@ async function generateCustomerNo(connection) {
     return `K${year}${String(nextNumber).padStart(5, '0')}`;
 }
 
-app.post('/register-customer', async (req, res) => {
+app.post('/register-customer', loginLimiter, async (req, res) => {
     const {
         firstName,
         lastName,
@@ -2189,7 +2202,7 @@ app.delete('/admin/return-images/:id', checkAdmin, async (req, res) => {
     }
 });
 
-app.post('/password-reset-request', async (req, res) => {
+app.post('/password-reset-request', loginLimiter, async (req, res) => {
     const { email } = req.body;
 
     if (!email) {
