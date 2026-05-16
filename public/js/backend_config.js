@@ -1444,15 +1444,13 @@ function applyOrderItemReturnModalRules(triggerSource = 'auto') {
     const deductionReasonInput = document.getElementById('returnDepositDeductionReason');
 
     /*
-     * Nur beim automatischen Datumscheck verspätet setzen.
-     * Nicht mehr bei jedem Klick erneut erzwingen.
+     * Rückgabe nach Mietende muss immer als verspätet gelten.
+     * Das gilt auch beim Speichern, nicht nur beim Datumswechsel.
      */
-    if (triggerSource === 'date') {
-        const lateDays = calculateLateDays(actualReturnDate, adjustedEnd);
+    const lateDays = calculateLateDays(actualReturnDate, adjustedEnd);
 
-        if (lateDays > 0) {
-            isLateInput.checked = true;
-        }
+    if (lateDays > 0) {
+        isLateInput.checked = true;
     }
 
     const isLate = isLateInput.checked;
