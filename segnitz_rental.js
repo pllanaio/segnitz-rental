@@ -1317,10 +1317,12 @@ app.post('/my-orders/:id/cancel', async (req, res) => {
         await connection.beginTransaction();
 
         const [orders] = await connection.execute(
-            `SELECT id, status, customer_email
-             FROM rental_orders
-             WHERE id = ?
-             AND customer_email = ?
+            `SELECT ro.id, ro.status, ro.customer_email, MIN(roi.rental_start) AS first_rental_start
+             FROM rental_orders ro
+             JOIN rental_order_items roi ON roi.order_id = ro.id
+             WHERE ro.id = ?
+             AND ro.customer_email = ?
+             GROUP BY ro.id
              LIMIT 1`,
             [orderId, userEmail]
         );
@@ -1333,6 +1335,15 @@ app.post('/my-orders/:id/cancel', async (req, res) => {
         }
 
         const order = orders[0];
+
+        const firstRentalStart = new Date(order.first_rental_start);
+
+        if (firstRentalStart <= new Date(Date.now() + 24 * 60 * 60 * 1000)) {
+            await connection.rollback();
+            return res.status(400).json({
+                error: 'Eine Stornierung ist nur bis spätestens 24 Stunden vor Mietbeginn möglich.'
+            });
+        }
 
         if (!['reserved', 'confirmed'].includes(order.status)) {
             await connection.rollback();
@@ -1623,13 +1634,35 @@ app.put('/admin/orders/:id/cancel', checkAdmin, async (req, res) => {
 
         await connection.execute(
             `UPDATE rental_orders
-             SET status = 'cancelled',
-             return_case_status = 'closed',
+            SET status = CASE
+        WHEN EXISTS (
+            SELECT 1
+            FROM rental_order_items
+            WHERE order_id = ?
+            AND COALESCE(item_status, 'active') = 'active'
+            AND rental_start <= CURDATE()
+        )
+        THEN status
+        ELSE 'cancelled'
+    END,
+    return_case_status = CASE
+        WHEN EXISTS (
+            SELECT 1
+            FROM rental_order_items
+            WHERE order_id = ?
+            AND COALESCE(item_status, 'active') = 'active'
+            AND rental_start <= CURDATE()
+        )
+        THEN 'open'
+        ELSE 'closed'
+    END,
              cancel_reason = ?,
              cancelled_by_user_id = ?,
              cancelled_at = NOW()
              WHERE id = ?`,
             [
+                req.params.id,
+                req.params.id,
                 cancelReason.trim(),
                 cancelledByUserId,
                 req.params.id
@@ -1639,11 +1672,12 @@ app.put('/admin/orders/:id/cancel', checkAdmin, async (req, res) => {
         await connection.execute(
             `UPDATE rental_order_items
              SET item_status = 'cancelled',
-                 cancelled_at = NOW(),
-                 cancelled_by_user_id = ?,
-                 cancel_reason = ?
+                    cancelled_at = NOW(),
+                    cancelled_by_user_id = ?,
+                    cancel_reason = ?
              WHERE order_id = ?
-             AND COALESCE(item_status, 'active') = 'active'`,
+             AND COALESCE(item_status, 'active') = 'active'
+             AND rental_start > CURDATE()`,
             [
                 cancelledByUserId,
                 cancelReason.trim(),
@@ -1691,7 +1725,7 @@ app.put('/admin/order-items/:itemId/cancel', checkAdmin, async (req, res) => {
         await connection.beginTransaction();
 
         const [items] = await connection.execute(
-            `SELECT id, order_id, item_status
+            `SELECT id, order_id, item_status, rental_start
              FROM rental_order_items
              WHERE id = ?
              LIMIT 1`,
@@ -1706,6 +1740,13 @@ app.put('/admin/order-items/:itemId/cancel', checkAdmin, async (req, res) => {
         }
 
         const item = items[0];
+
+        if (new Date(item.rental_start) <= new Date()) {
+            await connection.rollback();
+            return res.status(400).json({
+                error: 'Dieser Artikel hat bereits begonnen und muss über die Rückgabe abgewickelt werden.'
+            });
+        }
 
         if (item.item_status !== 'active') {
             await connection.rollback();
