@@ -115,11 +115,18 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         if (finalDiv) {
             finalDiv.innerHTML = `
-                <div class="alert alert-success">
-                    Ihre Zahlung war erfolgreich.<br>
-                    Bestellnummer: <strong>${order.orderNo}</strong>
-                </div>
-            `;
+    <div class="alert alert-success">
+        Ihre Zahlung war erfolgreich.<br>
+        Bestellnummer: <strong>${order.orderNo}</strong>
+    </div>
+
+    <div class="alert alert-success text-start">
+        <strong>Wie geht es weiter?</strong><br>
+        Sie können nun während unserer Öffnungszeiten bei uns vorbeikommen und die
+        reservierten Produkte abholen. Bitte bringen Sie zur Abholung einen gültigen
+        Ausweis mit.
+    </div>
+`;
         }
     };
 
