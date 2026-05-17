@@ -311,7 +311,13 @@ function renderMyOrderItemCard(item) {
             <div class="card-body">
                 <h6 class="mb-1">${item.title}</h6>
                 <div class="small text-muted mb-2">Position #${item.id}</div>
-
+        ${canCancelItem ? `
+            <button type="button"
+                class="btn btn-outline-danger btn-sm"
+                onclick="cancelMyOrderItem(${item.orderId || item.order_id}, ${item.id})">
+                Artikel stornieren
+            </button>
+        ` : ''}
                 <div>
                     <strong>Mietzeitraum:</strong>
                     ${item.rentalStart || '-'} bis ${item.rentalEnd || '-'}
@@ -351,13 +357,6 @@ function renderMyOrderItemCard(item) {
 
                 <div class="mt-3">
                     <strong>Rückgabefotos</strong>
-                    ${canCancelItem ? `
-    <button type="button"
-        class="btn btn-outline-danger btn-sm mt-3"
-        onclick="cancelMyOrderItem(${item.orderId || item.order_id}, ${item.id})">
-        Artikel stornieren
-    </button>
-` : ''}
                     ${imagesHtml}
                 </div>
             </div>
