@@ -166,7 +166,6 @@ button#submit-btn {
   height: 50px;
   background: var(--color-accent);
   margin: 0 auto;
-  margin-top: 40px;
   overflow: hidden;
   z-index: 1;
   cursor: pointer;
@@ -292,7 +291,18 @@ label.form-check-label.radio-lb {
 }
 
 #q-box__buttons {
-  text-align: center;
+  position: sticky;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+  padding: 20px 0;
+  background: rgba(247, 249, 255, 0.96);
+  backdrop-filter: blur(6px);
+  z-index: 100;
+  border-top: 1px solid rgba(4, 28, 64, 0.08);
 }
 
 input[type="text"],
@@ -520,6 +530,7 @@ input[type="radio"]:hover {
   background: transparent !important;
   box-shadow: none !important;
   border-radius: 0 !important;
+  padding-bottom: 120px;
 }
 
 #steps-container {
@@ -879,4 +890,46 @@ aside {
 .payment-icon {
   font-size: 2rem;
   color: #0d2c66;
+}
+
+button#prev-btn,
+button#next-btn,
+button#submit-btn {
+  min-width: 140px;
+  box-shadow: 0 8px 24px rgba(4, 28, 64, 0.12);
+}
+
+.success-screen {
+  min-height: calc(100vh - 120px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.success-card {
+  width: 100%;
+  max-width: 920px;
+  text-align: center;
+  background: #ffffff;
+  border: 1px solid rgba(4, 28, 64, 0.08);
+  border-radius: 18px;
+  padding: 42px;
+  box-shadow: 0 18px 45px rgba(4, 28, 64, 0.10);
+}
+
+.success-icon {
+  width: 72px;
+  height: 72px;
+  margin: 0 auto 22px;
+  border-radius: 50%;
+  background: #198754;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2.4rem;
+}
+
+.success-card .alert {
+  margin-bottom: 0;
 }
