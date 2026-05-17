@@ -1408,7 +1408,17 @@ function openOrderItemReturnModal(orderId, itemId) {
     document.getElementById('returnOrderId').value = orderId;
     document.getElementById('returnItemId').value = itemId;
     document.getElementById('returnActualDate').value = item.actualReturnDate || todayDateString();
-    document.getElementById('returnAdjustedStart').value = item.adjustedRentalStart || item.rentalStart || '';
+    const isPickedUp = (item.itemStatus || item.item_status) === 'picked_up';
+    const pickedUpDate = item.pickedUpAt || item.picked_up_at || item.adjustedRentalStart || item.rentalStart || '';
+
+    const returnAdjustedStartInput = document.getElementById('returnAdjustedStart');
+
+    returnAdjustedStartInput.value = isPickedUp
+        ? pickedUpDate.slice(0, 10)
+        : item.adjustedRentalStart || item.rentalStart || '';
+
+    returnAdjustedStartInput.disabled = isPickedUp;
+
     document.getElementById('returnAdjustedEnd').value = item.adjustedRentalEnd || item.actualReturnDate || item.rentalEnd || '';
     document.getElementById('returnPricePerDay').value = item.adjustedPricePerDay || item.pricePerDay || '';
     document.getElementById('returnStatus').value = item.returnStatus || 'returned_ok';
