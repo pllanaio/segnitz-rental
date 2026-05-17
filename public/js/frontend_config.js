@@ -401,6 +401,20 @@ submitBtn.addEventListener('click', async (event) => {
 
     const formData = serializeFormToStepJson();
 
+    const step3 = formData.find(step => step.step === 4);
+
+    if (step3) {
+        step3.elements = step3.elements.filter(
+            element => element.name !== 'paymentMethod'
+        );
+
+        step3.elements.push({
+            name: 'paymentMethod',
+            value: selectedPaymentMethod.value,
+            checked: true
+        });
+    }
+
     try {
         preloader.classList.add('d-block');
         submitBtn.disabled = true;
