@@ -599,6 +599,7 @@ function renderOrderItemCard(order, item) {
     const orderStatus = String(order.status || '').trim().toLowerCase();
     const isExpired = orderStatus === 'expired';
     const canEdit = ['active', 'picked_up'].includes(itemStatus) && !isExpired;
+    const canCancelItem = itemStatus === 'active' && !isExpired;
     const isPickedUp = itemStatus === 'picked_up';
     const canReturn = !isCancelled && !isReturned && !isExpired;
 
@@ -660,7 +661,7 @@ function renderOrderItemCard(order, item) {
 
                         <button type="button"
                             class="btn btn-outline-danger btn-sm"
-                            ${canEdit ? '' : 'disabled'}
+                            ${canCancelItem ? '' : 'disabled'}
                             onclick="openCancelOrderItemModal(${order.id}, ${item.id})">
                             Artikel stornieren
                         </button>
