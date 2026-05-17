@@ -19,6 +19,10 @@ document
             };
 
             elements.forEach(element => {
+                if (element.type === 'radio' && !element.checked) {
+                    return;
+                }
+
                 const elementData = {
                     name: element.name,
                     value: element.value
@@ -33,10 +37,6 @@ document
                 }
 
                 if (element.type === 'radio') {
-                    if (!element.checked) {
-                        return;
-                    }
-
                     elementData.value = element.value;
                     elementData.checked = true;
                 }
