@@ -530,7 +530,10 @@ app.post('/data', async (req, res) => {
             .flatMap(step => step.elements || [])
             .find(element =>
                 element.name === 'paymentMethod' &&
-                element.checked === true
+                (
+                    element.checked === true ||
+                    element.value === 'online'
+                )
             );
 
         const paymentMethod =

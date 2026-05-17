@@ -389,6 +389,16 @@ submitBtn.addEventListener('click', async (event) => {
         return;
     }
 
+    const selectedPaymentMethod = document.querySelector('input[name="paymentMethod"]:checked');
+
+    if (!selectedPaymentMethod) {
+        showAlert('Bitte wählen Sie eine Zahlungsart aus.', 'warning');
+        submitBtn.disabled = false;
+        return;
+    }
+
+    console.log('Gewählte Zahlungsart:', selectedPaymentMethod.value);
+
     const formData = serializeFormToStepJson();
 
     try {
