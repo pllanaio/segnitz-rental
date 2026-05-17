@@ -59,7 +59,6 @@ const {
     createMolliePaymentForOrder,
     getMolliePayment
 } = require('./services/mollieService');
-app.use(express.urlencoded({ extended: true }));
 
 
 async function cleanupOnStartup() {
@@ -457,7 +456,7 @@ app.post('/data', async (req, res) => {
             `INSERT INTO rental_orders
             (order_no, cart_id, user_id, customer_email, customer_first_name, customer_last_name,
             customer_company, customer_phone, customer_address, customer_zip, customer_city, status, reserved_until, confirmation_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'reserved', DATE_ADD(NOW(), INTERVAL 15 MINUTE), ?)`,
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'reserved', DATE_ADD(NOW(), INTERVAL 15 MINUTE, total_amount), ?)`,
             [
                 orderNo,
                 cartId,
@@ -470,7 +469,8 @@ app.post('/data', async (req, res) => {
                 address,
                 zip,
                 city,
-                JSON.stringify(orderSummary)
+                JSON.stringify(orderSummary),
+                orderSummary.totalGross
             ]
         );
 
