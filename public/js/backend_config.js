@@ -598,7 +598,8 @@ function renderOrderItemCard(order, item) {
     const isReturned = String(itemStatus).startsWith('returned_');
     const orderStatus = String(order.status || '').trim().toLowerCase();
     const isExpired = orderStatus === 'expired';
-    const canEdit = itemStatus === 'active' && !isExpired;
+    const canEdit = ['active', 'picked_up'].includes(itemStatus) && !isExpired;
+    const isPickedUp = itemStatus === 'picked_up';
     const canReturn = !isCancelled && !isReturned && !isExpired;
 
     return `
@@ -1291,7 +1292,17 @@ function openRentalPeriodModal(orderId, itemId) {
 
     document.getElementById('rentalPeriodOrderId').value = orderId;
     document.getElementById('rentalPeriodItemId').value = itemId;
-    document.getElementById('rentalPeriodStart').value = item.adjustedRentalStart || item.rentalStart || '';
+    const isPickedUp = (item.itemStatus || item.item_status) === 'picked_up';
+    const pickedUpDate = item.pickedUpAt || item.picked_up_at || todayDateString();
+
+    const rentalPeriodStartInput = document.getElementById('rentalPeriodStart');
+
+    rentalPeriodStartInput.value = isPickedUp
+        ? pickedUpDate.slice(0, 10)
+        : item.adjustedRentalStart || item.rentalStart || '';
+
+    rentalPeriodStartInput.disabled = isPickedUp;
+
     document.getElementById('rentalPeriodEnd').value = item.adjustedRentalEnd || item.rentalEnd || '';
     document.getElementById('rentalPeriodPricePerDay').value = item.adjustedPricePerDay || item.pricePerDay || '';
 

@@ -1995,7 +1995,7 @@ app.put('/admin/order-items/:itemId/rental-adjustment', checkAdmin, async (req, 
         }
 
         const item = items[0];
-        if (item.item_status !== 'active') {
+        if (!['active', 'picked_up'].includes(item.item_status)) {
             return res.status(409).json({
                 error: 'Nur aktive Artikel können geändert werden.'
             });
