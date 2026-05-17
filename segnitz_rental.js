@@ -1991,11 +1991,19 @@ app.put('/admin/order-items/:itemId/cancel', checkAdmin, async (req, res) => {
         if (openItems[0].count === 0) {
             await connection.execute(
                 `UPDATE rental_orders
-                 SET status = 'cancelled',
-                     return_case_status = 'closed'
-                 WHERE id = ?
-                 AND status NOT IN ('returned', 'expired')`,
-                [item.order_id]
+         SET status = 'cancelled',
+             return_case_status = 'closed',
+             cancel_reason = 'Alle Artikel durch Administrator storniert',
+             cancelled_by_user_id = ?,
+             cancelled_by_name = ?,
+             cancelled_at = NOW()
+         WHERE id = ?
+         AND status NOT IN ('returned', 'expired')`,
+                [
+                    cancelledByUserId,
+                    req.session.user,
+                    item.order_id
+                ]
             );
         } else {
             await connection.execute(
