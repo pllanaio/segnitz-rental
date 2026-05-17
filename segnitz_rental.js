@@ -2878,49 +2878,6 @@ app.get('/orders/:id/payment-status', async (req, res) => {
             ]
         );
 
-        if (payment.status === 'paid' && !order.order_confirmation_sent_at) {
-            const orderSummary =
-                typeof order.confirmation_json === 'string'
-                    ? JSON.parse(order.confirmation_json || '{}')
-                    : (order.confirmation_json || {});
-
-            const recipients = [
-                order.customer_email,
-                'orders@segnitzbau.de'
-            ]
-                .filter(Boolean)
-                .map(e => e.trim().toLowerCase());
-
-            const uniqueRecipients = [...new Set(recipients)];
-
-            await sendOrderEmail(
-                uniqueRecipients,
-                {
-                    ...orderSummary,
-                    id: order.id
-                },
-                {
-                    firstName: order.customer_first_name,
-                    lastName: order.customer_last_name,
-                    company: order.customer_company,
-                    email: order.customer_email,
-                    phone: order.customer_phone,
-                    address: order.customer_address,
-                    zip: order.customer_zip,
-                    city: order.customer_city
-                },
-                order.signature_data_url,
-                'Erfolgreich online gezahlt'
-            );
-
-            await connection.execute(
-                `UPDATE rental_orders
-         SET order_confirmation_sent_at = NOW()
-         WHERE id = ?`,
-                [order.id]
-            );
-        }
-
         return res.json({
             ...order,
             status: newOrderStatus,
