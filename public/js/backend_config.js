@@ -840,7 +840,8 @@ function getStatusBadge(status) {
         confirmed: 'primary',
         active: 'success',
         returned: 'success',
-        cancelled: 'dark'
+        cancelled: 'dark',
+        picked_up: 'info',
     };
 
     const labels = {
@@ -850,7 +851,8 @@ function getStatusBadge(status) {
         confirmed: 'Bestätigt',
         active: 'Aktiv',
         returned: 'Zurückgegeben',
-        cancelled: 'Storniert'
+        cancelled: 'Storniert',
+        picked_up: 'Abgeholt'
     };
 
     return `<span class="badge bg-${map[status] || 'secondary'} me-1">${labels[status] || status || '-'}</span>`;
