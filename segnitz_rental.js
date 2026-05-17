@@ -55,6 +55,12 @@ const {
 const cartRoutes = require('./routes/cartRoutes');
 const { checkProductAvailability } = require('./utils/availability');
 
+const {
+    createMolliePaymentForOrder,
+    getMolliePayment
+} = require('./services/mollieService');
+app.use(express.urlencoded({ extended: true }));
+
 
 async function cleanupOnStartup() {
     let connection;
@@ -2677,6 +2683,148 @@ app.put('/admin/opening-hours', checkAdmin, async (req, res) => {
     } catch (error) {
         console.error('Fehler beim Speichern der Öffnungszeiten:', error);
         res.status(500).json({ error: 'Öffnungszeiten konnten nicht gespeichert werden.' });
+    } finally {
+        if (connection) await connection.end();
+    }
+});
+
+app.post('/orders/:id/mollie-checkout', async (req, res) => {
+    let connection;
+
+    try {
+        connection = await mysql.createConnection(dbConfig);
+
+        const [orders] = await connection.execute(
+            `SELECT
+                id,
+                order_no AS orderNo,
+                total_amount AS totalAmount,
+                status
+             FROM rental_orders
+             WHERE id = ?
+             LIMIT 1`,
+            [req.params.id]
+        );
+
+        if (orders.length === 0) {
+            return res.status(404).json({
+                error: 'Bestellung nicht gefunden.'
+            });
+        }
+
+        const order = orders[0];
+
+        if (!['reserved', 'pending_payment'].includes(order.status)) {
+            return res.status(400).json({
+                error: 'Für diese Bestellung kann kein Checkout mehr erstellt werden.'
+            });
+        }
+
+        const payment = await createMolliePaymentForOrder(order);
+
+        await connection.execute(
+            `UPDATE rental_orders
+             SET mollie_payment_id = ?,
+                 mollie_checkout_url = ?,
+                 mollie_payment_status = ?
+             WHERE id = ?`,
+            [
+                payment.id,
+                payment.checkoutUrl,
+                payment.status,
+                order.id
+            ]
+        );
+
+        return res.json({
+            success: true,
+            checkoutUrl: payment.checkoutUrl
+        });
+
+    } catch (error) {
+        console.error('Fehler beim Erstellen des Mollie-Checkouts:', error);
+
+        return res.status(500).json({
+            error: 'Checkout konnte nicht erstellt werden.'
+        });
+
+    } finally {
+        if (connection) await connection.end();
+    }
+});
+
+app.post('/webhooks/mollie', async (req, res) => {
+    let connection;
+
+    try {
+        const paymentId = req.body.id;
+
+        if (!paymentId) {
+            return res.sendStatus(200);
+        }
+
+        const payment = await getMolliePayment(paymentId);
+
+        connection = await mysql.createConnection(dbConfig);
+
+        const [orders] = await connection.execute(
+            `SELECT id, status
+             FROM rental_orders
+             WHERE mollie_payment_id = ?
+             LIMIT 1`,
+            [payment.id]
+        );
+
+        if (orders.length === 0) {
+            return res.sendStatus(200);
+        }
+
+        const order = orders[0];
+
+        let newPaymentStatus = payment.status;
+        let newOrderStatus = order.status;
+
+        if (payment.isPaid()) {
+            newOrderStatus = 'confirmed';
+        }
+
+        if (payment.isCanceled()) {
+            newOrderStatus = 'cancelled';
+        }
+
+        if (payment.isExpired()) {
+            newOrderStatus = 'expired';
+        }
+
+        if (payment.isFailed()) {
+            newOrderStatus = 'payment_failed';
+        }
+
+        await connection.execute(
+            `UPDATE rental_orders
+             SET mollie_payment_status = ?,
+                 mollie_payment_method = ?,
+                 status = ?,
+                 paid_at = CASE
+                    WHEN ? = 'paid' THEN NOW()
+                    ELSE paid_at
+                 END
+             WHERE id = ?`,
+            [
+                newPaymentStatus,
+                payment.method || null,
+                newOrderStatus,
+                newPaymentStatus,
+                order.id
+            ]
+        );
+
+        return res.sendStatus(200);
+
+    } catch (error) {
+        console.error('Mollie Webhook Fehler:', error);
+        return res.sendStatus(500);
+
     } finally {
         if (connection) await connection.end();
     }
