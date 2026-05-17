@@ -129,7 +129,7 @@ function renderMyOrderDetails(order) {
     const body = document.getElementById('myOrderDetailsBody');
 
     const itemsHtml = (order.items || [])
-        .map(item => renderMyOrderItemCard(item))
+        .map(item => renderMyOrderItemCard(item, order))
         .join('');
 
     const status = String(order.status || '').trim().toLowerCase();
@@ -286,10 +286,11 @@ function renderReviewCard(item, orderId) {
     `;
 }
 
-function renderMyOrderItemCard(item) {
+function renderMyOrderItemCard(item, order) {
     const financials = calculateOrderItemFinancials(item);
     const itemStatus = item.itemStatus || item.item_status || 'active';
-    const canCancelItem = itemStatus === 'active';
+    const orderStatus = String(order?.status || '').trim().toLowerCase();
+    const canCancelItem = itemStatus === 'active' && !['expired', 'cancelled', 'picked_up', 'returned'].includes(orderStatus);
 
     const imagesHtml = (item.returnImages || []).length === 0
         ? '<div class="text-muted small">Keine Rückgabefotos zu diesem Artikel vorhanden.</div>'
@@ -618,7 +619,7 @@ function deriveMyOrderReturnStatus(order) {
 }
 
 function getReturnBadge(status, orderStatus = null) {
-    if (orderStatus === 'cancelled') {
+    if (['cancelled', 'expired'].includes(orderStatus)) {
         return `<span class="badge bg-dark">Rückgabe: Geschlossen</span>`;
     }
 
