@@ -2804,6 +2804,33 @@ app.post('/orders/:id/mollie-checkout', async (req, res) => {
     }
 });
 
+app.get('/orders/:id/payment-status', async (req, res) => {
+    let connection;
+
+    try {
+        connection = await mysql.createConnection(dbConfig);
+
+        const [orders] = await connection.execute(
+            `SELECT id, order_no AS orderNo, status, payment_status, mollie_payment_status
+             FROM rental_orders
+             WHERE id = ?
+             LIMIT 1`,
+            [req.params.id]
+        );
+
+        if (orders.length === 0) {
+            return res.status(404).json({ error: 'Bestellung nicht gefunden.' });
+        }
+
+        return res.json(orders[0]);
+    } catch (error) {
+        console.error('Fehler beim Laden des Zahlungsstatus:', error);
+        return res.status(500).json({ error: 'Zahlungsstatus konnte nicht geladen werden.' });
+    } finally {
+        if (connection) await connection.end();
+    }
+});
+
 app.post('/webhooks/mollie', async (req, res) => {
     let connection;
 
