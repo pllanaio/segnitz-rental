@@ -10,7 +10,7 @@ function escapeHtml(value) {
 }
 // hier deine Mail-Funktionen einfügen
 
-async function sendOrderEmail(recipients, orderSummary, customer, signatureDataUrl) {
+async function sendOrderEmail(recipients, orderSummary, customer, signatureDataUrl, paymentMethodText) {
     if (!recipients || recipients.length === 0) {
         return false;
     }
@@ -75,12 +75,19 @@ async function sendOrderEmail(recipients, orderSummary, customer, signatureDataU
             Gesamt vor Kautionsrückgabe: ${Number(orderSummary.totals.grandTotalBeforeDepositReturn || 0).toFixed(2)} €
         </p>
 
+                <h3>Zahlung</h3>
+        <p>
+            Zahlungsmethode: <strong>${escapeHtml(paymentMethodText || 'Nicht angegeben')}</strong>
+        </p>
+
+        <h3>Wie geht es weiter?</h3>
+        <p>
+            Sie können nun während unserer Öffnungszeiten bei uns vorbeikommen und die
+            reservierten Produkte unter Vorlage Ihres Personalausweises mieten.
+        </p>
+
         <h3>Unterschrift</h3>
         ${signatureHtml}
-
-        <p style="margin-top:24px;">
-            Hinweis: Die Rechnungsstellung erfolgt später über Stripe.
-        </p>
     `;
 
     const customerRecipient = recipients[0]; // erster = Kunde
