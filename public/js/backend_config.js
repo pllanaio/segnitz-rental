@@ -1346,7 +1346,6 @@ async function submitOrderItemRentalPeriod() {
 function openCancelOrderItemModal(orderId, itemId) {
     document.getElementById('cancelOrderItemOrderId').value = orderId;
     document.getElementById('cancelOrderItemId').value = itemId;
-    document.getElementById('cancelOrderItemReason').value = '';
 
     new bootstrap.Modal(document.getElementById('cancelOrderItemModal')).show();
 }
@@ -1354,12 +1353,6 @@ function openCancelOrderItemModal(orderId, itemId) {
 async function submitCancelOrderItem() {
     const orderId = document.getElementById('cancelOrderItemOrderId').value;
     const itemId = document.getElementById('cancelOrderItemId').value;
-    const reason = document.getElementById('cancelOrderItemReason').value.trim();
-
-    if (!reason) {
-        showAlert('Bitte geben Sie einen Stornogrund ein.', 'warning');
-        return;
-    }
 
     try {
         const response = await fetch(`/admin/order-items/${itemId}/cancel`, {
@@ -1367,9 +1360,7 @@ async function submitCancelOrderItem() {
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({
-                cancelReason: reason
-            })
+            body: JSON.stringify({})
         });
 
         const result = await response.json();
