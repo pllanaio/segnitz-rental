@@ -266,6 +266,28 @@ submitBtn.addEventListener('click', async (event) => {
             return;
         }
 
+        const checkoutResponse = await fetch(`/orders/${result.orderId}/mollie-checkout`, {
+            method: 'POST'
+        });
+
+        const checkoutResult = await checkoutResponse.json();
+
+        if (!checkoutResponse.ok) {
+            preloader.classList.remove('d-block');
+            bodyElement.classList.remove('loaded');
+            submitBtn.disabled = false;
+
+            showAlert(
+                checkoutResult.error || 'Zahlung konnte nicht gestartet werden.',
+                'danger'
+            );
+
+            return;
+        }
+
+        window.location.href = checkoutResult.checkoutUrl;
+        return;
+
         bodyElement.classList.add('loaded');
 
         step[stepCount].classList.remove('d-block');
