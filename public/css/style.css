@@ -858,3 +858,25 @@ aside {
   justify-content: center;
   gap: 6px;
 }
+
+.payment-card {
+  border: 2px solid #dee2e6;
+  transition: all 0.2s ease;
+  cursor: pointer;
+  border-radius: 14px;
+}
+
+.payment-card:hover {
+  border-color: #f0c400;
+  transform: translateY(-2px);
+}
+
+.payment-option-card input:checked+.payment-card {
+  border-color: #f0c400;
+  background: #fffdf2;
+}
+
+.payment-icon {
+  font-size: 2rem;
+  color: #0d2c66;
+}
