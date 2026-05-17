@@ -2876,7 +2876,7 @@ app.post('/webhooks/mollie', async (req, res) => {
             [
                 newPaymentStatus,
                 payment.method || null,
-                newPaymentStatus === 'paid' ? 'paid' : newPaymentStatus,
+                publicPaymentStatus,
                 newOrderStatus,
                 newPaymentStatus,
                 order.id
