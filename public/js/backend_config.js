@@ -2096,6 +2096,30 @@ async function uploadReturnImagesBeforeSave() {
     }
 }
 
+async function markOrderPickedUp(orderId) {
+    const confirmed = await showConfirm(
+        'Soll diese Bestellung als abgeholt markiert werden?',
+        'Abholung bestätigen'
+    );
+
+    if (!confirmed) return;
+
+    const response = await fetch(`/admin/orders/${orderId}/pick-up`, {
+        method: 'PUT'
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+        showAlert(result.error || 'Bestellung konnte nicht als abgeholt markiert werden.', 'danger');
+        return;
+    }
+
+    showAlert(result.message || 'Bestellung wurde als abgeholt markiert.', 'success');
+    await loadOrders();
+    await openOrderDetails(orderId);
+}
+
 function logout() {
     fetch('/logout', {
         method: 'POST'
