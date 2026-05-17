@@ -1345,10 +1345,17 @@ app.post('/my-orders/:id/cancel', async (req, res) => {
             });
         }
 
-        if (!['reserved', 'confirmed'].includes(order.status)) {
+        if (!['reserved', 'confirmed'].includes(order.status) || order.status === 'picked_up') {
             await connection.rollback();
             return res.status(400).json({
                 error: 'Diese Bestellung kann nicht mehr storniert werden.'
+            });
+        }
+
+        if (order.status === 'picked_up') {
+            await connection.rollback();
+            return res.status(400).json({
+                error: 'Diese Bestellung wurde bereits abgeholt und kann nicht mehr storniert werden.'
             });
         }
 
@@ -1593,6 +1600,70 @@ ORDER BY id DESC`,
     }
 });
 
+app.put('/admin/orders/:id/pick-up', checkAdmin, async (req, res) => {
+    let connection;
+
+    try {
+        connection = await mysql.createConnection(dbConfig);
+        await connection.beginTransaction();
+
+        const [orders] = await connection.execute(
+            `SELECT id, status
+             FROM rental_orders
+             WHERE id = ?
+             LIMIT 1`,
+            [req.params.id]
+        );
+
+        if (orders.length === 0) {
+            await connection.rollback();
+            return res.status(404).json({ error: 'Bestellung nicht gefunden.' });
+        }
+
+        const order = orders[0];
+
+        if (!['reserved', 'confirmed', 'paid', 'active'].includes(order.status)) {
+            await connection.rollback();
+            return res.status(409).json({
+                error: 'Diese Bestellung kann nicht als abgeholt markiert werden.'
+            });
+        }
+
+        const pickedUpByUserId = await getUserIdByEmail(connection, req.session.user);
+
+        await connection.execute(
+            `UPDATE rental_orders
+             SET status = 'picked_up',
+                 return_case_status = 'open',
+                 picked_up_at = NOW(),
+                 picked_up_by_user_id = ?
+             WHERE id = ?`,
+            [pickedUpByUserId, req.params.id]
+        );
+
+        await connection.execute(
+            `UPDATE rental_order_items
+             SET item_status = 'picked_up',
+                 picked_up_at = NOW(),
+                 picked_up_by_user_id = ?
+             WHERE order_id = ?
+             AND COALESCE(item_status, 'active') = 'active'`,
+            [pickedUpByUserId, req.params.id]
+        );
+
+        await connection.commit();
+
+        res.json({ message: 'Bestellung wurde als abgeholt markiert.' });
+
+    } catch (error) {
+        if (connection) await connection.rollback();
+        console.error('Fehler beim Markieren als abgeholt:', error);
+        res.status(500).json({ error: 'Bestellung konnte nicht als abgeholt markiert werden.' });
+    } finally {
+        if (connection) await connection.end();
+    }
+});
+
 app.put('/admin/orders/:id/cancel', checkAdmin, async (req, res) => {
     let connection;
 
@@ -1624,7 +1695,7 @@ app.put('/admin/orders/:id/cancel', checkAdmin, async (req, res) => {
 
         const order = orders[0];
 
-        if (['cancelled', 'returned', 'expired'].includes(order.status)) {
+        if (['cancelled', 'returned', 'expired', 'picked_up'].includes(order.status)) {
             return res.status(409).json({
                 error: 'Diese Bestellung kann nicht storniert werden.'
             });
@@ -1748,7 +1819,7 @@ app.put('/admin/order-items/:itemId/cancel', checkAdmin, async (req, res) => {
             });
         }
 
-        if (item.item_status !== 'active') {
+        if (!['active'].includes(item.item_status)) {
             await connection.rollback();
             return res.status(409).json({
                 error: 'Nur aktive Artikel können storniert werden.'
@@ -2147,7 +2218,7 @@ app.put('/admin/order-items/:itemId/return', checkAdmin, async (req, res) => {
             `SELECT COUNT(*) AS count
              FROM rental_order_items
              WHERE order_id = ?
-             AND COALESCE(item_status, 'active') = 'active'`,
+             AND COALESCE(item_status, 'active') IN ('active', 'picked_up')`,
             [item.order_id]
         );
 
