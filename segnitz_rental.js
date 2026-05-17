@@ -1071,7 +1071,10 @@ app.get('/my-orders', async (req, res) => {
                 payment_method,
                 payment_status,
                 DATE_FORMAT(reserved_until, '%Y-%m-%d %H:%i:%s') AS reserved_until,
-                DATE_FORMAT(returned_at, '%Y-%m-%d %H:%i:%s') AS returned_at
+                DATE_FORMAT(returned_at, '%Y-%m-%d %H:%i:%s') AS returned_at,
+                cancel_reason AS cancelReason,
+                cancelled_by_name AS cancelledByName,
+                DATE_FORMAT(cancelled_at, '%Y-%m-%d %H:%i:%s') AS cancelledAt
              FROM rental_orders
              WHERE customer_email = ?
              ORDER BY id DESC`,
@@ -1165,6 +1168,7 @@ app.get('/my-orders/:id', async (req, res) => {
                 DATE_FORMAT(returned_at, '%Y-%m-%d %H:%i:%s') AS returned_at,
                 confirmation_json,
                 cancel_reason,
+                cancelled_by_name AS cancelledByName,
                 DATE_FORMAT(cancelled_at, '%Y-%m-%d %H:%i:%s') AS cancelled_at
              FROM rental_orders
              WHERE id = ?
@@ -1562,7 +1566,10 @@ app.get('/admin/orders', checkAdmin, async (req, res) => {
         return_status,
         deposit_decision,
         DATE_FORMAT(reserved_until, '%Y-%m-%d %H:%i:%s') AS reserved_until,
-        DATE_FORMAT(returned_at, '%Y-%m-%d %H:%i:%s') AS returned_at
+        DATE_FORMAT(returned_at, '%Y-%m-%d %H:%i:%s') AS returned_at,
+        cancel_reason AS cancelReason,
+        cancelled_by_name AS cancelledByName,
+        DATE_FORMAT(cancelled_at, '%Y-%m-%d %H:%i:%s') AS cancelledAt
      FROM rental_orders
      ORDER BY id DESC`
         );
