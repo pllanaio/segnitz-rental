@@ -524,6 +524,15 @@ app.post('/data', async (req, res) => {
 
         await connection.commit();
 
+        const signatureDataUrl = getSignatureDataUrl(formData);
+
+        await connection.execute(
+            `UPDATE rental_orders
+     SET signature_data_url = ?
+     WHERE id = ?`,
+            [signatureDataUrl, orderId]
+        );
+
         const paymentMethodElement = formData
             .flatMap(step => step.elements || [])
             .find(element =>
@@ -570,8 +579,6 @@ app.post('/data', async (req, res) => {
      WHERE id = ?`,
             [orderId]
         );
-
-        const signatureDataUrl = getSignatureDataUrl(formData);
 
         const customerOrderEmail =
             getFormValue(formData, 'email') ||
@@ -2815,7 +2822,7 @@ app.get('/orders/:id/payment-status', async (req, res) => {
             `SELECT id, order_no AS orderNo, status, payment_status, mollie_payment_id, mollie_payment_status,
        order_confirmation_sent_at, confirmation_json, customer_email, customer_first_name,
        customer_last_name, customer_company, customer_phone, customer_address,
-       customer_zip, customer_city
+       customer_zip, customer_city, signature_data_url
              FROM rental_orders
              WHERE id = ?
              LIMIT 1`,
@@ -2879,7 +2886,10 @@ app.get('/orders/:id/payment-status', async (req, res) => {
         );
 
         if (payment.status === 'paid' && !order.order_confirmation_sent_at) {
-            const orderSummary = JSON.parse(order.confirmation_json || '{}');
+            const orderSummary =
+                typeof order.confirmation_json === 'string'
+                    ? JSON.parse(order.confirmation_json || '{}')
+                    : (order.confirmation_json || {});
 
             const recipients = [
                 order.customer_email,
@@ -2906,7 +2916,7 @@ app.get('/orders/:id/payment-status', async (req, res) => {
                     zip: order.customer_zip,
                     city: order.customer_city
                 },
-                null,
+                order.signature_data_url,
                 'Erfolgreich online gezahlt'
             );
 
@@ -3016,7 +3026,7 @@ app.post('/webhooks/mollie', async (req, res) => {
         if (payment.status === 'paid' && !order.order_confirmation_sent_at) {
             const [paidOrders] = await connection.execute(
                 `SELECT confirmation_json, customer_email, customer_first_name, customer_last_name,
-                customer_company, customer_phone, customer_address, customer_zip, customer_city
+                customer_company, customer_phone, customer_address, customer_zip, customer_city, signature_data_url
          FROM rental_orders
          WHERE id = ?
          LIMIT 1`,
@@ -3025,7 +3035,10 @@ app.post('/webhooks/mollie', async (req, res) => {
 
             if (paidOrders.length > 0) {
                 const paidOrder = paidOrders[0];
-                const orderSummary = JSON.parse(paidOrder.confirmation_json || '{}');
+                const orderSummary =
+                    typeof paidOrder.confirmation_json === 'string'
+                        ? JSON.parse(paidOrder.confirmation_json || '{}')
+                        : (paidOrder.confirmation_json || {});
 
                 const recipients = [
                     paidOrder.customer_email,
@@ -3052,7 +3065,7 @@ app.post('/webhooks/mollie', async (req, res) => {
                         zip: paidOrder.customer_zip,
                         city: paidOrder.customer_city
                     },
-                    null,
+                    paidOrder.signature_data_url,
                     'Erfolgreich online gezahlt'
                 );
 
