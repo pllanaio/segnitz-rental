@@ -608,7 +608,8 @@ app.post('/data', async (req, res) => {
                     zip,
                     city
                 },
-                signatureDataUrl
+                signatureDataUrl,
+                'Zahlung bei Abholung'
             );
         } catch (emailError) {
             console.error('Fehler beim E-Mail-Versand:', emailError);
@@ -2968,6 +2969,51 @@ app.post('/webhooks/mollie', async (req, res) => {
                 order.id
             ]
         );
+
+        if (payment.status === 'paid' && order.status !== 'confirmed') {
+            const [paidOrders] = await connection.execute(
+                `SELECT confirmation_json, customer_email, customer_first_name, customer_last_name,
+                customer_company, customer_phone, customer_address, customer_zip, customer_city
+         FROM rental_orders
+         WHERE id = ?
+         LIMIT 1`,
+                [order.id]
+            );
+
+            if (paidOrders.length > 0) {
+                const paidOrder = paidOrders[0];
+                const orderSummary = JSON.parse(paidOrder.confirmation_json || '{}');
+
+                const recipients = [
+                    paidOrder.customer_email,
+                    'orders@segnitzbau.de'
+                ]
+                    .filter(Boolean)
+                    .map(e => e.trim().toLowerCase());
+
+                const uniqueRecipients = [...new Set(recipients)];
+
+                await sendOrderEmail(
+                    uniqueRecipients,
+                    {
+                        ...orderSummary,
+                        id: order.id
+                    },
+                    {
+                        firstName: paidOrder.customer_first_name,
+                        lastName: paidOrder.customer_last_name,
+                        company: paidOrder.customer_company,
+                        email: paidOrder.customer_email,
+                        phone: paidOrder.customer_phone,
+                        address: paidOrder.customer_address,
+                        zip: paidOrder.customer_zip,
+                        city: paidOrder.customer_city
+                    },
+                    null,
+                    'Erfolgreich online gezahlt'
+                );
+            }
+        }
 
         return res.sendStatus(200);
 
