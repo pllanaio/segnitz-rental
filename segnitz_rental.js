@@ -2970,7 +2970,7 @@ app.post('/webhooks/mollie', async (req, res) => {
             ]
         );
 
-        if (payment.status === 'paid') {
+        if (payment.status === 'paid' && !order.order_confirmation_sent_at) {
             const [paidOrders] = await connection.execute(
                 `SELECT confirmation_json, customer_email, customer_first_name, customer_last_name,
                 customer_company, customer_phone, customer_address, customer_zip, customer_city
@@ -3011,6 +3011,13 @@ app.post('/webhooks/mollie', async (req, res) => {
                     },
                     null,
                     'Erfolgreich online gezahlt'
+                );
+
+                await connection.execute(
+                    `UPDATE rental_orders
+     SET order_confirmation_sent_at = NOW()
+     WHERE id = ?`,
+                    [order.id]
                 );
             }
         }
