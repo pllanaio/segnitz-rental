@@ -288,6 +288,8 @@ function renderReviewCard(item, orderId) {
 
 function renderMyOrderItemCard(item) {
     const financials = calculateOrderItemFinancials(item);
+    const itemStatus = item.itemStatus || item.item_status || 'active';
+    const canCancelItem = itemStatus === 'active';
 
     const imagesHtml = (item.returnImages || []).length === 0
         ? '<div class="text-muted small">Keine Rückgabefotos zu diesem Artikel vorhanden.</div>'
@@ -349,6 +351,13 @@ function renderMyOrderItemCard(item) {
 
                 <div class="mt-3">
                     <strong>Rückgabefotos</strong>
+                    ${canCancelItem ? `
+    <button type="button"
+        class="btn btn-outline-danger btn-sm mt-3"
+        onclick="cancelMyOrderItem(${item.orderId || item.order_id}, ${item.id})">
+        Artikel stornieren
+    </button>
+` : ''}
                     ${imagesHtml}
                 </div>
             </div>
@@ -923,6 +932,35 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 });
 
+async function cancelMyOrderItem(orderId, itemId) {
+    const confirmed = window.confirm(
+        'Möchten Sie diesen Artikel wirklich stornieren?'
+    );
+
+    if (!confirmed) return;
+
+    try {
+        const response = await fetch(`/my-orders/${orderId}/items/${itemId}/cancel`, {
+            method: 'POST'
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+            showAlert(result.error || 'Artikel konnte nicht storniert werden.', 'danger');
+            return;
+        }
+
+        showAlert(result.message || 'Artikel wurde storniert.', 'success');
+
+        await loadMyOrders();
+        await refreshMyOrderDetails(orderId);
+
+    } catch (error) {
+        console.error('Fehler beim Stornieren des Artikels:', error);
+        showAlert('Artikel konnte nicht storniert werden.', 'danger');
+    }
+}
 
 function logout() {
     fetch('/logout', {
