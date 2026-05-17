@@ -308,9 +308,13 @@ function renderMyOrderItemCard(item) {
 
     return `
         <div class="card mb-3">
-            <div class="card-body">
-                <h6 class="mb-1">${item.title}</h6>
-                <div class="small text-muted mb-2">Position #${item.id}</div>
+        <div class="card-body">
+    <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-2">
+        <div>
+            <h6 class="mb-1">${item.title}</h6>
+            <div class="small text-muted">Position #${item.id}</div>
+        </div>
+
         ${canCancelItem ? `
             <button type="button"
                 class="btn btn-outline-danger btn-sm"
@@ -318,6 +322,7 @@ function renderMyOrderItemCard(item) {
                 Artikel stornieren
             </button>
         ` : ''}
+    </div>
                 <div>
                     <strong>Mietzeitraum:</strong>
                     ${item.rentalStart || '-'} bis ${item.rentalEnd || '-'}
