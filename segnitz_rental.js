@@ -455,8 +455,8 @@ app.post('/data', async (req, res) => {
         const [orderResult] = await connection.execute(
             `INSERT INTO rental_orders
             (order_no, cart_id, user_id, customer_email, customer_first_name, customer_last_name,
-            customer_company, customer_phone, customer_address, customer_zip, customer_city, status, reserved_until, confirmation_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'reserved', DATE_ADD(NOW(), INTERVAL 15 MINUTE, total_amount), ?)`,
+            customer_company, customer_phone, customer_address, customer_zip, customer_city, status, reserved_until, confirmation_json, total_amount)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'reserved', DATE_ADD(NOW(), INTERVAL 15 MINUTE), ?, ?)`,
             [
                 orderNo,
                 cartId,
@@ -470,7 +470,7 @@ app.post('/data', async (req, res) => {
                 zip,
                 city,
                 JSON.stringify(orderSummary),
-                orderSummary.totalGross
+                orderSummary.totals.grandTotalBeforeDepositReturn
             ]
         );
 
