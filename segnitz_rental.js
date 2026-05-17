@@ -1318,7 +1318,7 @@ app.post('/my-orders/:id/cancel', async (req, res) => {
         await connection.beginTransaction();
 
         const [orders] = await connection.execute(
-            `SELECT ro.id, ro.status, ro.customer_email, MIN(roi.rental_start) AS first_rental_start
+            `SELECT ro.id, ro.status, ro.customer_email
              FROM rental_orders ro
              JOIN rental_order_items roi ON roi.order_id = ro.id
              WHERE ro.id = ?
