@@ -251,90 +251,154 @@
                             <div class="step d-none" id="page3">
                                 <div class="mt-1">
                                     <div class="closing-text">
-                                        <h4>Fast fertig</h4>
-                                        <h6>Bitte unterschreiben Sie noch im Signaturfeld</h6>
-                                        <div class="row">
-                                            <h6>Die ordnungsgemäße Ausführung der Arbeiten, die Einsatzzeit und der
-                                                Materialverbrauch werden hiermit anerkannt:</h6>
-                                            <br>
-                                            <h6>Zahlbar sofort nach Rechnungserhalt, ohne Abzug.</h6>
-                                            <div id="signature-pad" class="m-signature-pad">
-                                                <div class="m-signature-pad--body">
-                                                    <canvas></canvas>
-                                                    <input type="hidden" name="Signature" id="Signature" value="">
-                                                </div>
+                                        <h6>Fast fertig</h6>
+
+                                        <p>
+                                            Bitte unterschreiben Sie im Signaturfeld, um die Reservierung verbindlich
+                                            abzuschließen.
+                                        </p>
+
+                                        <p>
+                                            Mit Ihrer Unterschrift bestätigen Sie:
+                                        </p>
+
+                                        <ul>
+                                            <li>die Richtigkeit Ihrer angegebenen Daten,</li>
+                                            <li>die verbindliche Reservierung der ausgewählten Mietartikel,</li>
+                                            <li>die Zustimmung zu den AGB und der Datenschutzerklärung,</li>
+                                            <li>dass Kautionen, Zusatzkosten und Nachbelastungen gemäß Mietbedingungen
+                                                berechnet werden dürfen.</li>
+                                        </ul>
+
+                                        <p>
+                                            Die finale Buchung erfolgt nach erfolgreicher Prüfung und Bestätigung Ihrer
+                                            Reservierung.
+                                        </p>
+                                        <div id="signature-pad" class="m-signature-pad">
+                                            <div class="m-signature-pad--body">
+                                                <canvas></canvas>
+                                                <input type="hidden" name="Signature" id="Signature" value="">
                                             </div>
                                         </div>
-                                        <br>
-                                        <div class="container text-center">
-                                            <div class="row justify-content-center">
-                                                <div class="col-md-auto">
-                                                    <button id="clear-signature" class="btn btn-warning"
-                                                        onclick="clearCanvas()" type="button">Signaturfeld
-                                                        leeren</button>
-                                                </div>
+                                    </div>
+                                    <div class="container text-center">
+                                        <div class="row justify-content-center">
+                                            <div class="col-md-auto">
+                                                <button id="clear-signature" class="btn btn-warning"
+                                                    onclick="clearCanvas()" type="button">Signaturfeld
+                                                    leeren</button>
                                             </div>
                                         </div>
-                                        <br>
-                                        <div class="form-check form-switch">
-                                            <input class="form-check-input" type="checkbox" role="switch" name="agbs"
-                                                id="agbs">
-                                            <label class="form-check-label">Hiermit stimme ich den AGBs zu</label>
+                                    </div>
+                                    <br>
+                                    <div class="form-check form-switch">
+                                        <input class="form-check-input" type="checkbox" role="switch" name="agbs"
+                                            id="agbs">
+                                        <label class="form-check-label">Hiermit stimme ich den AGBs zu</label>
+                                    </div>
+                                    <div class="form-check form-switch">
+                                        <input class="form-check-input" type="checkbox" role="switch" name="dsgvo"
+                                            id="dsgvo">
+                                        <label class="form-check-label">Hiermit stimme ich der Datenschutzerklärung
+                                            zu</label>
+                                    </div>
+                                    <div class="mt-4">
+                                        <h5 class="mb-3">Zahlungsart wählen</h5>
+
+                                        <div class="row g-3">
+
+                                            <div class="col-12 col-lg-6">
+                                                <label class="payment-option-card w-100">
+                                                    <input type="radio" name="paymentMethod" value="cash" class="d-none"
+                                                        checked>
+
+                                                    <div class="card h-100 payment-card">
+                                                        <div class="card-body d-flex align-items-start gap-3">
+                                                            <i class="bi bi-cash-coin payment-icon"></i>
+
+                                                            <div>
+                                                                <h6 class="mb-1">Bar bei Abholung</h6>
+
+                                                                <small class="text-muted">
+                                                                    Sie zahlen den Gesamtbetrag bequem bei Abholung in
+                                                                    bar.
+                                                                </small>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </label>
+                                            </div>
+
+                                            <div class="col-12 col-lg-6">
+                                                <label class="payment-option-card w-100">
+                                                    <input type="radio" name="paymentMethod" value="online"
+                                                        class="d-none">
+
+                                                    <div class="card h-100 payment-card">
+                                                        <div class="card-body d-flex align-items-start gap-3">
+                                                            <i class="bi bi-credit-card payment-icon"></i>
+
+                                                            <div>
+                                                                <h6 class="mb-1">Online bezahlen</h6>
+
+                                                                <small class="text-muted">
+                                                                    Sicher online bezahlen per Karte oder weiteren
+                                                                    Zahlungsmethoden.
+                                                                </small>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </label>
+                                            </div>
+
                                         </div>
-                                        <div class="form-check form-switch">
-                                            <input class="form-check-input" type="checkbox" role="switch" name="dsgvo"
-                                                id="dsgvo">
-                                            <label class="form-check-label">Hiermit stimme ich der Datenschutzerklärung
-                                                zu</label>
-                                        </div>
-                                        <br>
-                                        <br>
-                                        <h6>Falls Sie das Dokument per E-Mail erhalten möchten, geben Sie diese bitte
-                                            hier an:
-                                        </h6>
-                                        <input type="email" class="form-control" id="email" name="email"
-                                            placeholder="name@beispiel.de">
                                     </div>
-                                </div>
-                            </div>
-                            <div id="success">
-                                <div class="mt-5 text-center w-100">
-                                    <div class="mb-4">
-                                        <i class="bi bi-check-circle-fill text-success" style="font-size: 4rem;"></i>
-                                    </div>
-
-                                    <h3 class="mb-3">Mietvorgang erfolgreich hinterlegt</h3>
-
-                                    <p class="lead">
-                                        Vielen Dank! Ihr Mietvorgang wurde erfolgreich bei uns im System gespeichert.
-                                    </p>
-
-                                    <div class="alert alert-success mt-4 text-start w-100">
-                                        <strong>Wie geht es weiter?</strong><br>
-                                        Sie können nun während unserer Öffnungszeiten bei uns vorbeikommen und die
-                                        reservierten Produkte abholen.
-                                        Bitte bringen Sie zur Abholung einen gültigen Ausweis mit.
-                                    </div>
-
-                                    <div id="final" class="mt-4"></div>
-
-                                    <a class="back-link" href="/index.html">
-                                        <button type="button" class="btn btn-primary mt-4">
-                                            Zurück zur Startseite
-                                        </button>
-                                    </a>
+                                    <h6>Falls Sie das Dokument per E-Mail erhalten möchten, geben Sie diese bitte
+                                        hier an:
+                                    </h6>
+                                    <input type="email" class="form-control" id="email" name="email"
+                                        placeholder="name@beispiel.de">
                                 </div>
                             </div>
                         </div>
-                        <div id="q-box__buttons">
-                            <button id="prev-btn" type="button" class="d-none">Zurück</button>
-                            <button id="next-btn" type="button" class="d-inline-block">Weiter</button>
-                            <button id="submit-btn" type="button" class="d-inline-block">Absenden</button>
+                        <div id="success">
+                            <div class="mt-5 text-center w-100">
+                                <div class="mb-4">
+                                    <i class="bi bi-check-circle-fill text-success" style="font-size: 4rem;"></i>
+                                </div>
+
+                                <h3 class="mb-3">Mietvorgang erfolgreich hinterlegt</h3>
+
+                                <p class="lead">
+                                    Vielen Dank! Ihr Mietvorgang wurde erfolgreich bei uns im System gespeichert.
+                                </p>
+
+                                <div class="alert alert-success mt-4 text-start w-100">
+                                    <strong>Wie geht es weiter?</strong><br>
+                                    Sie können nun während unserer Öffnungszeiten bei uns vorbeikommen und die
+                                    reservierten Produkte abholen.
+                                    Bitte bringen Sie zur Abholung einen gültigen Ausweis mit.
+                                </div>
+
+                                <div id="final" class="mt-4"></div>
+
+                                <a class="back-link" href="/index.html">
+                                    <button type="button" class="btn btn-primary mt-4">
+                                        Zurück zur Startseite
+                                    </button>
+                                </a>
+                            </div>
                         </div>
-                    </form>
                 </div>
-            </main>
+                <div id="q-box__buttons">
+                    <button id="prev-btn" type="button" class="d-none">Zurück</button>
+                    <button id="next-btn" type="button" class="d-inline-block">Weiter</button>
+                    <button id="submit-btn" type="button" class="d-inline-block">Absenden</button>
+                </div>
+                </form>
         </div>
+        </main>
+    </div>
     </div>
     </div>
     <div id="preloader-wrapper">
