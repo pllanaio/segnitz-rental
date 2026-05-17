@@ -451,12 +451,13 @@ app.post('/data', async (req, res) => {
 
         const orderNo = await generateOrderNo(connection);
         const orderSummary = buildOrderSummary(orderNo, cartItems);
+        const signatureDataUrl = getSignatureDataUrl(formData);
 
         const [orderResult] = await connection.execute(
             `INSERT INTO rental_orders
             (order_no, cart_id, user_id, customer_email, customer_first_name, customer_last_name,
-            customer_company, customer_phone, customer_address, customer_zip, customer_city, status, reserved_until, confirmation_json, total_amount)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'reserved', DATE_ADD(NOW(), INTERVAL 15 MINUTE), ?, ?)`,
+            customer_company, customer_phone, customer_address, customer_zip, customer_city, signature_data_url, status, reserved_until, confirmation_json, total_amount)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'reserved', DATE_ADD(NOW(), INTERVAL 15 MINUTE), ?, ?)`,
             [
                 orderNo,
                 cartId,
@@ -469,6 +470,7 @@ app.post('/data', async (req, res) => {
                 address,
                 zip,
                 city,
+                signatureDataUrl,
                 JSON.stringify(orderSummary),
                 orderSummary.totals.grandTotalBeforeDepositReturn
             ]
@@ -523,15 +525,6 @@ app.post('/data', async (req, res) => {
         );
 
         await connection.commit();
-
-        const signatureDataUrl = getSignatureDataUrl(formData);
-
-        await connection.execute(
-            `UPDATE rental_orders
-     SET signature_data_url = ?
-     WHERE id = ?`,
-            [signatureDataUrl, orderId]
-        );
 
         const paymentMethodElement = formData
             .flatMap(step => step.elements || [])
