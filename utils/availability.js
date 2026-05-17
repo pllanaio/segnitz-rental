@@ -4,7 +4,7 @@ async function checkProductAvailability(connection, productId, rentalStart, rent
         FROM rental_order_items roi
         JOIN rental_orders ro ON ro.id = roi.order_id
         WHERE roi.product_id = ?
-        AND ro.status IN ('reserved', 'paid', 'confirmed', 'active')
+        AND ro.status IN ('reserved', 'paid', 'confirmed', 'active', 'picked_up')
         AND (ro.status != 'reserved' OR ro.reserved_until > NOW())
         AND roi.returned_at IS NULL
         AND COALESCE(roi.item_status, 'active') != 'cancelled'
