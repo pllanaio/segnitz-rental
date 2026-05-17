@@ -1337,15 +1337,6 @@ app.post('/my-orders/:id/cancel', async (req, res) => {
 
         const order = orders[0];
 
-        const firstRentalStart = new Date(order.first_rental_start);
-
-        if (firstRentalStart <= new Date(Date.now() + 24 * 60 * 60 * 1000)) {
-            await connection.rollback();
-            return res.status(400).json({
-                error: 'Eine Stornierung ist nur bis spätestens 24 Stunden vor Mietbeginn möglich.'
-            });
-        }
-
         if (!['reserved', 'confirmed'].includes(order.status) || order.status === 'picked_up') {
             await connection.rollback();
             return res.status(400).json({
@@ -1460,13 +1451,6 @@ app.post('/my-orders/:orderId/items/:itemId/cancel', async (req, res) => {
             await connection.rollback();
             return res.status(400).json({
                 error: 'Dieser Artikel kann nicht mehr storniert werden.'
-            });
-        }
-
-        if (new Date(item.rental_start) <= new Date(Date.now() + 24 * 60 * 60 * 1000)) {
-            await connection.rollback();
-            return res.status(400).json({
-                error: 'Eine Stornierung ist nur bis spätestens 24 Stunden vor Mietbeginn möglich.'
             });
         }
 
