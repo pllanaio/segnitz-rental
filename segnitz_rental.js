@@ -524,8 +524,15 @@ app.post('/data', async (req, res) => {
 
         await connection.commit();
 
+        const paymentMethodElement = formData
+            .flatMap(step => step.elements || [])
+            .find(element =>
+                element.name === 'paymentMethod' &&
+                element.checked === true
+            );
+
         const paymentMethod =
-            getFormValue(formData, 'paymentMethod') === 'online'
+            paymentMethodElement?.value === 'online'
                 ? 'online'
                 : 'cash';
 
