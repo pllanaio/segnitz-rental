@@ -963,3 +963,42 @@ button#submit-btn {
     border: 2px solid #0d6efd;
     box-shadow: 0 0 0 0.2rem rgba(13, 110, 253, .15);
 }
+
+.payment-option-card > input[type="radio"] {
+  position: absolute !important;
+  left: -9999px !important;
+  opacity: 0 !important;
+  width: 1px !important;
+  height: 1px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  appearance: none !important;
+  -webkit-appearance: none !important;
+}
+
+.payment-option-card {
+  position: relative;
+  cursor: pointer;
+}
+
+.payment-option-card > input[type="radio"]:checked + .payment-card {
+  border-color: #f0c400 !important;
+  background: #fffdf2 !important;
+  box-shadow: 0 0 0 0.2rem rgba(252, 220, 49, 0.28) !important;
+}
+
+input[name="paymentMethod"] {
+  position: fixed !important;
+  top: -10000px !important;
+  left: -10000px !important;
+  opacity: 0 !important;
+  width: 1px !important;
+  height: 1px !important;
+  margin: 0 !important;
+  appearance: none !important;
+  -webkit-appearance: none !important;
+}
+
+.payment-error-icon {
+  background: #dc3545 !important;
+}
