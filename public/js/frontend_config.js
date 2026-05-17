@@ -60,6 +60,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     progress(100);
 
     const setPaymentErrorView = (message) => {
+
+        const nextSteps = document.getElementById('paymentNextSteps');
+
+        if (nextSteps) {
+            nextSteps.classList.add('d-none');
+        }
+
         if (resultIcon) {
             resultIcon.innerHTML = '<i class="bi bi-x-lg"></i>';
             resultIcon.className = 'success-icon payment-error-icon';
@@ -88,6 +95,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     };
 
     const setPaymentSuccessView = (order) => {
+
+        const nextSteps = document.getElementById('paymentNextSteps');
+
+        if (nextSteps) {
+            nextSteps.classList.remove('d-none');
+        }
         if (resultIcon) {
             resultIcon.innerHTML = '<i class="bi bi-check-lg"></i>';
             resultIcon.className = 'success-icon';
