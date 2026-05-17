@@ -523,21 +523,6 @@ function renderOrderDetails(order) {
 
     const canMarkPickedUp = ['reserved', 'confirmed', 'paid', 'active'].includes(status);
 
-    const pickUpHtml = canMarkPickedUp ? `
-    <div class="col-12">
-        <hr>
-        <h5>Abholung</h5>
-        <p class="text-muted">
-            Markiert die Bestellung als abgeholt. Danach ist keine Stornierung mehr möglich.
-        </p>
-
-        <button type="button" class="btn btn-success"
-            onclick="markOrderPickedUp(${order.id})">
-            Bestellung als abgeholt markieren
-        </button>
-    </div>
-` : '';
-
     const cancelHtml = canCancelOrder(order) ? `
         <div class="col-12">
             <hr>
@@ -598,7 +583,6 @@ function renderOrderDetails(order) {
                 ${itemsHtml}
                 ${renderOrderFinancialSummary(order)}
             </div>
-            ${pickUpHtml}
             ${cancelHtml}
         </div>
     `;
@@ -660,6 +644,12 @@ function renderOrderItemCard(order, item) {
                     </div>
 
                     <div class="d-flex gap-2 flex-wrap align-items-start">
+                        <button type="button"
+                            class="btn btn-outline-success btn-sm"
+                            ${itemStatus === 'active' ? '' : 'disabled'}
+                            onclick="markOrderPickedUp(${order.id})">
+                            Als abgeholt markieren
+                        </button>
                         <button type="button"
                             class="btn btn-outline-primary btn-sm"
                             ${canEdit ? '' : 'disabled'}
@@ -954,7 +944,8 @@ function getOrderItemStatusBadge(item) {
         returned_ok: 'success',
         returned_late: 'warning',
         returned_damaged: 'danger',
-        returned_late_damaged: 'danger'
+        returned_late_damaged: 'danger',
+        picked_up: 'info'
     };
 
     const labels = {
@@ -963,7 +954,8 @@ function getOrderItemStatusBadge(item) {
         returned_ok: 'Zurückgegeben',
         returned_late: 'Verspätet zurück',
         returned_damaged: 'Beschädigt zurück',
-        returned_late_damaged: 'Verspätet + beschädigt'
+        returned_late_damaged: 'Verspätet + beschädigt',
+        picked_up: 'Abgeholt'
     };
 
     return `<span class="badge bg-${map[status] || 'secondary'}">${labels[status] || status || '-'}</span>`;
@@ -2134,7 +2126,15 @@ async function markOrderPickedUp(orderId) {
 
     showAlert(result.message || 'Bestellung wurde als abgeholt markiert.', 'success');
     await loadOrders();
-    await openOrderDetails(orderId);
+
+    const detailsResponse = await fetch(`/admin/orders/${orderId}`);
+    const updatedOrder = await detailsResponse.json();
+
+    if (detailsResponse.ok) {
+        renderOrderDetails(updatedOrder);
+    }
+
+    setTimeout(restoreOrderDetailsModalLayer, 300);
 }
 
 function logout() {
