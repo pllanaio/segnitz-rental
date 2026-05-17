@@ -552,11 +552,20 @@ app.post('/data', async (req, res) => {
                 ]
             );
 
+            const checkoutUrl =
+                typeof payment.getCheckoutUrl === 'function'
+                    ? payment.getCheckoutUrl()
+                    : payment._links?.checkout?.href;
+
+            if (!checkoutUrl) {
+                throw new Error('Mollie Checkout-URL fehlt.');
+            }
+
             return res.status(200).json({
                 message: 'Online-Zahlung wurde vorbereitet.',
                 orderId,
                 orderNo,
-                checkoutUrl: payment.getCheckoutUrl()
+                checkoutUrl
             });
         }
 
