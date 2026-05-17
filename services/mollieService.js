@@ -27,7 +27,7 @@ async function createMolliePaymentForOrder(order) {
             value: amountValue
         },
         description: `Segnitz Rental Bestellung ${order.orderNo}`,
-        redirectUrl: `${process.env.BASE_URL}/index.html?payment=success`,
+        redirectUrl: `${process.env.BASE_URL}/index.html?payment=success&orderId=${encodeURIComponent(order.id)}`,
         webhookUrl: `${process.env.BASE_URL}/webhooks/mollie`,
         metadata: {
             orderId: String(order.id),

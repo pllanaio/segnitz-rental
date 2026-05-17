@@ -30,6 +30,23 @@ let current_step = 0;
 let stepCount = 3;
 let bestsellerProducts = [];
 let currentModalProductReviews = [];
+document.addEventListener('DOMContentLoaded', () => {
+    const params = new URLSearchParams(window.location.search);
+
+    if (params.get('payment') === 'success') {
+        step[current_step]?.classList.remove('d-block');
+        step[current_step]?.classList.add('d-none');
+
+        prevBtn.classList.add('d-none');
+        nextBtn.classList.add('d-none');
+        submitBtn.classList.add('d-none');
+
+        succcessDiv.classList.remove('d-none');
+        succcessDiv.classList.add('d-block');
+
+        progress(100);
+    }
+});
 
 const VAT_RATE = 0.19;
 
@@ -266,27 +283,10 @@ submitBtn.addEventListener('click', async (event) => {
             return;
         }
 
-        const checkoutResponse = await fetch(`/orders/${result.orderId}/mollie-checkout`, {
-            method: 'POST'
-        });
-
-        const checkoutResult = await checkoutResponse.json();
-
-        if (!checkoutResponse.ok) {
-            preloader.classList.remove('d-block');
-            bodyElement.classList.remove('loaded');
-            submitBtn.disabled = false;
-
-            showAlert(
-                checkoutResult.error || 'Zahlung konnte nicht gestartet werden.',
-                'danger'
-            );
-
+        if (result.checkoutUrl) {
+            window.location.href = result.checkoutUrl;
             return;
         }
-
-        window.location.href = checkoutResult.checkoutUrl;
-        return;
 
         bodyElement.classList.add('loaded');
 
