@@ -10,6 +10,18 @@ function escapeHtml(value) {
 }
 // hier deine Mail-Funktionen einfügen
 
+function createMailTransporter() {
+    return nodemailer.createTransport({
+        host: process.env.SMTP_HOST || 'mail.your-server.de',
+        port: Number(process.env.SMTP_PORT || 465),
+        secure: true,
+        auth: {
+            user: process.env.SMTP_USER,
+            pass: process.env.SMTP_PASS
+        }
+    });
+}
+
 async function sendOrderEmail(recipients, orderSummary, customer, signatureDataUrl, paymentMethodText) {
     if (!recipients || recipients.length === 0) {
         return false;
@@ -383,15 +395,7 @@ async function sendReturnSummaryEmail(connection, orderId, returnedItemId) {
 async function sendVerificationEmail(email, token) {
     const verificationUrl = `${process.env.BASE_URL}/verify-email?token=${token}`;
 
-    const transporter = nodemailer.createTransport({
-        host: process.env.SMTP_HOST,
-        port: process.env.SMTP_PORT,
-        secure: true,
-        auth: {
-            user: process.env.SMTP_USER,
-            pass: process.env.SMTP_PASS
-        }
-    });
+    const transporter = createMailTransporter();
 
     await transporter.sendMail({
         from: `"Segnitz Rental" <${process.env.SMTP_USER}>`,
@@ -407,15 +411,8 @@ async function sendVerificationEmail(email, token) {
 }
 
 async function sendPasswordChangedEmail(email) {
-    const transporter = nodemailer.createTransport({
-        host: process.env.SMTP_HOST,
-        port: process.env.SMTP_PORT,
-        secure: true,
-        auth: {
-            user: process.env.SMTP_USER,
-            pass: process.env.SMTP_PASS
-        }
-    });
+
+    const transporter = createMailTransporter();
 
     await transporter.sendMail({
         from: `"Segnitz Rental" <${process.env.SMTP_USER}>`,
