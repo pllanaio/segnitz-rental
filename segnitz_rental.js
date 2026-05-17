@@ -2906,7 +2906,7 @@ app.post('/webhooks/mollie', async (req, res) => {
         connection = await mysql.createConnection(dbConfig);
 
         const [orders] = await connection.execute(
-            `SELECT id, status
+            `SELECT id, status, order_confirmation_sent_at
              FROM rental_orders
              WHERE mollie_payment_id = ?
              LIMIT 1`,
@@ -2970,7 +2970,7 @@ app.post('/webhooks/mollie', async (req, res) => {
             ]
         );
 
-        if (payment.status === 'paid' && order.status !== 'confirmed') {
+        if (payment.status === 'paid') {
             const [paidOrders] = await connection.execute(
                 `SELECT confirmation_json, customer_email, customer_first_name, customer_last_name,
                 customer_company, customer_phone, customer_address, customer_zip, customer_city
