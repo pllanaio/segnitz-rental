@@ -1101,7 +1101,10 @@ app.get('/my-orders', async (req, res) => {
                 roi.additional_charge_reason AS additionalChargeReason,
                 roi.additional_charge_amount AS additionalChargeAmount,
                 DATE_FORMAT(roi.returned_at, '%Y-%m-%d %H:%i:%s') AS returnedAt,
-                DATE_FORMAT(roi.return_case_processed_at, '%Y-%m-%d %H:%i:%s') AS returnCaseProcessedAt
+                DATE_FORMAT(roi.return_case_processed_at, '%Y-%m-%d %H:%i:%s') AS returnCaseProcessedAt,
+                DATE_FORMAT(roi.cancelled_at, '%Y-%m-%d %H:%i:%s') AS cancelledAt,
+                roi.cancel_reason AS cancelReason,
+                roi.cancelled_by_name AS cancelledByName
              FROM rental_order_items roi
              WHERE roi.order_id IN (${placeholders})
              ORDER BY roi.id ASC`,
@@ -1187,6 +1190,7 @@ app.get('/my-orders/:id', async (req, res) => {
                 roi.item_status AS itemStatus,
                 DATE_FORMAT(roi.cancelled_at, '%Y-%m-%d %H:%i:%s') AS cancelledAt,
                 roi.cancel_reason AS cancelReason,
+                roi.cancelled_by_name AS cancelledByName,
                 DATE_FORMAT(roi.actual_return_date, '%Y-%m-%d') AS actualReturnDate,
                 roi.return_status AS returnStatus,
                 roi.is_damaged AS isDamaged,
@@ -1351,27 +1355,39 @@ app.post('/my-orders/:id/cancel', async (req, res) => {
             });
         }
 
+        const cancelledByName = req.session.user;
+        const cancelReason = 'Bestellung durch Benutzer storniert';
+
         await connection.execute(
             `UPDATE rental_orders
-             SET status = 'cancelled',
-                 return_case_status = 'closed'
-             WHERE id = ?`,
-            [orderId]
+     SET status = 'cancelled',
+         return_case_status = 'closed',
+         cancel_reason = ?,
+         cancelled_by_name = ?,
+         cancelled_at = NOW()
+     WHERE id = ?`,
+            [
+                cancelReason,
+                cancelledByName,
+                orderId
+            ]
         );
 
         await connection.execute(
             `UPDATE rental_order_items
      SET item_status = 'cancelled',
          cancelled_at = NOW(),
-         cancel_reason = 'Artikel durch Benutzer storniert',
+         cancel_reason = ?,
          cancelled_by_name = ?
      WHERE order_id = ?
      AND COALESCE(item_status, 'active') = 'active'`,
             [
-                req.session.user.username,
+                cancelReason,
+                cancelledByName,
                 orderId
             ]
         );
+
         await connection.commit();
 
         return res.json({
@@ -1459,11 +1475,12 @@ app.post('/my-orders/:orderId/items/:itemId/cancel', async (req, res) => {
 
         await connection.execute(
             `UPDATE rental_order_items
-             SET item_status = 'cancelled',
-                 cancelled_at = NOW(),
-                 cancel_reason = 'Artikel durch Kunde storniert'
-             WHERE id = ?`,
-            [itemId]
+     SET item_status = 'cancelled',
+         cancelled_at = NOW(),
+         cancel_reason = 'Artikel durch Benutzer storniert',
+         cancelled_by_name = ?
+     WHERE id = ?`,
+            [req.session.user, itemId]
         );
 
         const [activeItems] = await connection.execute(
@@ -1479,10 +1496,11 @@ app.post('/my-orders/:orderId/items/:itemId/cancel', async (req, res) => {
                 `UPDATE rental_orders
                  SET status = 'cancelled',
                      return_case_status = 'closed',
-                     cancel_reason = 'Alle Artikel durch Kunde storniert',
+                     cancel_reason = 'Alle Artikel durch Benutzer storniert',
+                     cancelled_by_name = ?,
                      cancelled_at = NOW()
                  WHERE id = ?`,
-                [orderId]
+                [req.session.user, orderId]
             );
         } else {
             await connection.execute(
@@ -1555,7 +1573,10 @@ app.get('/admin/orders', checkAdmin, async (req, res) => {
         roi.order_id AS orderId,
         roi.item_status AS itemStatus,
         roi.return_status AS returnStatus,
-        DATE_FORMAT(roi.returned_at, '%Y-%m-%d %H:%i:%s') AS returnedAt
+        DATE_FORMAT(roi.returned_at, '%Y-%m-%d %H:%i:%s') AS returnedAt,
+        DATE_FORMAT(roi.cancelled_at, '%Y-%m-%d %H:%i:%s') AS cancelledAt,
+        roi.cancel_reason AS cancelReason,
+        roi.cancelled_by_name AS cancelledByName
      FROM rental_order_items roi
      ORDER BY roi.id ASC`
         );
@@ -1621,6 +1642,7 @@ app.get('/admin/orders/:id', checkAdmin, async (req, res) => {
                 roi.item_status AS itemStatus,
                 DATE_FORMAT(roi.cancelled_at, '%Y-%m-%d %H:%i:%s') AS cancelledAt,
                 roi.cancel_reason AS cancelReason,
+                roi.cancelled_by_name AS cancelledByName,
                 p.title,
                 DATE_FORMAT(roi.rental_start, '%Y-%m-%d') AS rentalStart,
                 DATE_FORMAT(roi.rental_end, '%Y-%m-%d') AS rentalEnd,
@@ -1843,6 +1865,7 @@ app.put('/admin/orders/:id/cancel', checkAdmin, async (req, res) => {
     END,
              cancel_reason = ?,
              cancelled_by_user_id = ?,
+             cancelled_by_name = ?,
              cancelled_at = NOW()
              WHERE id = ?`,
             [
@@ -1850,6 +1873,7 @@ app.put('/admin/orders/:id/cancel', checkAdmin, async (req, res) => {
                 req.params.id,
                 cancelReason.trim(),
                 cancelledByUserId,
+                req.session.user,
                 req.params.id
             ]
         );
@@ -1861,10 +1885,11 @@ app.put('/admin/orders/:id/cancel', checkAdmin, async (req, res) => {
          cancel_reason = 'Artikel durch Administrator storniert',
          cancelled_by_name = ?
      WHERE order_id = ?
-     AND COALESCE(item_status, 'active') = 'active'`,
+     AND COALESCE(item_status, 'active') = 'active'
+     AND rental_start > CURDATE()`,
             [
-                req.session.user.username,
-                orderId
+                req.session.user,
+                req.params.id
             ]
         );
 
@@ -1942,14 +1967,15 @@ app.put('/admin/order-items/:itemId/cancel', checkAdmin, async (req, res) => {
 
         await connection.execute(
             `UPDATE rental_order_items
-             SET item_status = 'cancelled',
-                 cancelled_at = NOW(),
-                 cancelled_by_user_id = ?,
-                 cancel_reason = ?
-             WHERE id = ?`,
+     SET item_status = 'cancelled',
+         cancelled_at = NOW(),
+         cancelled_by_user_id = ?,
+         cancelled_by_name = ?,
+         cancel_reason = 'Artikel durch Administrator storniert'
+     WHERE id = ?`,
             [
                 cancelledByUserId,
-                cancelReason.trim(),
+                req.session.user,
                 req.params.itemId
             ]
         );
