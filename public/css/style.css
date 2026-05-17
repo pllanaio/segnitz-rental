@@ -899,8 +899,13 @@ button#submit-btn {
   box-shadow: 0 8px 24px rgba(4, 28, 64, 0.12);
 }
 
+#success {
+  width: 100%;
+}
+
 .success-screen {
-  min-height: calc(100vh - 120px);
+  width: 100%;
+  min-height: calc(100vh - 220px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -908,7 +913,7 @@ button#submit-btn {
 
 .success-card {
   width: 100%;
-  max-width: 920px;
+  max-width: none;
   text-align: center;
   background: #ffffff;
   border: 1px solid rgba(4, 28, 64, 0.08);
