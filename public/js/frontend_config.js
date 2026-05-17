@@ -70,8 +70,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const nextSteps = document.getElementById('paymentNextSteps');
 
         if (nextSteps) {
-            nextSteps.classList.add('d-none');
-            nextSteps.style.display = 'none';
+            nextSteps.remove();
         }
 
         if (resultIcon) {
@@ -106,8 +105,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const nextSteps = document.getElementById('paymentNextSteps');
 
         if (nextSteps) {
-            nextSteps.classList.remove('d-none');
-            nextSteps.style.display = '';
+            nextSteps.remove();
         }
         if (resultIcon) {
             resultIcon.innerHTML = '<i class="bi bi-check-lg"></i>';
