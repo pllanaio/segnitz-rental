@@ -2812,7 +2812,10 @@ app.get('/orders/:id/payment-status', async (req, res) => {
         connection = await mysql.createConnection(dbConfig);
 
         const [orders] = await connection.execute(
-            `SELECT id, order_no AS orderNo, status, payment_status, mollie_payment_id, mollie_payment_status
+            `SELECT id, order_no AS orderNo, status, payment_status, mollie_payment_id, mollie_payment_status,
+       order_confirmation_sent_at, confirmation_json, customer_email, customer_first_name,
+       customer_last_name, customer_company, customer_phone, customer_address,
+       customer_zip, customer_city
              FROM rental_orders
              WHERE id = ?
              LIMIT 1`,
@@ -2874,6 +2877,46 @@ app.get('/orders/:id/payment-status', async (req, res) => {
                 order.id
             ]
         );
+
+        if (payment.status === 'paid' && !order.order_confirmation_sent_at) {
+            const orderSummary = JSON.parse(order.confirmation_json || '{}');
+
+            const recipients = [
+                order.customer_email,
+                'orders@segnitzbau.de'
+            ]
+                .filter(Boolean)
+                .map(e => e.trim().toLowerCase());
+
+            const uniqueRecipients = [...new Set(recipients)];
+
+            await sendOrderEmail(
+                uniqueRecipients,
+                {
+                    ...orderSummary,
+                    id: order.id
+                },
+                {
+                    firstName: order.customer_first_name,
+                    lastName: order.customer_last_name,
+                    company: order.customer_company,
+                    email: order.customer_email,
+                    phone: order.customer_phone,
+                    address: order.customer_address,
+                    zip: order.customer_zip,
+                    city: order.customer_city
+                },
+                null,
+                'Erfolgreich online gezahlt'
+            );
+
+            await connection.execute(
+                `UPDATE rental_orders
+         SET order_confirmation_sent_at = NOW()
+         WHERE id = ?`,
+                [order.id]
+            );
+        }
 
         return res.json({
             ...order,
