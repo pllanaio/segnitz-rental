@@ -521,6 +521,23 @@ function renderOrderDetails(order) {
         ? currentOrderItems.map(item => renderOrderItemCard(order, item)).join('')
         : '<div class="alert alert-info">Keine Artikel vorhanden.</div>';
 
+    const canMarkPickedUp = ['reserved', 'confirmed', 'paid', 'active'].includes(status);
+
+    const pickUpHtml = canMarkPickedUp ? `
+    <div class="col-12">
+        <hr>
+        <h5>Abholung</h5>
+        <p class="text-muted">
+            Markiert die Bestellung als abgeholt. Danach ist keine Stornierung mehr möglich.
+        </p>
+
+        <button type="button" class="btn btn-success"
+            onclick="markOrderPickedUp(${order.id})">
+            Bestellung als abgeholt markieren
+        </button>
+    </div>
+` : '';
+
     const cancelHtml = canCancelOrder(order) ? `
         <div class="col-12">
             <hr>
@@ -581,7 +598,7 @@ function renderOrderDetails(order) {
                 ${itemsHtml}
                 ${renderOrderFinancialSummary(order)}
             </div>
-
+            ${pickUpHtml}
             ${cancelHtml}
         </div>
     `;
