@@ -24,12 +24,21 @@ document
                     value: element.value
                 };
 
-                if (element.type === 'checkbox' || element.type === 'radio') {
+                if (element.type === 'checkbox') {
                     elementData.value = element.checked ? 'on' : 'off';
 
                     if (element.checked) {
-                        elementData.checked = element.checked;
+                        elementData.checked = true;
                     }
+                }
+
+                if (element.type === 'radio') {
+                    if (!element.checked) {
+                        return;
+                    }
+
+                    elementData.value = element.value;
+                    elementData.checked = true;
                 }
 
                 stepData.elements.push(elementData);
@@ -55,6 +64,12 @@ document
                 return data;
             })
             .then(data => {
+
+                if (data.checkoutUrl) {
+                    window.location.href = data.checkoutUrl;
+                    return;
+                }
+
                 const final = document.getElementById('final');
 
                 if (final) {
