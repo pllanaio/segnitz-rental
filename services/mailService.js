@@ -394,10 +394,9 @@ async function sendReturnSummaryEmail(connection, orderId, returnedItemId) {
 
 async function sendVerificationEmail(email, token) {
     const verificationUrl = `${process.env.BASE_URL}/verify-email?token=${token}`;
-
     const transporter = createMailTransporter();
 
-    await transporter.sendMail({
+    const info = await transporter.sendMail({
         from: `"Segnitz Rental" <${process.env.SMTP_USER}>`,
         to: email,
         subject: 'E-Mail-Adresse bestätigen',
@@ -407,6 +406,14 @@ async function sendVerificationEmail(email, token) {
             <p><a href="${verificationUrl}">E-Mail-Adresse bestätigen</a></p>
             <p>Der Link ist 24 Stunden gültig.</p>
         `
+    });
+
+    console.log('Verification-Mail gesendet:', {
+        to: email,
+        messageId: info.messageId,
+        accepted: info.accepted,
+        rejected: info.rejected,
+        response: info.response
     });
 }
 
@@ -427,15 +434,8 @@ async function sendPasswordChangedEmail(email) {
 }
 
 async function sendPasswordResetEmail(email, resetUrl) {
-    const transporter = nodemailer.createTransport({
-        host: process.env.SMTP_HOST,
-        port: Number(process.env.SMTP_PORT),
-        secure: true,
-        auth: {
-            user: process.env.SMTP_USER,
-            pass: process.env.SMTP_PASS
-        }
-    });
+
+    const transporter = createMailTransporter();
 
     await transporter.sendMail({
         from: `"Segnitz Rental" <${process.env.SMTP_USER}>`,
