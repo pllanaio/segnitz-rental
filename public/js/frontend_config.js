@@ -44,6 +44,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     const resultIcon = document.getElementById('paymentResultIcon');
     const resultTitle = document.getElementById('paymentResultTitle');
     const resultText = document.getElementById('paymentResultText');
+    const nextSteps = document.getElementById('paymentNextSteps');
+
+    if (nextSteps) {
+        nextSteps.classList.add('d-none');
+        nextSteps.style.display = 'none';
+    }
 
     Array.from(step).forEach(stepElement => {
         stepElement.classList.remove('d-block');
@@ -65,6 +71,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         if (nextSteps) {
             nextSteps.classList.add('d-none');
+            nextSteps.style.display = 'none';
         }
 
         if (resultIcon) {
@@ -100,6 +107,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         if (nextSteps) {
             nextSteps.classList.remove('d-none');
+            nextSteps.style.display = '';
         }
         if (resultIcon) {
             resultIcon.innerHTML = '<i class="bi bi-check-lg"></i>';
