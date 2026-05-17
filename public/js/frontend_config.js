@@ -34,17 +34,40 @@ document.addEventListener('DOMContentLoaded', () => {
     const params = new URLSearchParams(window.location.search);
 
     if (params.get('payment') === 'success') {
-        step[current_step]?.classList.remove('d-block');
-        step[current_step]?.classList.add('d-none');
 
+        // Alle Steps verstecken
+        Array.from(step).forEach(stepElement => {
+            stepElement.classList.remove('d-block');
+            stepElement.classList.add('d-none');
+        });
+
+        // Buttons verstecken
         prevBtn.classList.add('d-none');
         nextBtn.classList.add('d-none');
         submitBtn.classList.add('d-none');
 
+        // Success-Screen anzeigen
         succcessDiv.classList.remove('d-none');
         succcessDiv.classList.add('d-block');
 
+        // Fortschritt auf 100%
         progress(100);
+
+        // Optional: Erfolgsnachricht dynamisch ergänzen
+        const orderId = params.get('orderId');
+
+        if (orderId) {
+            const finalDiv = document.getElementById('final');
+
+            if (finalDiv) {
+                finalDiv.innerHTML = `
+                    <div class="alert alert-info">
+                        Ihre Bestellnummer lautet:
+                        <strong>#${orderId}</strong>
+                    </div>
+                `;
+            }
+        }
     }
 });
 
