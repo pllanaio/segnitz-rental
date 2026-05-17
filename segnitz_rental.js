@@ -2767,14 +2767,18 @@ app.post('/orders/:id/mollie-checkout', async (req, res) => {
             });
         }
 
+        const payment = await createMolliePaymentForOrder(order);
+
         const checkoutUrl = payment.getCheckoutUrl();
 
         await connection.execute(
             `UPDATE rental_orders
-     SET mollie_payment_id = ?,
-         mollie_checkout_url = ?,
-         mollie_payment_status = ?
-     WHERE id = ?`,
+ SET mollie_payment_id = ?,
+     mollie_checkout_url = ?,
+     mollie_payment_status = ?,
+     payment_method = 'online',
+     payment_status = 'pending'
+ WHERE id = ?`,
             [
                 payment.id,
                 checkoutUrl,
@@ -2831,26 +2835,38 @@ app.post('/webhooks/mollie', async (req, res) => {
         let newPaymentStatus = payment.status;
         let newOrderStatus = order.status;
 
-        if (payment.isPaid()) {
+        if (payment.status === 'paid') {
             newOrderStatus = 'confirmed';
         }
 
-        if (payment.isCanceled()) {
+        if (payment.status === 'canceled') {
             newOrderStatus = 'cancelled';
         }
 
-        if (payment.isExpired()) {
+        if (payment.status === 'expired') {
             newOrderStatus = 'expired';
         }
 
-        if (payment.isFailed()) {
+        if (payment.status === 'failed') {
             newOrderStatus = 'payment_failed';
         }
+
+        const publicPaymentStatus =
+            payment.status === 'paid'
+                ? 'paid'
+                : payment.status === 'failed'
+                    ? 'failed'
+                    : payment.status === 'canceled'
+                        ? 'cancelled'
+                        : payment.status === 'expired'
+                            ? 'expired'
+                            : 'pending';
 
         await connection.execute(
             `UPDATE rental_orders
              SET mollie_payment_status = ?,
                  mollie_payment_method = ?,
+                 payment_status = ?,
                  status = ?,
                  paid_at = CASE
                     WHEN ? = 'paid' THEN NOW()
@@ -2860,6 +2876,7 @@ app.post('/webhooks/mollie', async (req, res) => {
             [
                 newPaymentStatus,
                 payment.method || null,
+                publicPaymentStatus,
                 newOrderStatus,
                 newPaymentStatus,
                 order.id
