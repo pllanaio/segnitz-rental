@@ -338,7 +338,7 @@ function renderMyOrderItemCard(item, order) {
                 ` : ''}
 
                 <div>
-                    <strong>Rückgabe:</strong> ${getReturnBadge(item.returnStatus, item.itemStatus)}
+                    <strong>Rückgabe:</strong> ${getReturnBadge(item.returnStatus, order?.status)}
                 </div>
 
                 <div class="mt-3 p-2 border rounded bg-light">
