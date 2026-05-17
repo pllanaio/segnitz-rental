@@ -47,8 +47,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const nextSteps = document.getElementById('paymentNextSteps');
 
     if (nextSteps) {
-        nextSteps.classList.add('d-none');
-        nextSteps.style.display = 'none';
+        nextSteps.remove();
     }
 
     Array.from(step).forEach(stepElement => {
@@ -101,12 +100,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     };
 
     const setPaymentSuccessView = (order) => {
-
-        const nextSteps = document.getElementById('paymentNextSteps');
-
-        if (nextSteps) {
-            nextSteps.remove();
-        }
         if (resultIcon) {
             resultIcon.innerHTML = '<i class="bi bi-check-lg"></i>';
             resultIcon.className = 'success-icon';
