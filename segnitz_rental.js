@@ -1177,6 +1177,7 @@ app.get('/my-orders/:id', async (req, res) => {
         const [items] = await connection.execute(
             `SELECT
                 roi.id,
+                roi.order_id AS orderId,
                 roi.product_id AS productId,
                 p.title,
                 DATE_FORMAT(roi.rental_start, '%Y-%m-%d') AS rentalStart,
@@ -1403,6 +1404,132 @@ app.post('/my-orders/:id/cancel', async (req, res) => {
         if (connection) {
             await connection.end();
         }
+    }
+});
+
+app.post('/my-orders/:orderId/items/:itemId/cancel', async (req, res) => {
+    let connection;
+
+    if (!req.session.user) {
+        return res.status(401).json({
+            error: 'Bitte einloggen.'
+        });
+    }
+
+    try {
+        const { orderId, itemId } = req.params;
+        const userEmail = req.session.user;
+
+        connection = await mysql.createConnection(dbConfig);
+        await connection.beginTransaction();
+
+        const [items] = await connection.execute(
+            `SELECT 
+                roi.id,
+                roi.order_id,
+                roi.item_status,
+                roi.rental_start,
+                ro.status AS order_status,
+                ro.customer_email
+             FROM rental_order_items roi
+             JOIN rental_orders ro ON ro.id = roi.order_id
+             WHERE roi.id = ?
+             AND roi.order_id = ?
+             AND ro.customer_email = ?
+             LIMIT 1`,
+            [itemId, orderId, userEmail]
+        );
+
+        if (items.length === 0) {
+            await connection.rollback();
+            return res.status(404).json({
+                error: 'Artikel nicht gefunden.'
+            });
+        }
+
+        const item = items[0];
+
+        if (!['reserved', 'confirmed'].includes(item.order_status)) {
+            await connection.rollback();
+            return res.status(400).json({
+                error: 'Artikel dieser Bestellung können nicht mehr storniert werden.'
+            });
+        }
+
+        if (item.item_status !== 'active') {
+            await connection.rollback();
+            return res.status(400).json({
+                error: 'Dieser Artikel kann nicht mehr storniert werden.'
+            });
+        }
+
+        if (new Date(item.rental_start) <= new Date(Date.now() + 24 * 60 * 60 * 1000)) {
+            await connection.rollback();
+            return res.status(400).json({
+                error: 'Eine Stornierung ist nur bis spätestens 24 Stunden vor Mietbeginn möglich.'
+            });
+        }
+
+        await connection.execute(
+            `UPDATE rental_order_items
+             SET item_status = 'cancelled',
+                 cancelled_at = NOW(),
+                 cancel_reason = 'Artikel durch Kunde storniert'
+             WHERE id = ?`,
+            [itemId]
+        );
+
+        const [activeItems] = await connection.execute(
+            `SELECT COUNT(*) AS count
+             FROM rental_order_items
+             WHERE order_id = ?
+             AND COALESCE(item_status, 'active') IN ('active', 'picked_up')`,
+            [orderId]
+        );
+
+        if (activeItems[0].count === 0) {
+            await connection.execute(
+                `UPDATE rental_orders
+                 SET status = 'cancelled',
+                     return_case_status = 'closed',
+                     cancel_reason = 'Alle Artikel durch Kunde storniert',
+                     cancelled_at = NOW()
+                 WHERE id = ?`,
+                [orderId]
+            );
+        } else {
+            await connection.execute(
+                `UPDATE rental_orders
+                 SET return_case_status = 'partial'
+                 WHERE id = ?`,
+                [orderId]
+            );
+        }
+
+        await connection.commit();
+
+        return res.json({
+            success: true,
+            message: 'Artikel wurde storniert.'
+        });
+
+    } catch (error) {
+        console.error('Fehler beim Stornieren des Artikels:', error);
+
+        if (connection) {
+            try {
+                await connection.rollback();
+            } catch (rollbackError) {
+                console.error('Rollback fehlgeschlagen:', rollbackError);
+            }
+        }
+
+        return res.status(500).json({
+            error: 'Artikel konnte nicht storniert werden.'
+        });
+
+    } finally {
+        if (connection) await connection.end();
     }
 });
 
