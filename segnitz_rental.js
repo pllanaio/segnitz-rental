@@ -2767,25 +2767,25 @@ app.post('/orders/:id/mollie-checkout', async (req, res) => {
             });
         }
 
-        const payment = await createMolliePaymentForOrder(order);
+        const checkoutUrl = payment.getCheckoutUrl();
 
         await connection.execute(
             `UPDATE rental_orders
-             SET mollie_payment_id = ?,
-                 mollie_checkout_url = ?,
-                 mollie_payment_status = ?
-             WHERE id = ?`,
+     SET mollie_payment_id = ?,
+         mollie_checkout_url = ?,
+         mollie_payment_status = ?
+     WHERE id = ?`,
             [
                 payment.id,
-                payment.checkoutUrl,
-                payment.status,
+                checkoutUrl,
+                payment.status || 'open',
                 order.id
             ]
         );
 
         return res.json({
             success: true,
-            checkoutUrl: payment.checkoutUrl
+            checkoutUrl
         });
 
     } catch (error) {
