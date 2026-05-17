@@ -30,44 +30,97 @@ let current_step = 0;
 let stepCount = 3;
 let bestsellerProducts = [];
 let currentModalProductReviews = [];
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     const params = new URLSearchParams(window.location.search);
 
-    if (params.get('payment') === 'success') {
+    if (params.get('payment') !== 'return') {
+        return;
+    }
 
-        // Alle Steps verstecken
-        Array.from(step).forEach(stepElement => {
-            stepElement.classList.remove('d-block');
-            stepElement.classList.add('d-none');
-        });
+    const orderId = params.get('orderId');
+    const finalDiv = document.getElementById('final');
 
-        // Buttons verstecken
-        prevBtn.classList.add('d-none');
-        nextBtn.classList.add('d-none');
-        submitBtn.classList.add('d-none');
+    Array.from(step).forEach(stepElement => {
+        stepElement.classList.remove('d-block');
+        stepElement.classList.add('d-none');
+    });
 
-        // Success-Screen anzeigen
-        succcessDiv.classList.remove('d-none');
-        succcessDiv.classList.add('d-block');
+    prevBtn.classList.add('d-none');
+    nextBtn.classList.add('d-none');
+    submitBtn.classList.add('d-none');
 
-        // Fortschritt auf 100%
-        progress(100);
+    succcessDiv.classList.remove('d-none');
+    succcessDiv.classList.add('d-block');
 
-        // Optional: Erfolgsnachricht dynamisch ergänzen
-        const orderId = params.get('orderId');
+    progress(100);
 
-        if (orderId) {
-            const finalDiv = document.getElementById('final');
+    if (!orderId || !finalDiv) {
+        return;
+    }
 
-            if (finalDiv) {
-                finalDiv.innerHTML = `
-                    <div class="alert alert-info">
-                        Ihre Bestellnummer lautet:
-                        <strong>#${orderId}</strong>
-                    </div>
-                `;
-            }
+    try {
+        const response = await fetch(`/orders/${orderId}/payment-status`);
+        const order = await response.json();
+
+        if (!response.ok) {
+            throw new Error(order.error || 'Status konnte nicht geladen werden.');
         }
+
+        if (order.payment_status === 'paid') {
+            finalDiv.innerHTML = `
+                <div class="alert alert-success">
+                    Ihre Zahlung war erfolgreich.<br>
+                    Bestellnummer: <strong>${order.orderNo}</strong>
+                </div>
+            `;
+            return;
+        }
+
+        if (order.payment_status === 'failed') {
+            finalDiv.innerHTML = `
+                <div class="alert alert-danger">
+                    Die Zahlung ist fehlgeschlagen.<br>
+                    Bitte versuchen Sie es erneut oder wählen Sie eine andere Zahlungsart.
+                </div>
+            `;
+            return;
+        }
+
+        if (order.payment_status === 'cancelled' || order.payment_status === 'canceled') {
+            finalDiv.innerHTML = `
+                <div class="alert alert-warning">
+                    Die Zahlung wurde abgebrochen.<br>
+                    Ihre Reservierung wurde noch nicht bezahlt.
+                </div>
+            `;
+            return;
+        }
+
+        if (order.payment_status === 'expired') {
+            finalDiv.innerHTML = `
+                <div class="alert alert-warning">
+                    Die Zahlung ist abgelaufen.<br>
+                    Bitte starten Sie die Zahlung erneut.
+                </div>
+            `;
+            return;
+        }
+
+        finalDiv.innerHTML = `
+            <div class="alert alert-info">
+                Die Zahlung wurde noch nicht bestätigt.<br>
+                Aktueller Status: <strong>${order.payment_status || 'pending'}</strong>
+            </div>
+        `;
+    } catch (error) {
+        console.error('Fehler beim Prüfen des Zahlungsstatus:', error);
+
+        finalDiv.innerHTML = `
+            <div class="alert alert-warning">
+                Der Zahlungsstatus konnte gerade nicht geprüft werden.
+                Bitte prüfen Sie Ihre Bestellung später erneut.
+            </div>
+        `;
     }
 });
 
@@ -249,7 +302,7 @@ function serializeFormToStepJson() {
                             : field.value
                     };
 
-                    if (field.type === 'checkbox') {
+                    if (field.type === 'checkbox' || field.type === 'radio') {
                         element.checked = field.checked;
                     }
 
