@@ -189,7 +189,7 @@ const sessionStore = new MySQLStore({
         }
     }
 });
-/*app.set('trust proxy', 1);*/
+app.set('trust proxy', 1);
 
 app.use(session({
     key: 'segnitz.sid',
@@ -523,6 +523,46 @@ app.post('/data', async (req, res) => {
         );
 
         await connection.commit();
+
+        const paymentMethod =
+            getFormValue(formData, 'paymentMethod') === 'online'
+                ? 'online'
+                : 'cash';
+
+        if (paymentMethod === 'online') {
+            const payment = await createMolliePaymentForOrder({
+                id: orderId,
+                orderNo,
+                totalAmount: orderSummary.totals.grandTotalBeforeDepositReturn
+            });
+
+            await connection.execute(
+                `UPDATE rental_orders
+         SET payment_method = 'online',
+             payment_status = 'pending',
+             mollie_payment_id = ?
+         WHERE id = ?`,
+                [
+                    payment.id,
+                    orderId
+                ]
+            );
+
+            return res.status(200).json({
+                message: 'Online-Zahlung wurde vorbereitet.',
+                orderId,
+                orderNo,
+                checkoutUrl: payment.getCheckoutUrl()
+            });
+        }
+
+        await connection.execute(
+            `UPDATE rental_orders
+     SET payment_method = 'cash',
+         payment_status = 'pending'
+     WHERE id = ?`,
+            [orderId]
+        );
 
         const signatureDataUrl = getSignatureDataUrl(formData);
 
