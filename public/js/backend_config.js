@@ -917,7 +917,8 @@ function getOrderDisplayBadge(order) {
         partially_returned: 'warning',
         partially_cancelled: 'warning',
         completed_with_issues: 'danger',
-        cancelled: 'dark'
+        cancelled: 'dark',
+        picked_up: 'info'
     };
 
     const labels = {
@@ -930,7 +931,8 @@ function getOrderDisplayBadge(order) {
         partially_returned: 'Teilweise zurückgegeben',
         partially_cancelled: 'Teilweise storniert',
         completed_with_issues: 'Zurückgegeben mit Klärung',
-        cancelled: 'Storniert'
+        cancelled: 'Storniert',
+        picked_up: 'Abgeholt'
     };
 
     return `<span class="badge bg-${map[state] || 'secondary'} me-1">${labels[state] || state || '-'}</span>`;
