@@ -2811,7 +2811,7 @@ app.get('/orders/:id/payment-status', async (req, res) => {
         connection = await mysql.createConnection(dbConfig);
 
         const [orders] = await connection.execute(
-            `SELECT id, order_no AS orderNo, status, payment_status, mollie_payment_status
+            `SELECT id, order_no AS orderNo, status, payment_status, mollie_payment_id, mollie_payment_status
              FROM rental_orders
              WHERE id = ?
              LIMIT 1`,
@@ -2822,7 +2822,66 @@ app.get('/orders/:id/payment-status', async (req, res) => {
             return res.status(404).json({ error: 'Bestellung nicht gefunden.' });
         }
 
-        return res.json(orders[0]);
+        const order = orders[0];
+
+        if (!order.mollie_payment_id) {
+            return res.json(order);
+        }
+
+        const payment = await getMolliePayment(order.mollie_payment_id);
+
+        let newOrderStatus = order.status;
+
+        if (payment.status === 'paid') {
+            newOrderStatus = 'confirmed';
+        } else if (payment.status === 'canceled') {
+            newOrderStatus = 'cancelled';
+        } else if (payment.status === 'expired') {
+            newOrderStatus = 'expired';
+        } else if (payment.status === 'failed') {
+            newOrderStatus = 'payment_failed';
+        }
+
+        const publicPaymentStatus =
+            payment.status === 'paid'
+                ? 'paid'
+                : payment.status === 'failed'
+                    ? 'failed'
+                    : payment.status === 'canceled'
+                        ? 'cancelled'
+                        : payment.status === 'expired'
+                            ? 'expired'
+                            : 'pending';
+
+        await connection.execute(
+            `UPDATE rental_orders
+             SET mollie_payment_status = ?,
+                 mollie_payment_method = ?,
+                 payment_status = ?,
+                 status = ?,
+                 paid_at = CASE
+                    WHEN ? = 'paid' THEN NOW()
+                    ELSE paid_at
+                 END
+             WHERE id = ?`,
+            [
+                payment.status,
+                payment.method || null,
+                publicPaymentStatus,
+                newOrderStatus,
+                payment.status,
+                order.id
+            ]
+        );
+
+        return res.json({
+            ...order,
+            status: newOrderStatus,
+            payment_status: publicPaymentStatus,
+            mollie_payment_status: payment.status,
+            mollie_payment_method: payment.method || null
+        });
+
     } catch (error) {
         console.error('Fehler beim Laden des Zahlungsstatus:', error);
         return res.status(500).json({ error: 'Zahlungsstatus konnte nicht geladen werden.' });

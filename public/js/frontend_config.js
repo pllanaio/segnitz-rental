@@ -30,6 +30,8 @@ let current_step = 0;
 let stepCount = 3;
 let bestsellerProducts = [];
 let currentModalProductReviews = [];
+const VAT_RATE = 0.19;
+
 document.addEventListener('DOMContentLoaded', async () => {
     const params = new URLSearchParams(window.location.search);
 
@@ -39,6 +41,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const orderId = params.get('orderId');
     const finalDiv = document.getElementById('final');
+    const resultIcon = document.getElementById('paymentResultIcon');
+    const resultTitle = document.getElementById('paymentResultTitle');
+    const resultText = document.getElementById('paymentResultText');
 
     Array.from(step).forEach(stepElement => {
         stepElement.classList.remove('d-block');
@@ -54,7 +59,60 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     progress(100);
 
+    const setPaymentErrorView = (message) => {
+        if (resultIcon) {
+            resultIcon.innerHTML = '<i class="bi bi-x-lg"></i>';
+            resultIcon.className = 'success-icon payment-error-icon';
+        }
+
+        if (resultTitle) {
+            resultTitle.textContent = 'Zahlung nicht abgeschlossen';
+        }
+
+        if (resultText) {
+            resultText.textContent = 'Ihre Zahlung wurde nicht erfolgreich abgeschlossen.';
+        }
+
+        if (finalDiv) {
+            finalDiv.innerHTML = `
+                <div class="alert alert-danger">
+                    ${message}<br>
+                    Bitte versuchen Sie es erneut.
+                </div>
+
+                <button type="button" class="btn btn-primary mt-3" onclick="retryMolliePayment('${orderId}')">
+                    Zahlung erneut versuchen
+                </button>
+            `;
+        }
+    };
+
+    const setPaymentSuccessView = (order) => {
+        if (resultIcon) {
+            resultIcon.innerHTML = '<i class="bi bi-check-lg"></i>';
+            resultIcon.className = 'success-icon';
+        }
+
+        if (resultTitle) {
+            resultTitle.textContent = 'Mietvorgang erfolgreich hinterlegt';
+        }
+
+        if (resultText) {
+            resultText.textContent = 'Vielen Dank! Ihre Zahlung wurde erfolgreich bestätigt.';
+        }
+
+        if (finalDiv) {
+            finalDiv.innerHTML = `
+                <div class="alert alert-success">
+                    Ihre Zahlung war erfolgreich.<br>
+                    Bestellnummer: <strong>${order.orderNo}</strong>
+                </div>
+            `;
+        }
+    };
+
     if (!orderId || !finalDiv) {
+        setPaymentErrorView('Die Bestellung konnte nicht eindeutig zugeordnet werden.');
         return;
     }
 
@@ -67,64 +125,53 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
 
         if (order.payment_status === 'paid') {
-            finalDiv.innerHTML = `
-                <div class="alert alert-success">
-                    Ihre Zahlung war erfolgreich.<br>
-                    Bestellnummer: <strong>${order.orderNo}</strong>
-                </div>
-            `;
+            setPaymentSuccessView(order);
             return;
         }
 
         if (order.payment_status === 'failed') {
-            finalDiv.innerHTML = `
-                <div class="alert alert-danger">
-                    Die Zahlung ist fehlgeschlagen.<br>
-                    Bitte versuchen Sie es erneut oder wählen Sie eine andere Zahlungsart.
-                </div>
-            `;
+            setPaymentErrorView('Die Zahlung ist fehlgeschlagen.');
             return;
         }
 
         if (order.payment_status === 'cancelled' || order.payment_status === 'canceled') {
-            finalDiv.innerHTML = `
-                <div class="alert alert-warning">
-                    Die Zahlung wurde abgebrochen.<br>
-                    Ihre Reservierung wurde noch nicht bezahlt.
-                </div>
-            `;
+            setPaymentErrorView('Die Zahlung wurde abgebrochen.');
             return;
         }
 
         if (order.payment_status === 'expired') {
-            finalDiv.innerHTML = `
-                <div class="alert alert-warning">
-                    Die Zahlung ist abgelaufen.<br>
-                    Bitte starten Sie die Zahlung erneut.
-                </div>
-            `;
+            setPaymentErrorView('Die Zahlung ist abgelaufen.');
             return;
         }
 
-        finalDiv.innerHTML = `
-            <div class="alert alert-info">
-                Die Zahlung wurde noch nicht bestätigt.<br>
-                Aktueller Status: <strong>${order.payment_status || 'pending'}</strong>
-            </div>
-        `;
+        setPaymentErrorView('Die Zahlung wurde noch nicht bestätigt.');
     } catch (error) {
         console.error('Fehler beim Prüfen des Zahlungsstatus:', error);
-
-        finalDiv.innerHTML = `
-            <div class="alert alert-warning">
-                Der Zahlungsstatus konnte gerade nicht geprüft werden.
-                Bitte prüfen Sie Ihre Bestellung später erneut.
-            </div>
-        `;
+        setPaymentErrorView('Der Zahlungsstatus konnte gerade nicht geprüft werden.');
     }
 });
 
-const VAT_RATE = 0.19;
+async function retryMolliePayment(orderId) {
+    try {
+        const response = await fetch(`/orders/${orderId}/mollie-checkout`, {
+            method: 'POST'
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+            showAlert(result.error || 'Zahlung konnte nicht erneut gestartet werden.', 'danger');
+            return;
+        }
+
+        window.location.href = result.checkoutUrl;
+    } catch (error) {
+        console.error('Fehler beim erneuten Starten der Zahlung:', error);
+        showAlert('Zahlung konnte nicht erneut gestartet werden.', 'danger');
+    }
+}
+
+
 
 
 step[current_step]
