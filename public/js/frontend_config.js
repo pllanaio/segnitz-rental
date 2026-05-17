@@ -425,7 +425,8 @@ submitBtn.addEventListener('click', async (event) => {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                form: formData
+                form: formData,
+                paymentMethod: selectedPaymentMethod.value
             })
         });
 

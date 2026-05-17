@@ -526,17 +526,12 @@ app.post('/data', async (req, res) => {
 
         await connection.commit();
 
-        const paymentMethodElement = formData
-            .flatMap(step => step.elements || [])
-            .find(element =>
-                element.name === 'paymentMethod' &&
-                element.checked === true
-            );
-
         const paymentMethod =
-            paymentMethodElement?.value === 'online'
+            req.body.paymentMethod === 'online'
                 ? 'online'
                 : 'cash';
+
+        console.log('Payment-Methode Backend:', paymentMethod);
 
         if (paymentMethod === 'online') {
             const payment = await createMolliePaymentForOrder({
