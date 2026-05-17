@@ -1928,19 +1928,11 @@ app.put('/admin/order-items/:itemId/cancel', checkAdmin, async (req, res) => {
     let connection;
 
     try {
-        const { cancelReason } = req.body;
-
-        if (!cancelReason || !cancelReason.trim()) {
-            return res.status(400).json({
-                error: 'Ein Stornogrund ist erforderlich.'
-            });
-        }
-
         connection = await mysql.createConnection(dbConfig);
         await connection.beginTransaction();
 
         const [items] = await connection.execute(
-            `SELECT id, order_id, item_status, rental_start
+            `SELECT id, order_id, item_status, rental_start, picked_up_at
              FROM rental_order_items
              WHERE id = ?
              LIMIT 1`,
@@ -1956,10 +1948,10 @@ app.put('/admin/order-items/:itemId/cancel', checkAdmin, async (req, res) => {
 
         const item = items[0];
 
-        if (new Date(item.rental_start) <= new Date()) {
+        if (item.item_status === 'picked_up' || item.picked_up_at) {
             await connection.rollback();
             return res.status(400).json({
-                error: 'Dieser Artikel hat bereits begonnen und muss über die Rückgabe abgewickelt werden.'
+                error: 'Dieser Artikel wurde bereits abgeholt und muss über die Rückgabe abgewickelt werden.'
             });
         }
 
