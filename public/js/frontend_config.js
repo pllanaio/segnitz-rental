@@ -1850,7 +1850,7 @@ function selectCategoryFilter(category) {
 
 function applyProductFilters() {
     if (selectedCategory === 'all') {
-        filteredRentalProducts = [];
+        filteredRentalProducts = [...rentalProducts];
     } else {
         filteredRentalProducts = rentalProducts.filter(product =>
             getProductCategoryNames(product)
