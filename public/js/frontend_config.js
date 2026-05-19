@@ -512,6 +512,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const logoutBtn = document.getElementById('logout-button');
     const registerBtn = document.getElementById('register-button');
     const profileBtn = document.getElementById('profile-button');
+    const guestOrderWrapper = document.getElementById('guestOrderWrapper');
 
     if (!adminBtn || !loginStatus || !logoutBtn) return;
 
@@ -524,6 +525,10 @@ document.addEventListener("DOMContentLoaded", () => {
                 profileBtn.style.display = 'block';
 
                 loginStatus.textContent = `Angemeldet als: ${data.user}`;
+
+                if (guestOrderWrapper) {
+                    guestOrderWrapper.style.display = 'none';
+                }
 
                 if (data.role === 'global_admin') {
                     adminBtn.href = '/backend.html';
@@ -546,6 +551,9 @@ document.addEventListener("DOMContentLoaded", () => {
                 profileBtn.style.display = 'none';
 
                 loginStatus.textContent = 'Kein Benutzer angemeldet';
+                if (guestOrderWrapper) {
+                    guestOrderWrapper.style.display = 'block';
+                }
             }
         })
         .catch(err => {
