@@ -197,15 +197,13 @@ step[current_step]
     .classList
     .add('d-block');
 if (current_step == 0) {
-    prevBtn
-        .classList
-        .add('d-none');
-    submitBtn
-        .classList
-        .add('d-none');
-    nextBtn
-        .classList
-        .add('d-inline-block');
+
+    prevBtn.classList.add('d-none');
+    submitBtn.classList.add('d-none');
+
+    nextBtn.classList.remove('d-inline-block');
+    nextBtn.classList.add('d-none');
+
 }
 
 function submitSignature() {
@@ -1382,10 +1380,24 @@ function renderCart() {
     const cartRentalNetTotal = document.getElementById('cartRentalNetTotal');
     const cartRentalVatTotal = document.getElementById('cartRentalVatTotal');
     const cartModalNextBtn = document.getElementById('cartModalNextBtn');
+    const nextBtn = document.getElementById('next-btn');
 
     if (!cartItems) return;
 
     const items = currentCart.items || [];
+
+    if (nextBtn && current_step === 0) {
+
+        if (items.length === 0) {
+            nextBtn.classList.remove('d-inline-block');
+            nextBtn.classList.add('d-none');
+        } else {
+            nextBtn.classList.remove('d-none');
+            nextBtn.classList.add('d-inline-block');
+        }
+
+    }
+
     if (cartModalNextBtn) {
         cartModalNextBtn.disabled = items.length === 0;
     }
