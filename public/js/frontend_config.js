@@ -38,10 +38,8 @@ function syncMainNextButtonVisibility() {
     const items = currentCart.items || [];
     const shouldShow = current_step === 0 && items.length > 0;
 
-    nextBtn.hidden = !shouldShow;
     nextBtn.classList.toggle('d-none', !shouldShow);
     nextBtn.classList.toggle('d-inline-block', shouldShow);
-    nextBtn.style.setProperty('display', shouldShow ? 'inline-block' : 'none', 'important');
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -1852,7 +1850,7 @@ function selectCategoryFilter(category) {
 
 function applyProductFilters() {
     if (selectedCategory === 'all') {
-        filteredRentalProducts = [...rentalProducts];
+        filteredRentalProducts = [];
     } else {
         filteredRentalProducts = rentalProducts.filter(product =>
             getProductCategoryNames(product)
