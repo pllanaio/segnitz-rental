@@ -19,7 +19,7 @@ document.addEventListener('DOMContentLoaded', () => {
             : { message: await res.text() };
 
         if (!res.ok) {
-            showGlobalAlert(result.error || result.message || 'Login fehlgeschlagen.', 'danger');
+            showAlert(result.error || result.message || 'Login fehlgeschlagen.', 'danger');
             return;
         }
 
