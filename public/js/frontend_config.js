@@ -1864,6 +1864,7 @@ function applyProductFilters() {
     renderCategoryFilters();
     renderProductPage();
     updateProductSectionTitle();
+    renderBestsellers();
 }
 
 function updateProductSectionTitle() {
@@ -1913,13 +1914,13 @@ function renderBestsellers() {
 
     if (!grid || !section) return;
 
-    const visibleBestsellers = bestsellerProducts.filter(product => {
-        return selectedCategory === 'all'
-            || getProductCategoryNames(product)
-                .some(category =>
-                    category.toLowerCase() === selectedCategory.toLowerCase()
-                );
-    });
+    if (selectedCategory !== 'all') {
+        grid.innerHTML = '';
+        section.classList.add('d-none');
+        return;
+    }
+
+    const visibleBestsellers = bestsellerProducts;
 
     if (visibleBestsellers.length === 0) {
         section.classList.add('d-none');
