@@ -39,7 +39,9 @@ function syncMainNextButtonVisibility() {
     const shouldShow = current_step === 0 && items.length > 0;
 
     nextBtn.hidden = !shouldShow;
-    nextBtn.style.display = shouldShow ? 'inline-block' : 'none';
+    nextBtn.classList.toggle('d-none', !shouldShow);
+    nextBtn.classList.toggle('d-inline-block', shouldShow);
+    nextBtn.style.setProperty('display', shouldShow ? 'inline-block' : 'none', 'important');
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -200,9 +202,6 @@ async function retryMolliePayment(orderId) {
     }
 }
 
-
-
-
 step[current_step]
     .classList
     .add('d-block');
@@ -325,12 +324,7 @@ prevBtn.addEventListener('click', () => {
             submitBtn
                 .classList
                 .add('d-none');
-            nextBtn
-                .classList
-                .remove('d-none');
-            nextBtn
-                .classList
-                .add('d-inline-block');
+            syncMainNextButtonVisibility();
             prevBtn
                 .classList
                 .remove('d-none');
