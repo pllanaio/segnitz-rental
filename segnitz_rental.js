@@ -511,14 +511,6 @@ app.post('/data', async (req, res) => {
         }
 
         await connection.execute(
-            `DELETE FROM rental_carts
-             WHERE id = ?`,
-            [cartId]
-        );
-
-        delete req.session.cartKey;
-
-        await connection.execute(
             `DELETE FROM guest_verifications
              WHERE email = ?`,
             [email]
@@ -618,6 +610,14 @@ app.post('/data', async (req, res) => {
         } catch (emailError) {
             console.error('Fehler beim E-Mail-Versand:', emailError);
         }
+
+        await connection.execute(
+            `DELETE FROM rental_carts
+             WHERE id = ?`,
+            [cartId]
+        );
+
+        delete req.session.cartKey;
 
         return res.status(200).json({
             message: 'Bestellung erfolgreich reserviert.',
@@ -2816,7 +2816,7 @@ app.get('/orders/:id/payment-status', async (req, res) => {
         connection = await mysql.createConnection(dbConfig);
 
         const [orders] = await connection.execute(
-            `SELECT id, order_no AS orderNo, status, payment_status, mollie_payment_id, mollie_payment_status,
+            `SELECT id, cart_id, order_no AS orderNo, status, payment_status, mollie_payment_id, mollie_payment_status,
        order_confirmation_sent_at, confirmation_json, customer_email, customer_first_name,
        customer_last_name, customer_company, customer_phone, customer_address,
        customer_zip, customer_city, signature_data_url
@@ -2842,6 +2842,16 @@ app.get('/orders/:id/payment-status', async (req, res) => {
 
         if (payment.status === 'paid') {
             newOrderStatus = 'confirmed';
+
+            if (order.cart_id) {
+                await connection.execute(
+                    `DELETE FROM rental_carts
+             WHERE id = ?`,
+                    [order.cart_id]
+                );
+
+                delete req.session.cartKey;
+            }
         } else if (payment.status === 'canceled') {
             newOrderStatus = 'cancelled';
         } else if (payment.status === 'expired') {
