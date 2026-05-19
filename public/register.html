@@ -97,65 +97,72 @@
 
                                                 <div class="col-12 col-lg-6">
                                                     <label class="form-label" for="firstName">
-                                                        Vorname
+                                                        Vorname <span class="required-marker">*</span>
                                                     </label>
 
-                                                    <input class="form-control" placeholder="Vorname" id="firstName">
+                                                    <input class="form-control" placeholder="Vorname" id="firstName" required>
+                                                    <div class="invalid-feedback" id="firstNameFeedback"></div>
                                                 </div>
 
                                                 <div class="col-12 col-lg-6">
                                                     <label class="form-label" for="lastName">
-                                                        Nachname
+                                                        Nachname <span class="required-marker">*</span>
                                                     </label>
 
-                                                    <input class="form-control" placeholder="Nachname" id="lastName">
+                                                    <input class="form-control" placeholder="Nachname" id="lastName" required>
+                                                    <div class="invalid-feedback" id="lastNameFeedback"></div>
                                                 </div>
 
                                                 <div class="col-12">
                                                     <label class="form-label" for="company">Firma</label>
-                                                    <input class="form-control" placeholder="Firma" id="company"
+                                                    <input class="form-control" placeholder="Firma" id="company" required>  
                                                         autocomplete="organization">
                                                 </div>
 
                                                 <div class="col-12 col-lg-6">
                                                     <label class="form-label" for="email">
-                                                        E-Mail
+                                                        E-Mail <span class="required-marker">*</span>
                                                     </label>
 
                                                     <input type="email" class="form-control"
-                                                        placeholder="name@beispiel.de" id="email">
+                                                        placeholder="name@beispiel.de" id="email" required>
+                                                    <div class="invalid-feedback" id="emailFeedback"></div>
                                                 </div>
 
                                                 <div class="col-12 col-lg-6">
                                                     <label class="form-label" for="phone">
-                                                        Telefon
+                                                        Telefon <span class="required-marker">*</span>
                                                     </label>
 
-                                                    <input class="form-control" placeholder="Telefon" id="phone">
+                                                    <input class="form-control" placeholder="Telefon" id="phone" required>
+                                                    <div class="invalid-feedback" id="phoneFeedback"></div>
                                                 </div>
 
                                                 <div class="col-12">
                                                     <label class="form-label" for="address">
-                                                        Adresse
+                                                        Adresse <span class="required-marker">*</span>
                                                     </label>
 
-                                                    <input class="form-control" placeholder="Adresse" id="address">
+                                                    <input class="form-control" placeholder="Adresse" id="address" required>
+                                                    <div class="invalid-feedback" id="addressFeedback"></div>
                                                 </div>
 
                                                 <div class="col-12 col-lg-4">
                                                     <label class="form-label" for="zip">
-                                                        PLZ
+                                                        PLZ <span class="required-marker">*</span>
                                                     </label>
 
-                                                    <input class="form-control" placeholder="PLZ" id="zip">
+                                                    <input class="form-control" placeholder="PLZ" id="zip" required>
+                                                    <div class="invalid-feedback" id="zipFeedback"></div>
                                                 </div>
 
                                                 <div class="col-12 col-lg-8">
                                                     <label class="form-label" for="city">
-                                                        Ort
+                                                        Ort <span class="required-marker">*</span>
                                                     </label>
 
-                                                    <input class="form-control" placeholder="Ort" id="city">
+                                                    <input class="form-control" placeholder="Ort" id="city" required>
+                                                    <div class="invalid-feedback" id="cityFeedback"></div>
                                                 </div>
 
                                                 <div class="col-12">
@@ -164,24 +171,26 @@
 
                                                 <div class="col-12 col-lg-6">
                                                     <label class="form-label" for="password">
-                                                        Passwort
+                                                        Passwort <span class="required-marker">*</span>
                                                     </label>
 
                                                     <input type="password" class="form-control" placeholder="Passwort"
-                                                        id="password">
+                                                        id="password" required>
+                                                    <div class="invalid-feedback" id="passwordFeedback"></div>
                                                 </div>
 
                                                 <div class="col-12 col-lg-6">
                                                     <label class="form-label" for="passwordRepeat">
-                                                        Passwort wiederholen
+                                                        Passwort wiederholen <span class="required-marker">*</span>
                                                     </label>
 
                                                     <input type="password" class="form-control"
-                                                        placeholder="Passwort wiederholen" id="passwordRepeat">
+                                                        placeholder="Passwort wiederholen" id="passwordRepeat" required>
+                                                    <div class="invalid-feedback" id="passwordRepeatFeedback"></div>
                                                 </div>
 
                                                 <div class="col-12">
-                                                    <button class="btn btn-success w-100 mt-2">
+                                                    <button type="submit" id="registerSubmitButton" class="btn btn-success w-100 mt-2">
                                                         <i class="bi bi-person-plus"></i>
                                                         Registrieren
                                                     </button>

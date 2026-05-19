@@ -1002,3 +1002,12 @@ input[name="paymentMethod"] {
 .payment-error-icon {
   background: #dc3545 !important;
 }
+
+.required-marker {
+  color: #dc3545;
+  margin-left: 2px;
+}
+
+.form-control.is-invalid {
+  border-color: #dc3545;
+}
