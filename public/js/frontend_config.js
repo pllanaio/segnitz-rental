@@ -36,7 +36,10 @@ function syncMainNextButtonVisibility() {
     if (!nextBtn) return;
 
     const items = currentCart.items || [];
-    const shouldShow = current_step === 0 && items.length > 0;
+
+    const shouldShow =
+        (current_step === 0 && items.length > 0) ||
+        (current_step > 0 && current_step < stepCount);
 
     nextBtn.classList.toggle('d-none', !shouldShow);
     nextBtn.classList.toggle('d-inline-block', shouldShow);
@@ -290,6 +293,9 @@ nextBtn.addEventListener('click', async () => {
             }
         }
     }
+
+    syncMainNextButtonVisibility();
+
     progress((100 / stepCount) * current_step);
 });
 
@@ -340,6 +346,9 @@ prevBtn.addEventListener('click', () => {
             .classList
             .add('d-none');
     }
+
+    syncMainNextButtonVisibility();
+
     progress((100 / stepCount) * current_step);
 
 });
