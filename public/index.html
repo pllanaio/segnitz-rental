@@ -186,13 +186,19 @@
 
                                 <div class="row g-3">
                                     <div class="col-12 col-lg-6">
-                                        <label class="form-label" for="FirstName">Vorname</label>
+                                        <label class="form-label" for="FirstName">
+                                            Vorname <span class="required-marker">*</span>
+                                        </label>
                                         <input type="text" class="form-control" id="FirstName" name="FirstName">
+                                        <div class="invalid-feedback" id="FirstNameFeedback"></div>
                                     </div>
 
                                     <div class="col-12 col-lg-6">
-                                        <label class="form-label" for="LastName">Nachname</label>
+                                        <label class="form-label" for="LastName">
+                                            Nachname <span class="required-marker">*</span>
+                                        </label>
                                         <input type="text" class="form-control" id="LastName" name="LastName">
+                                        <div class="invalid-feedback" id="LastNameFeedback"></div>
                                     </div>
 
                                     <div class="col-12">
@@ -202,30 +208,44 @@
                                     </div>
 
                                     <div class="col-12 col-lg-6">
-                                        <label class="form-label" for="CustomerEmail">E-Mail</label>
+                                        <label class="form-label" for="CustomerEmail">
+                                            E-Mail <span class="required-marker">*</span>
+                                        </label>
                                         <input type="email" class="form-control" id="CustomerEmail"
                                             name="CustomerEmail">
+                                        <div class="invalid-feedback" id="CustomerEmailFeedback"></div>
                                     </div>
 
                                     <div class="col-12 col-lg-6">
-                                        <label class="form-label" for="CustomerPhone">Telefon</label>
+                                        <label class="form-label" for="CustomerPhone">
+                                            Telefon <span class="required-marker">*</span>
+                                        </label>
                                         <input type="tel" class="form-control" id="CustomerPhone" name="CustomerPhone">
+                                        <div class="invalid-feedback" id="CustomerPhoneFeedback"></div>
                                     </div>
 
                                     <div class="col-12">
-                                        <label class="form-label" for="CustomerAddress">Adresse</label>
-                                        <input type="text" class="form-control" id="CustomerAddress"
-                                            name="CustomerAddress">
+                                        <label class="form-label" for="CustomerAddress">
+                                            Adresse <span class="required-marker">*</span>
+                                        </label>
+                                        <input type="text" class="form-control" id="CustomerAddress" name="CustomerAddress">
+                                        <div class="invalid-feedback" id="CustomerAddressFeedback"></div>
                                     </div>
 
                                     <div class="col-12 col-lg-4">
-                                        <label class="form-label" for="CustomerZip">PLZ</label>
+                                        <label class="form-label" for="CustomerZip">
+                                            PLZ <span class="required-marker">*</span>
+                                        </label>
                                         <input type="text" class="form-control" id="CustomerZip" name="CustomerZip">
+                                        <div class="invalid-feedback" id="CustomerZipFeedback"></div>
                                     </div>
 
                                     <div class="col-12 col-lg-8">
-                                        <label class="form-label" for="CustomerCity">Ort</label>
+                                        <label class="form-label" for="CustomerCity">
+                                            Ort <span class="required-marker">*</span>
+                                        </label>
                                         <input type="text" class="form-control" id="CustomerCity" name="CustomerCity">
+                                        <div class="invalid-feedback" id="CustomerCityFeedback"></div>
                                     </div>
                                 </div>
                                 <div class="col-12 mt-4" id="guestOrderWrapper">
@@ -308,7 +328,8 @@
 
                                             <div class="col-12 col-lg-6">
                                                 <label class="payment-option-card w-100">
-                                                    <input id="paymentMethodCash" type="radio" name="paymentMethod" value="cash" class="payment-radio">
+                                                    <input id="paymentMethodCash" type="radio" name="paymentMethod"
+                                                        value="cash" class="payment-radio">
                                                     <div class="card h-100 payment-card">
                                                         <div class="card-body d-flex align-items-start gap-3">
                                                             <i class="bi bi-cash-coin payment-icon"></i>
@@ -328,7 +349,8 @@
 
                                             <div class="col-12 col-lg-6">
                                                 <label class="payment-option-card w-100">
-                                                    <input id="paymentMethodOnline" type="radio" name="paymentMethod" value="online" class="payment-radio" checked>
+                                                    <input id="paymentMethodOnline" type="radio" name="paymentMethod"
+                                                        value="online" class="payment-radio" checked>
                                                     <div class="card h-100 payment-card">
                                                         <div class="card-body d-flex align-items-start gap-3">
                                                             <i class="bi bi-credit-card payment-icon"></i>

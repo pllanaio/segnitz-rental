@@ -817,6 +817,21 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 });
 
+function setCheckoutFieldInvalid(field, message) {
+    field.classList.add('is-invalid');
+    field.setAttribute('aria-invalid', 'true');
+
+    const feedback = document.getElementById(`${field.id}Feedback`);
+    if (feedback) {
+        feedback.textContent = message;
+    }
+}
+
+function clearCheckoutFieldInvalid(field) {
+    field.classList.remove('is-invalid');
+    field.removeAttribute('aria-invalid');
+}
+
 function validateCustomerRequiredFields() {
     const requiredFields = [
         'FirstName',
@@ -828,30 +843,57 @@ function validateCustomerRequiredFields() {
         'CustomerCity'
     ];
 
-    for (const fieldId of requiredFields) {
+    let isValid = true;
+    let firstInvalidField = null;
+
+    requiredFields.forEach((fieldId) => {
         const field = document.getElementById(fieldId);
 
-        if (!field || !field.value.trim()) {
-            showAlert('Bitte füllen Sie alle persönlichen Daten aus.', 'warning');
-            return false;
+        clearCheckoutFieldInvalid(field);
+
+        if (!field.value.trim()) {
+            isValid = false;
+            firstInvalidField = firstInvalidField || field;
+            setCheckoutFieldInvalid(field, 'Dieses Pflichtfeld muss ausgefüllt werden.');
         }
-    }
-    const phone = document.getElementById('CustomerPhone').value.trim();
-    const zip = document.getElementById('CustomerZip').value.trim();
-    const address = document.getElementById('CustomerAddress').value.trim();
+    });
 
-    if (!/^[0-9]+$/.test(phone)) {
-        showAlert('Telefon darf nur Ziffern enthalten.', 'warning');
-        return false;
-    }
+    const phone = document.getElementById('CustomerPhone');
+    const zip = document.getElementById('CustomerZip');
+    const address = document.getElementById('CustomerAddress');
+    const email = document.getElementById('CustomerEmail');
 
-    if (!/^[0-9]+$/.test(zip)) {
-        showAlert('PLZ darf nur Ziffern enthalten.', 'warning');
-        return false;
+    if (email.value.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.value.trim())) {
+        isValid = false;
+        firstInvalidField = firstInvalidField || email;
+        setCheckoutFieldInvalid(email, 'Bitte geben Sie eine gültige E-Mail-Adresse ein.');
     }
 
-    if (!/^[a-zA-Z0-9äöüÄÖÜß\s]+$/.test(address)) {
-        showAlert('Adresse darf nur Buchstaben, Zahlen und Leerzeichen enthalten.', 'warning');
+    if (phone.value.trim() && !/^[0-9]+$/.test(phone.value.trim())) {
+        isValid = false;
+        firstInvalidField = firstInvalidField || phone;
+        setCheckoutFieldInvalid(phone, 'Telefon darf nur Ziffern enthalten.');
+    }
+
+    if (zip.value.trim() && !/^[0-9]+$/.test(zip.value.trim())) {
+        isValid = false;
+        firstInvalidField = firstInvalidField || zip;
+        setCheckoutFieldInvalid(zip, 'PLZ darf nur Ziffern enthalten.');
+    }
+
+    if (address.value.trim() && !/^[a-zA-Z0-9äöüÄÖÜß\s]+$/.test(address.value.trim())) {
+        isValid = false;
+        firstInvalidField = firstInvalidField || address;
+        setCheckoutFieldInvalid(address, 'Adresse darf nur Buchstaben, Zahlen und Leerzeichen enthalten.');
+    }
+
+    if (!isValid) {
+        showAlert('Bitte füllen Sie alle rot markierten Pflichtfelder korrekt aus.', 'warning');
+
+        if (firstInvalidField) {
+            firstInvalidField.focus();
+        }
+
         return false;
     }
 
@@ -2019,5 +2061,27 @@ document.addEventListener('DOMContentLoaded', () => {
         if (cartModal) {
             cartModal.hide();
         }
+    });
+});
+
+document.addEventListener('DOMContentLoaded', () => {
+    [
+        'FirstName',
+        'LastName',
+        'CustomerEmail',
+        'CustomerPhone',
+        'CustomerAddress',
+        'CustomerZip',
+        'CustomerCity'
+    ].forEach((fieldId) => {
+        const field = document.getElementById(fieldId);
+
+        if (!field) return;
+
+        field.addEventListener('input', () => {
+            if (field.value.trim()) {
+                clearCheckoutFieldInvalid(field);
+            }
+        });
     });
 });
