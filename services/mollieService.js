@@ -13,7 +13,19 @@ function getMollieClient() {
 }
 
 function formatMollieAmount(amount) {
-    return Number(amount || 0).toFixed(2);
+    const numericAmount = Number(amount || 0);
+
+    if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+        throw new Error('Mollie-Betrag muss größer als 0 sein.');
+    }
+
+    return numericAmount.toFixed(2);
+}
+
+function getMollieCheckoutUrl(payment) {
+    return typeof payment.getCheckoutUrl === 'function'
+        ? payment.getCheckoutUrl()
+        : payment._links?.checkout?.href;
 }
 
 async function createMolliePaymentForOrder(order) {
@@ -22,23 +34,30 @@ async function createMolliePaymentForOrder(order) {
     const amountValue = formatMollieAmount(order.totalAmount);
     const baseUrl = process.env.BASE_URL.replace(/\/$/, '');
 
-    const payment = await mollie.payments.create({
+    return mollie.payments.create({
         amount: {
             currency: 'EUR',
             value: amountValue
         },
-        description: order.description || `Segnitz Rental Bestellung ${order.orderNo}`,
-        redirectUrl: order.redirectUrl || `${baseUrl}/index.html?payment=return&orderId=${encodeURIComponent(order.id)}`,
+        description:
+            order.description ||
+            `Segnitz Rental Bestellung ${order.orderNo}`,
+
+        redirectUrl:
+            order.redirectUrl ||
+            `${baseUrl}/index.html?payment=return&orderId=${encodeURIComponent(order.id)}`,
+
         webhookUrl: `${baseUrl}/webhooks/mollie`,
+
         metadata: {
             orderId: String(order.id),
             orderNo: String(order.orderNo),
             type: order.type || 'order_payment',
-            itemId: order.itemId ? String(order.itemId) : null
+            itemId: order.itemId
+                ? String(order.itemId)
+                : null
         }
     });
-
-    return payment;
 }
 
 async function getMolliePayment(paymentId) {
@@ -47,7 +66,34 @@ async function getMolliePayment(paymentId) {
     return mollie.payments.get(paymentId);
 }
 
+async function createMollieRefundForPayment({
+    paymentId,
+    amount,
+    description,
+    metadata = {}
+}) {
+    if (!paymentId) {
+        throw new Error(
+            'paymentId ist für eine Erstattung erforderlich.'
+        );
+    }
+
+    const mollie = getMollieClient();
+
+    return mollie.paymentRefunds.create({
+        paymentId,
+        amount: {
+            currency: 'EUR',
+            value: formatMollieAmount(amount)
+        },
+        description,
+        metadata
+    });
+}
+
 module.exports = {
     createMolliePaymentForOrder,
-    getMolliePayment
+    getMolliePayment,
+    createMollieRefundForPayment,
+    getMollieCheckoutUrl
 };
