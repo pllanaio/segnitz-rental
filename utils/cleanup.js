@@ -26,20 +26,6 @@ async function expireOldReservations(connection) {
     }
 }
 
-async function deleteExpiredGuestVerifications(connection) {
-    const [result] = await connection.execute(
-        `DELETE FROM guest_verifications
-         WHERE expires_at IS NOT NULL
-         AND expires_at < NOW()`
-    );
-
-    if (result.affectedRows > 0) {
-        console.log(
-            `${new Date().toISOString()} - Cleanup: ${result.affectedRows} Guest-Verifications gelöscht`
-        );
-    }
-}
-
 async function deleteOldActiveCarts(connection) {
     const [result] = await connection.execute(
         `DELETE FROM rental_carts
@@ -56,13 +42,11 @@ async function deleteOldActiveCarts(connection) {
 
 async function runDatabaseCleanup(connection) {
     await expireOldReservations(connection);
-    await deleteExpiredGuestVerifications(connection);
     await deleteOldActiveCarts(connection);
 }
 
 module.exports = {
     runDatabaseCleanup,
     expireOldReservations,
-    deleteExpiredGuestVerifications,
     deleteOldActiveCarts
 };
