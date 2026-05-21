@@ -1671,6 +1671,25 @@ ORDER BY id DESC`,
             [req.params.id]
         );
 
+        const [payments] = await connection.execute(
+            `SELECT
+        id,
+        order_id AS orderId,
+        order_item_id AS orderItemId,
+        payment_type AS paymentType,
+        payment_method AS paymentMethod,
+        payment_status AS paymentStatus,
+        amount,
+        mollie_payment_id AS molliePaymentId,
+        DATE_FORMAT(paid_at, '%Y-%m-%d %H:%i:%s') AS paidAt,
+        note,
+        DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS createdAt
+     FROM rental_order_payments
+     WHERE order_id = ?
+     ORDER BY created_at DESC`,
+            [req.params.id]
+        );
+
         const imagesByItemId = images.reduce((map, image) => {
             const itemId = Number(image.orderItemId);
 
@@ -1692,8 +1711,10 @@ ORDER BY id DESC`,
         res.json({
             ...orders[0],
             items: finalItems,
-            returnImages: images
+            returnImages: images,
+            payments
         });
+
     } catch (error) {
         console.error('Fehler beim Laden der Bestellung:', error);
         res.status(500).json({
@@ -2204,12 +2225,6 @@ LIMIT 1`,
             [item.order_id]
         );
 
-        try {
-            await sendRentalAdjustmentEmail(connection, item.order_id, req.params.itemId);
-        } catch (mailError) {
-            console.error('Mietzeitraum wurde gespeichert, aber Mailversand fehlgeschlagen:', mailError);
-        }
-
         const originalDays = calculateRentalDays(item.rental_start, item.rental_end);
         const originalTotal = originalDays * Number(item.price_per_day || 0);
         const amountDue = Math.max(adjustedRentalTotal - originalTotal, 0);
@@ -2225,6 +2240,18 @@ LIMIT 1`,
                 type: 'rental_adjustment',
                 itemId: req.params.itemId
             });
+
+            await connection.execute(
+                `INSERT INTO rental_order_payments
+     (order_id, order_item_id, payment_type, payment_method, payment_status, amount, mollie_payment_id)
+     VALUES (?, ?, 'rental_adjustment', 'online', 'pending', ?, ?)`,
+                [
+                    item.order_id,
+                    req.params.itemId,
+                    amountDue,
+                    payment.id
+                ]
+            );
 
             paymentUrl =
                 typeof payment.getCheckoutUrl === 'function'
@@ -2471,6 +2498,18 @@ LIMIT 1`,
                     type: 'return_additional_charge',
                     itemId: req.params.itemId
                 });
+
+                await connection.execute(
+                    `INSERT INTO rental_order_payments
+     (order_id, order_item_id, payment_type, payment_method, payment_status, amount, mollie_payment_id)
+     VALUES (?, ?, 'return_additional_charge', 'online', 'pending', ?, ?)`,
+                    [
+                        item.order_id,
+                        req.params.itemId,
+                        normalizedAdditionalChargeAmount,
+                        payment.id
+                    ]
+                );
 
                 const paymentUrl =
                     typeof payment.getCheckoutUrl === 'function'

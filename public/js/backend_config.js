@@ -582,6 +582,7 @@ function renderOrderDetails(order) {
                 <h5>Artikel</h5>
                 ${itemsHtml}
                 ${renderOrderFinancialSummary(order)}
+                ${renderOrderPayments(order)}
             </div>
             ${cancelHtml}
         </div>
@@ -1135,6 +1136,65 @@ function formatTextValue(value) {
     }
 
     return String(value);
+}
+
+function renderOrderPayments(order) {
+    const payments = order.payments || [];
+
+    if (payments.length === 0) {
+        return `
+            <div class="alert alert-info mt-3">
+                Noch keine separaten Zahlungen erfasst.
+            </div>
+        `;
+    }
+
+    return `
+        <div class="mt-4">
+            <h5>Zahlungen</h5>
+
+            ${payments.map(payment => `
+                <div class="border rounded p-3 mb-2">
+                    <strong>${formatPaymentType(payment.paymentType)}</strong><br>
+                    Betrag: ${Number(payment.amount || 0).toFixed(2)} €<br>
+                    Methode: ${payment.paymentMethod === 'cash' ? 'Barzahlung' : 'Onlinezahlung'}<br>
+                    Status: ${formatPaymentStatusBadge(payment.paymentStatus)}<br>
+                    ${payment.paidAt ? `Bezahlt am: ${payment.paidAt}<br>` : ''}
+                    ${payment.note ? `Notiz: ${formatTextValue(payment.note)}<br>` : ''}
+                </div>
+            `).join('')}
+        </div>
+    `;
+}
+
+function formatPaymentType(type) {
+    const labels = {
+        rental: 'Miete',
+        rental_adjustment: 'Nachzahlung Mietzeitraum',
+        return_additional_charge: 'Nachzahlung Rückgabe'
+    };
+
+    return labels[type] || type || '-';
+}
+
+function formatPaymentStatusBadge(status) {
+    const map = {
+        pending: 'warning',
+        paid: 'success',
+        failed: 'danger',
+        cancelled: 'dark',
+        expired: 'secondary'
+    };
+
+    const labels = {
+        pending: 'Offen',
+        paid: 'Bezahlt',
+        failed: 'Fehlgeschlagen',
+        cancelled: 'Abgebrochen',
+        expired: 'Abgelaufen'
+    };
+
+    return `<span class="badge bg-${map[status] || 'secondary'}">${labels[status] || status || '-'}</span>`;
 }
 
 const weekdayLabels = {
