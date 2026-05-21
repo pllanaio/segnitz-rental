@@ -2670,30 +2670,115 @@ LIMIT 1`,
             }
         }
 
+        const [mandateRows] = await connection.execute(
+            `SELECT mollie_customer_id, mollie_mandate_id
+     FROM rental_orders
+     WHERE id = ?
+     LIMIT 1`,
+            [item.order_id]
+        );
+
         if (normalizedAdditionalChargeAmount && normalizedAdditionalChargeAmount > 0) {
             try {
-                const payment = await createMolliePaymentForOrder({
-                    id: item.order_id,
-                    orderNo: item.order_no,
-                    totalAmount: normalizedAdditionalChargeAmount,
-                    description: `Nachzahlung Rückgabe ${item.order_no}`,
-                    type: 'return_additional_charge',
-                    itemId: req.params.itemId
-                });
 
-                await connection.execute(
-                    `INSERT INTO rental_order_payments
-     (order_id, order_item_id, payment_type, payment_method, payment_status, amount, mollie_payment_id)
-     VALUES (?, ?, 'return_additional_charge', 'online', 'pending', ?, ?)`,
-                    [
-                        item.order_id,
-                        req.params.itemId,
+                if (
+                    mandateRows.length > 0 &&
+                    mandateRows[0].mollie_customer_id &&
+                    mandateRows[0].mollie_mandate_id
+                ) {
+
+                    const payment =
+                        await createMollieRecurringPayment({
+                            customerId:
+                                mandateRows[0].mollie_customer_id,
+
+                            mandateId:
+                                mandateRows[0].mollie_mandate_id,
+
+                            orderId: item.order_id,
+                            orderNo: item.order_no,
+                            itemId: req.params.itemId,
+
+                            amount:
+                                normalizedAdditionalChargeAmount,
+
+                            description:
+                                `Automatische Nachbelastung Rückgabe ${item.order_no}`,
+
+                            type: 'return_additional_charge'
+                        });
+
+                    await connection.execute(
+                        `INSERT INTO rental_order_payments
+         (
+            order_id,
+            order_item_id,
+            payment_type,
+            payment_method,
+            payment_status,
+            amount,
+            mollie_payment_id,
+            note
+         )
+         VALUES
+         (?, ?, 'return_additional_charge',
+          'online', 'pending', ?, ?, ?)`,
+                        [
+                            item.order_id,
+                            req.params.itemId,
+                            normalizedAdditionalChargeAmount,
+                            payment.id,
+                            'Automatische Nachbelastung über Mollie Mandate'
+                        ]
+                    );
+
+                } else {
+
+                    const payment = await createMolliePaymentForOrder({
+                        id: item.order_id,
+                        orderNo: item.order_no,
+                        totalAmount: normalizedAdditionalChargeAmount,
+                        description: `Nachzahlung Rückgabe ${item.order_no}`,
+                        type: 'return_additional_charge',
+                        itemId: req.params.itemId
+                    });
+
+                    await connection.execute(
+                        `INSERT INTO rental_order_payments
+         (
+            order_id,
+            order_item_id,
+            payment_type,
+            payment_method,
+            payment_status,
+            amount,
+            mollie_payment_id
+         )
+         VALUES
+         (?, ?, 'return_additional_charge',
+          'online', 'pending', ?, ?)`,
+                        [
+                            item.order_id,
+                            req.params.itemId,
+                            normalizedAdditionalChargeAmount,
+                            payment.id
+                        ]
+                    );
+
+                    const checkoutUrl =
+                        getMollieCheckoutUrl(payment);
+
+                    await sendReturnAdditionalChargeEmail(
+                        {
+                            order_no: item.order_no,
+                            customer_email: item.customer_email
+                        },
+                        item,
+                        checkoutUrl,
                         normalizedAdditionalChargeAmount,
-                        payment.id
-                    ]
-                );
-
-                const checkoutUrl = getMollieCheckoutUrl(payment);
+                        additionalChargeReason
+                    );
+                }
 
                 await sendReturnAdditionalChargeEmail(
                     {
@@ -3305,6 +3390,43 @@ app.post('/webhooks/mollie', async (req, res) => {
              WHERE id = ?
              AND return_case_status = 'payment_pending'`,
                     [additionalChargeRows[0].order_id]
+                );
+            }
+        }
+
+        const [customerOrders] = await connection.execute(
+            `SELECT id, customer_email, mollie_customer_id
+     FROM rental_orders
+     WHERE mollie_payment_id = ?
+     LIMIT 1`,
+            [payment.id]
+        );
+
+        if (
+            customerOrders.length > 0 &&
+            customerOrders[0].mollie_customer_id
+        ) {
+
+            const mandates = await getMollieCustomerMandates(
+                customerOrders[0].mollie_customer_id
+            );
+
+            const mandateList =
+                mandates?._embedded?.mandates || mandates || [];
+
+            const validMandate = mandateList.find(
+                m => m.status === 'valid'
+            );
+
+            if (validMandate) {
+                await connection.execute(
+                    `UPDATE rental_orders
+             SET mollie_mandate_id = ?
+             WHERE id = ?`,
+                    [
+                        validMandate.id,
+                        customerOrders[0].id
+                    ]
                 );
             }
         }
