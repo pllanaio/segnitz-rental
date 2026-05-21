@@ -769,62 +769,6 @@ app.post('/register-customer', loginLimiter, async (req, res) => {
     }
 });
 
-app.post('/request-guest-verification', async (req, res) => {
-    const {
-        email
-    } = req.body;
-
-    if (!email) {
-        return res.status(400).json({
-            error: 'E-Mail-Adresse fehlt'
-        });
-    }
-
-    try {
-        const connection = await mysql.createConnection(dbConfig);
-        await runDatabaseCleanup(connection);
-
-        const [existingUsers] = await connection.execute(
-            'SELECT id FROM users WHERE username = ? LIMIT 1',
-            [email]
-        );
-
-        if (existingUsers.length > 0) {
-            await connection.end();
-            return res.status(409).json({
-                error: 'Diese E-Mail-Adresse existiert bereits. Bitte einloggen.'
-            });
-        }
-
-        const token = createVerificationToken();
-        const expires = getVerificationExpiry();
-
-        await connection.execute(
-            `INSERT INTO guest_verifications
-            (email, verification_token, verified, expires_at)
-            VALUES (?, ?, ?, ?)`,
-            [email, token, 0, expires]
-        );
-
-        await connection.end();
-
-        await sendVerificationEmail(email, token);
-
-        console.log(
-            `${new Date().toISOString()} - Gast-Verifikation: Bestätigungsmail an ${email} wurde versendet`
-        );
-
-        res.status(200).json({
-            message: 'Bestätigungsmail wurde versendet.'
-        });
-    } catch (error) {
-        console.error('Fehler bei Gast-Verifikation:', error);
-        res.status(500).json({
-            error: 'Fehler beim Versenden der Bestätigungsmail'
-        });
-    }
-});
-
 app.get('/verify-email', async (req, res) => {
     const {
         token
@@ -885,64 +829,6 @@ app.get('/verify-email', async (req, res) => {
     } catch (error) {
         console.error('Fehler bei E-Mail-Verifikation:', error);
         res.status(500).send('Fehler bei der E-Mail-Verifikation.');
-    }
-});
-
-app.post('/check-email-verification', async (req, res) => {
-    const {
-        email
-    } = req.body;
-
-    if (!email) {
-        return res.status(400).json({
-            verified: false,
-            error: 'E-Mail-Adresse fehlt'
-        });
-    }
-
-    try {
-        const connection = await mysql.createConnection(dbConfig);
-        await runDatabaseCleanup(connection);
-
-        const [users] = await connection.execute(
-            'SELECT email_verified FROM users WHERE username = ?',
-            [email]
-        );
-
-        if (users.length > 0) {
-            await connection.end();
-
-            return res.json({
-                verified: users[0].email_verified === 1
-            });
-        }
-
-        const [guests] = await connection.execute(
-            `SELECT verified 
-             FROM guest_verifications 
-             WHERE email = ?
-             ORDER BY created_at DESC
-             LIMIT 1`,
-            [email]
-        );
-
-        await connection.end();
-
-        if (guests.length > 0) {
-            return res.json({
-                verified: guests[0].verified === 1
-            });
-        }
-
-        return res.json({
-            verified: false
-        });
-    } catch (error) {
-        console.error('Fehler beim Prüfen der E-Mail-Verifikation:', error);
-        return res.status(500).json({
-            verified: false,
-            error: 'Fehler beim Prüfen der E-Mail-Verifikation'
-        });
     }
 });
 

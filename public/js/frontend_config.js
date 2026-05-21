@@ -725,111 +725,6 @@ async function loadUserProfileIntoForm() {
     }
 }
 
-document.addEventListener('DOMContentLoaded', () => {
-    const guestOrderBtn = document.getElementById('guestOrderBtn');
-    const checkGuestVerificationBtn = document.getElementById('checkGuestVerificationBtn');
-    const guestVerificationInfo = document.getElementById('guestVerificationInfo');
-
-    if (guestOrderBtn) {
-        guestOrderBtn.addEventListener('click', async () => {
-            const email = document.getElementById('CustomerEmail').value.trim();
-            prefillFinalEmailField(email);
-
-            if (!email) {
-                showAlert('Bitte geben Sie zuerst Ihre E-Mail-Adresse ein.', 'warning');
-                return;
-            }
-
-            if (!validateCustomerRequiredFields()) {
-                return;
-            }
-
-            try {
-                guestOrderBtn.disabled = true;
-
-                const response = await fetch('/request-guest-verification', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ email })
-                });
-
-                const result = await response.json();
-
-                if (!response.ok) {
-                    if (response.status === 409) {
-                        showAlert(
-                            'Diese E-Mail-Adresse existiert bereits. <a href="/login.html" class="alert-link">Hier klicken, um sich einzuloggen.</a>',
-                            'warning',
-                            8000
-                        );
-                        return;
-                    }
-
-                    showAlert(result.error || 'E-Mail-Verifikation konnte nicht gestartet werden.', 'danger');
-                    return;
-                }
-
-                if (!response.ok) {
-                    showAlert(result.error || 'Fehler beim Versenden des Bestätigungslinks.', 'danger');
-                    guestOrderBtn.disabled = false;
-                    return;
-                }
-
-                guestVerificationRequested = true;
-                guestEmailVerified = false;
-
-                if (guestVerificationInfo) {
-                    guestVerificationInfo.classList.remove('d-none');
-                }
-
-                showAlert('Bestätigungslink wurde versendet.', 'success');
-
-            } catch (error) {
-                console.error('Fehler bei Gast-Verifikation:', error);
-                showAlert('Fehler beim Versenden des Bestätigungslinks.', 'danger');
-                guestOrderBtn.disabled = false;
-            }
-        });
-    }
-
-    if (checkGuestVerificationBtn) {
-        checkGuestVerificationBtn.addEventListener('click', async () => {
-            const email = document.getElementById('CustomerEmail').value.trim();
-            prefillFinalEmailField(email);
-
-            if (!email) {
-                showAlert('Bitte geben Sie Ihre E-Mail-Adresse ein.', 'warning');
-                return;
-            }
-
-            try {
-                const response = await fetch('/check-email-verification', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ email })
-                });
-
-                const result = await response.json();
-
-                if (result.verified) {
-                    guestEmailVerified = true;
-                    showAlert('E-Mail wurde erfolgreich bestätigt. Sie können fortfahren.', 'success');
-                } else {
-                    showAlert('E-Mail wurde noch nicht bestätigt.', 'warning');
-                }
-
-            } catch (error) {
-                console.error('Fehler beim Prüfen der Gast-Verifikation:', error);
-                showAlert('Fehler beim Prüfen der Verifikation.', 'danger');
-            }
-        });
-    }
-});
-
 function setCheckoutFieldInvalid(field, message) {
     field.classList.add('is-invalid');
     field.setAttribute('aria-invalid', 'true');
@@ -958,23 +853,8 @@ function validateCustomerDataStep() {
         return false;
     }
 
-    const isLoggedIn =
-        document.getElementById('logout-button') &&
-        document.getElementById('logout-button').style.display !== 'none';
-
-    if (isLoggedIn) {
-        return true;
-    }
-
-    if (!guestVerificationRequested) {
-        showAlert('Bitte wählen Sie "Als Gast bestellen", um Ihre E-Mail-Adresse zu bestätigen.', 'warning');
-        return false;
-    }
-
-    if (!guestEmailVerified) {
-        showAlert('Bitte bestätigen Sie zuerst Ihre E-Mail-Adresse und klicken Sie anschließend auf "Verifikation prüfen".', 'warning');
-        return false;
-    }
+    const email = document.getElementById('CustomerEmail').value.trim();
+    prefillFinalEmailField(email);
 
     return true;
 }
