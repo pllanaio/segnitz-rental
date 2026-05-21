@@ -3196,6 +3196,7 @@ app.post('/webhooks/mollie', async (req, res) => {
         const payment = await getMolliePayment(paymentId);
 
         connection = await mysql.createConnection(dbConfig);
+        await connection.beginTransaction();
 
         const mappedPaymentStatus =
             payment.status === 'paid'
@@ -3208,14 +3209,26 @@ app.post('/webhooks/mollie', async (req, res) => {
                             ? 'expired'
                             : 'pending';
 
+        try {
+            await connection.execute(
+                `INSERT INTO mollie_webhook_events
+                 (mollie_payment_id, mollie_status)
+                 VALUES (?, ?)`,
+                [payment.id, payment.status]
+            );
+        } catch (duplicateEventError) {
+            await connection.rollback();
+            return res.sendStatus(200);
+        }
+
         await connection.execute(
             `UPDATE rental_order_payments
-     SET payment_status = ?,
-         paid_at = CASE
-            WHEN ? = 'paid' THEN NOW()
-            ELSE paid_at
-         END
-     WHERE mollie_payment_id = ?`,
+             SET payment_status = ?,
+                 paid_at = CASE
+                    WHEN ? = 'paid' THEN COALESCE(paid_at, NOW())
+                    ELSE paid_at
+                 END
+             WHERE mollie_payment_id = ?`,
             [
                 mappedPaymentStatus,
                 mappedPaymentStatus,
@@ -3227,45 +3240,29 @@ app.post('/webhooks/mollie', async (req, res) => {
             `SELECT id, status, order_confirmation_sent_at
              FROM rental_orders
              WHERE mollie_payment_id = ?
-             LIMIT 1`,
+             LIMIT 1
+             FOR UPDATE`,
             [payment.id]
         );
 
         if (orders.length === 0) {
+            await connection.commit();
             return res.sendStatus(200);
         }
 
         const order = orders[0];
 
-        let newPaymentStatus = payment.status;
         let newOrderStatus = order.status;
 
         if (payment.status === 'paid') {
             newOrderStatus = 'confirmed';
-        }
-
-        if (payment.status === 'canceled') {
+        } else if (payment.status === 'canceled') {
             newOrderStatus = 'cancelled';
-        }
-
-        if (payment.status === 'expired') {
+        } else if (payment.status === 'expired') {
             newOrderStatus = 'expired';
-        }
-
-        if (payment.status === 'failed') {
+        } else if (payment.status === 'failed') {
             newOrderStatus = 'payment_failed';
         }
-
-        const publicPaymentStatus =
-            payment.status === 'paid'
-                ? 'paid'
-                : payment.status === 'failed'
-                    ? 'failed'
-                    : payment.status === 'canceled'
-                        ? 'cancelled'
-                        : payment.status === 'expired'
-                            ? 'expired'
-                            : 'pending';
 
         await connection.execute(
             `UPDATE rental_orders
@@ -3274,72 +3271,92 @@ app.post('/webhooks/mollie', async (req, res) => {
                  payment_status = ?,
                  status = ?,
                  paid_at = CASE
-                    WHEN ? = 'paid' THEN NOW()
+                    WHEN ? = 'paid' THEN COALESCE(paid_at, NOW())
                     ELSE paid_at
                  END
              WHERE id = ?`,
             [
-                newPaymentStatus,
+                payment.status,
                 payment.method || null,
-                publicPaymentStatus,
+                mappedPaymentStatus,
                 newOrderStatus,
-                newPaymentStatus,
+                mappedPaymentStatus,
                 order.id
             ]
         );
 
-        if (payment.status === 'paid' && !order.order_confirmation_sent_at) {
-            const [paidOrders] = await connection.execute(
-                `SELECT confirmation_json, customer_email, customer_first_name, customer_last_name,
-                customer_company, customer_phone, customer_address, customer_zip, customer_city, signature_data_url
-         FROM rental_orders
-         WHERE id = ?
-         LIMIT 1`,
+        let shouldSendConfirmation = false;
+
+        if (
+            mappedPaymentStatus === 'paid' &&
+            !order.order_confirmation_sent_at
+        ) {
+            shouldSendConfirmation = true;
+
+            await connection.execute(
+                `UPDATE rental_orders
+                 SET order_confirmation_sent_at = NOW()
+                 WHERE id = ?
+                 AND order_confirmation_sent_at IS NULL`,
                 [order.id]
             );
+        }
 
-            if (paidOrders.length > 0) {
-                const paidOrder = paidOrders[0];
-                const orderSummary =
-                    typeof paidOrder.confirmation_json === 'string'
-                        ? JSON.parse(paidOrder.confirmation_json || '{}')
-                        : (paidOrder.confirmation_json || {});
+        await connection.commit();
 
-                const recipients = [
-                    paidOrder.customer_email,
-                    'orders@segnitzbau.de'
-                ]
-                    .filter(Boolean)
-                    .map(e => e.trim().toLowerCase());
+        if (shouldSendConfirmation) {
+            const mailConnection = await mysql.createConnection(dbConfig);
 
-                const uniqueRecipients = [...new Set(recipients)];
-
-                await sendOrderEmail(
-                    uniqueRecipients,
-                    {
-                        ...orderSummary,
-                        id: order.id
-                    },
-                    {
-                        firstName: paidOrder.customer_first_name,
-                        lastName: paidOrder.customer_last_name,
-                        company: paidOrder.customer_company,
-                        email: paidOrder.customer_email,
-                        phone: paidOrder.customer_phone,
-                        address: paidOrder.customer_address,
-                        zip: paidOrder.customer_zip,
-                        city: paidOrder.customer_city
-                    },
-                    paidOrder.signature_data_url,
-                    'Erfolgreich online gezahlt'
-                );
-
-                await connection.execute(
-                    `UPDATE rental_orders
-     SET order_confirmation_sent_at = NOW()
-     WHERE id = ?`,
+            try {
+                const [paidOrders] = await mailConnection.execute(
+                    `SELECT confirmation_json, customer_email, customer_first_name, customer_last_name,
+                            customer_company, customer_phone, customer_address, customer_zip,
+                            customer_city, signature_data_url
+                     FROM rental_orders
+                     WHERE id = ?
+                     LIMIT 1`,
                     [order.id]
                 );
+
+                if (paidOrders.length > 0) {
+                    const paidOrder = paidOrders[0];
+
+                    const orderSummary =
+                        typeof paidOrder.confirmation_json === 'string'
+                            ? JSON.parse(paidOrder.confirmation_json || '{}')
+                            : (paidOrder.confirmation_json || {});
+
+                    const recipients = [
+                        paidOrder.customer_email,
+                        'orders@segnitzbau.de'
+                    ]
+                        .filter(Boolean)
+                        .map(e => e.trim().toLowerCase());
+
+                    const uniqueRecipients = [...new Set(recipients)];
+
+                    await sendOrderEmail(
+                        uniqueRecipients,
+                        {
+                            ...orderSummary,
+                            id: order.id
+                        },
+                        {
+                            firstName: paidOrder.customer_first_name,
+                            lastName: paidOrder.customer_last_name,
+                            company: paidOrder.customer_company,
+                            email: paidOrder.customer_email,
+                            phone: paidOrder.customer_phone,
+                            address: paidOrder.customer_address,
+                            zip: paidOrder.customer_zip,
+                            city: paidOrder.customer_city
+                        },
+                        paidOrder.signature_data_url,
+                        'Erfolgreich online gezahlt'
+                    );
+                }
+            } finally {
+                await mailConnection.end();
             }
         }
 
@@ -3347,6 +3364,15 @@ app.post('/webhooks/mollie', async (req, res) => {
 
     } catch (error) {
         console.error('Mollie Webhook Fehler:', error);
+
+        if (connection) {
+            try {
+                await connection.rollback();
+            } catch (rollbackError) {
+                console.error('Mollie Webhook Rollback Fehler:', rollbackError);
+            }
+        }
+
         return res.sendStatus(500);
 
     } finally {
