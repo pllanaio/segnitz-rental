@@ -856,7 +856,7 @@ app.get('/verify-email', async (req, res) => {
 
             await connection.end();
 
-            return res.send('E-Mail-Adresse wurde erfolgreich bestätigt. Sie können das Fenster schließen.');
+            return res.redirect('/email-verified.html');
         }
 
         const [guests] = await connection.execute(
@@ -877,7 +877,7 @@ app.get('/verify-email', async (req, res) => {
 
             await connection.end();
 
-            return res.send('E-Mail-Adresse wurde erfolgreich bestätigt. Sie können das Fenster schließen.');
+            return res.redirect('/email-verified.html');
         }
 
         await connection.end();
@@ -2549,7 +2549,13 @@ app.post('/password-reset-request', loginLimiter, async (req, res) => {
             [token, expires, email.toLowerCase()]
         );
 
-        const resetUrl = `${process.env.BASE_URL}/login.html?resetToken=${token}`;
+        const baseUrl = process.env.BASE_URL;
+
+        if (!baseUrl) {
+            throw new Error('BASE_URL fehlt in der .env');
+        }
+
+        const resetUrl = `${baseUrl.replace(/\/$/, '')}/login.html?resetToken=${token}`;
 
         try {
             await sendPasswordResetEmail(email.toLowerCase(), resetUrl);
