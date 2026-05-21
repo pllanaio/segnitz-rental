@@ -2496,9 +2496,16 @@ LIMIT 1`,
          SET status = 'returned',
              return_status = ?,
              returned_at = NOW(),
-             return_case_status = 'closed'
+             return_case_status = CASE
+    WHEN ? > 0 THEN 'payment_pending'
+    ELSE 'closed'
+END
          WHERE id = ?`,
-                [finalOrderReturnStatus, item.order_id]
+                [
+                    finalOrderReturnStatus,
+                    normalizedAdditionalChargeAmount || 0,
+                    item.order_id
+                ]
             );
         } else {
             await connection.execute(
@@ -3235,6 +3242,28 @@ app.post('/webhooks/mollie', async (req, res) => {
                 payment.id
             ]
         );
+
+        if (mappedPaymentStatus === 'paid') {
+            const [additionalChargeRows] = await connection.execute(
+                `SELECT order_id
+         FROM rental_order_payments
+         WHERE mollie_payment_id = ?
+         AND payment_type = 'return_additional_charge'
+         AND payment_status = 'paid'
+         LIMIT 1`,
+                [payment.id]
+            );
+
+            if (additionalChargeRows.length > 0) {
+                await connection.execute(
+                    `UPDATE rental_orders
+             SET return_case_status = 'closed'
+             WHERE id = ?
+             AND return_case_status = 'payment_pending'`,
+                    [additionalChargeRows[0].order_id]
+                );
+            }
+        }
 
         const [orders] = await connection.execute(
             `SELECT id, status, order_confirmation_sent_at
