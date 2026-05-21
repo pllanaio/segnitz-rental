@@ -573,7 +573,7 @@ app.post('/data', async (req, res) => {
                 `UPDATE rental_orders
          SET payment_method = 'online',
              payment_status = 'pending',
-             mollie_payment_id = ?,
+             mollie_payment_id = ?
          WHERE id = ?`,
                 [
                     payment.id,
@@ -2629,56 +2629,49 @@ LIMIT 1`,
 
         if (normalizedAdditionalChargeAmount && normalizedAdditionalChargeAmount > 0) {
             try {
+                const payment = await createMolliePaymentForOrder({
+                    id: item.order_id,
+                    orderNo: item.order_no,
+                    totalAmount: normalizedAdditionalChargeAmount,
+                    description: `Nachzahlung Rückgabe ${item.order_no}`,
+                    type: 'return_additional_charge',
+                    itemId: req.params.itemId
+                });
 
-                
-                
-                } else {
-
-                    const payment = await createMolliePaymentForOrder({
-                        id: item.order_id,
-                        orderNo: item.order_no,
-                        totalAmount: normalizedAdditionalChargeAmount,
-                        description: `Nachzahlung Rückgabe ${item.order_no}`,
-                        type: 'return_additional_charge',
-                        itemId: req.params.itemId
-                    });
-
-                    await connection.execute(
-                        `INSERT INTO rental_order_payments
-         (
-            order_id,
-            order_item_id,
-            payment_type,
-            payment_method,
-            payment_status,
-            amount,
-            mollie_payment_id
-         )
-         VALUES
-         (?, ?, 'return_additional_charge',
-          'online', 'pending', ?, ?)`,
-                        [
-                            item.order_id,
-                            req.params.itemId,
-                            normalizedAdditionalChargeAmount,
-                            payment.id
-                        ]
-                    );
-
-                    const checkoutUrl =
-                        getMollieCheckoutUrl(payment);
-
-                    await sendReturnAdditionalChargeEmail(
-                        {
-                            order_no: item.order_no,
-                            customer_email: item.customer_email
-                        },
-                        item,
-                        checkoutUrl,
+                await connection.execute(
+                    `INSERT INTO rental_order_payments
+             (
+                order_id,
+                order_item_id,
+                payment_type,
+                payment_method,
+                payment_status,
+                amount,
+                mollie_payment_id
+             )
+             VALUES
+             (?, ?, 'return_additional_charge',
+              'online', 'pending', ?, ?)`,
+                    [
+                        item.order_id,
+                        req.params.itemId,
                         normalizedAdditionalChargeAmount,
-                        additionalChargeReason
-                    );
-                }
+                        payment.id
+                    ]
+                );
+
+                const checkoutUrl = getMollieCheckoutUrl(payment);
+
+                await sendReturnAdditionalChargeEmail(
+                    {
+                        order_no: item.order_no,
+                        customer_email: item.customer_email
+                    },
+                    item,
+                    checkoutUrl,
+                    normalizedAdditionalChargeAmount,
+                    additionalChargeReason
+                );
             } catch (mailError) {
                 console.error('Rückgabe gespeichert, aber Nachzahlungs-Mail fehlgeschlagen:', mailError);
             }

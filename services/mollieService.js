@@ -91,85 +91,9 @@ async function createMollieRefundForPayment({
     });
 }
 
-async function createMollieCustomer({ email, name }) {
-    const mollie = getMollieClient();
-
-    return mollie.customers.create({
-        email,
-        name
-    });
-}
-
-async function createMollieFirstPaymentForOrder(order) {
-    const mollie = getMollieClient();
-
-    const amountValue = formatMollieAmount(order.totalAmount);
-    const baseUrl = process.env.BASE_URL.replace(/\/$/, '');
-
-    return mollie.customerPayments.create({
-        customerId: order.customerId,
-        amount: {
-            currency: 'EUR',
-            value: amountValue
-        },
-        description: order.description || `Segnitz Rental Bestellung ${order.orderNo}`,
-        redirectUrl: order.redirectUrl || `${baseUrl}/index.html?payment=return&orderId=${encodeURIComponent(order.id)}`,
-        webhookUrl: `${baseUrl}/webhooks/mollie`,
-        sequenceType: 'first',
-        metadata: {
-            orderId: String(order.id),
-            orderNo: String(order.orderNo),
-            type: order.type || 'initial_payment'
-        }
-    });
-}
-
-async function createMollieRecurringPayment({
-    customerId,
-    mandateId,
-    orderId,
-    orderNo,
-    itemId,
-    amount,
-    description,
-    type
-}) {
-    const mollie = getMollieClient();
-
-    return mollie.customerPayments.create({
-        customerId,
-        amount: {
-            currency: 'EUR',
-            value: formatMollieAmount(amount)
-        },
-        description,
-        sequenceType: 'recurring',
-        mandateId,
-        webhookUrl: `${process.env.BASE_URL.replace(/\/$/, '')}/webhooks/mollie`,
-        metadata: {
-            orderId: String(orderId),
-            orderNo: String(orderNo),
-            itemId: itemId ? String(itemId) : null,
-            type
-        }
-    });
-}
-
-async function getMollieCustomerMandates(customerId) {
-    const mollie = getMollieClient();
-
-    return mollie.customerMandates.page({
-        customerId
-    });
-}
-
 module.exports = {
     createMolliePaymentForOrder,
     getMolliePayment,
     createMollieRefundForPayment,
-    getMollieCheckoutUrl,
-    createMollieCustomer,
-    createMollieFirstPaymentForOrder,
-    createMollieRecurringPayment,
-    getMollieCustomerMandates
+    getMollieCheckoutUrl
 };
