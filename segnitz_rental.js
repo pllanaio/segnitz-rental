@@ -33,7 +33,12 @@ const {
     sendReturnSummaryEmail,
     sendVerificationEmail,
     sendPasswordChangedEmail,
-    sendPasswordResetEmail
+    sendPasswordResetEmail,
+    sendPickedUpEmail,
+    sendOrderCancelledEmail,
+    sendItemCancelledEmail,
+    sendRentalAdjustmentEmailWithPayment,
+    sendReturnAdditionalChargeEmail
 } = require('./services/mailService');
 
 const {
@@ -509,12 +514,6 @@ app.post('/data', async (req, res) => {
                 [item.productId]
             );
         }
-
-        await connection.execute(
-            `DELETE FROM guest_verifications
-             WHERE email = ?`,
-            [email]
-        );
 
         await connection.commit();
 
@@ -1695,7 +1694,7 @@ app.put('/admin/orders/:id/pick-up', checkAdmin, async (req, res) => {
         await connection.beginTransaction();
 
         const [orders] = await connection.execute(
-            `SELECT id, status
+            `SELECT id, status, order_no, customer_email
              FROM rental_orders
              WHERE id = ?
              LIMIT 1`,
@@ -1740,6 +1739,12 @@ app.put('/admin/orders/:id/pick-up', checkAdmin, async (req, res) => {
 
         await connection.commit();
 
+        try {
+            await sendPickedUpEmail(order);
+        } catch (mailError) {
+            console.error('Abholung gespeichert, aber Mailversand fehlgeschlagen:', mailError);
+        }
+
         res.json({ message: 'Bestellung wurde als abgeholt markiert.' });
 
     } catch (error) {
@@ -1767,7 +1772,7 @@ app.put('/admin/orders/:id/cancel', checkAdmin, async (req, res) => {
         await connection.beginTransaction();
 
         const [orders] = await connection.execute(
-            `SELECT id, status
+            `SELECT id, status, order_no, customer_email
              FROM rental_orders
              WHERE id = ?
              LIMIT 1`,
@@ -1846,6 +1851,12 @@ app.put('/admin/orders/:id/cancel', checkAdmin, async (req, res) => {
 
         await connection.commit();
 
+        try {
+            await sendOrderCancelledEmail(order, cancelReason.trim());
+        } catch (mailError) {
+            console.error('Storno gespeichert, aber Mailversand fehlgeschlagen:', mailError);
+        }
+
         res.json({
             message: 'Bestellung wurde storniert.'
         });
@@ -1876,10 +1887,20 @@ app.put('/admin/order-items/:itemId/cancel', checkAdmin, async (req, res) => {
         await connection.beginTransaction();
 
         const [items] = await connection.execute(
-            `SELECT id, order_id, item_status, rental_start, picked_up_at
-             FROM rental_order_items
-             WHERE id = ?
-             LIMIT 1`,
+            `SELECT 
+    roi.id,
+    roi.order_id,
+    roi.item_status,
+    roi.rental_start,
+    roi.picked_up_at,
+    p.title,
+    ro.order_no,
+    ro.customer_email
+FROM rental_order_items roi
+JOIN rental_orders ro ON ro.id = roi.order_id
+JOIN rental_products p ON p.id = roi.product_id
+WHERE roi.id = ?
+LIMIT 1`,
             [req.params.itemId]
         );
 
@@ -1958,6 +1979,18 @@ app.put('/admin/order-items/:itemId/cancel', checkAdmin, async (req, res) => {
         }
 
         await connection.commit();
+
+        try {
+            await sendItemCancelledEmail(
+                {
+                    order_no: item.order_no,
+                    customer_email: item.customer_email
+                },
+                item
+            );
+        } catch (mailError) {
+            console.error('Artikel-Storno gespeichert, aber Mailversand fehlgeschlagen:', mailError);
+        }
 
         res.json({
             message: 'Artikel wurde storniert.'
@@ -2072,10 +2105,22 @@ app.put('/admin/order-items/:itemId/rental-adjustment', checkAdmin, async (req, 
         connection = await mysql.createConnection(dbConfig);
 
         const [items] = await connection.execute(
-            `SELECT id, order_id, product_id, price_per_day, rental_start, rental_end, item_status
-             FROM rental_order_items
-             WHERE id = ?
-             LIMIT 1`,
+            `SELECT 
+    roi.id,
+    roi.order_id,
+    roi.product_id,
+    roi.price_per_day,
+    roi.rental_start,
+    roi.rental_end,
+    roi.item_status,
+    p.title,
+    ro.order_no,
+    ro.customer_email
+FROM rental_order_items roi
+JOIN rental_orders ro ON ro.id = roi.order_id
+JOIN rental_products p ON p.id = roi.product_id
+WHERE roi.id = ?
+LIMIT 1`,
             [req.params.itemId]
         );
 
@@ -2147,6 +2192,42 @@ app.put('/admin/order-items/:itemId/rental-adjustment', checkAdmin, async (req, 
             console.error('Mietzeitraum wurde gespeichert, aber Mailversand fehlgeschlagen:', mailError);
         }
 
+        const originalDays = calculateRentalDays(item.rental_start, item.rental_end);
+        const originalTotal = originalDays * Number(item.price_per_day || 0);
+        const amountDue = Math.max(adjustedRentalTotal - originalTotal, 0);
+
+        let paymentUrl = null;
+
+        if (amountDue > 0) {
+            const payment = await createMolliePaymentForOrder({
+                id: item.order_id,
+                orderNo: item.order_no,
+                totalAmount: amountDue,
+                description: `Nachzahlung Mietzeitraum ${item.order_no}`,
+                type: 'rental_adjustment',
+                itemId: req.params.itemId
+            });
+
+            paymentUrl =
+                typeof payment.getCheckoutUrl === 'function'
+                    ? payment.getCheckoutUrl()
+                    : payment._links?.checkout?.href;
+        }
+
+        try {
+            await sendRentalAdjustmentEmailWithPayment(
+                {
+                    order_no: item.order_no,
+                    customer_email: item.customer_email
+                },
+                item,
+                paymentUrl,
+                amountDue
+            );
+        } catch (mailError) {
+            console.error('Mietzeitraum gespeichert, aber Mailversand fehlgeschlagen:', mailError);
+        }
+
         res.json({
             message: 'Mietzeitraum wurde gespeichert.',
             adjustedRentalTotal
@@ -2189,10 +2270,22 @@ app.put('/admin/order-items/:itemId/return', checkAdmin, async (req, res) => {
         const processedByUserId = await getUserIdByEmail(connection, req.session.user);
 
         const [items] = await connection.execute(
-            `SELECT id, order_id, price_per_day, rental_start, rental_end, deposit, item_status
-             FROM rental_order_items
-             WHERE id = ?
-             LIMIT 1`,
+            `SELECT 
+    roi.id,
+    roi.order_id,
+    roi.price_per_day,
+    roi.rental_start,
+    roi.rental_end,
+    roi.deposit,
+    roi.item_status,
+    p.title,
+    ro.order_no,
+    ro.customer_email
+FROM rental_order_items roi
+JOIN rental_orders ro ON ro.id = roi.order_id
+JOIN rental_products p ON p.id = roi.product_id
+WHERE roi.id = ?
+LIMIT 1`,
             [req.params.itemId]
         );
 
@@ -2348,6 +2441,37 @@ app.put('/admin/order-items/:itemId/return', checkAdmin, async (req, res) => {
          WHERE id = ?`,
                 [item.order_id]
             );
+        }
+
+        if (normalizedAdditionalChargeAmount && normalizedAdditionalChargeAmount > 0) {
+            try {
+                const payment = await createMolliePaymentForOrder({
+                    id: item.order_id,
+                    orderNo: item.order_no,
+                    totalAmount: normalizedAdditionalChargeAmount,
+                    description: `Nachzahlung Rückgabe ${item.order_no}`,
+                    type: 'return_additional_charge',
+                    itemId: req.params.itemId
+                });
+
+                const paymentUrl =
+                    typeof payment.getCheckoutUrl === 'function'
+                        ? payment.getCheckoutUrl()
+                        : payment._links?.checkout?.href;
+
+                await sendReturnAdditionalChargeEmail(
+                    {
+                        order_no: item.order_no,
+                        customer_email: item.customer_email
+                    },
+                    item,
+                    paymentUrl,
+                    normalizedAdditionalChargeAmount,
+                    additionalChargeReason
+                );
+            } catch (mailError) {
+                console.error('Rückgabe gespeichert, aber Nachzahlungs-Mail fehlgeschlagen:', mailError);
+            }
         }
 
         res.json({

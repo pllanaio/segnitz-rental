@@ -20,18 +20,21 @@ async function createMolliePaymentForOrder(order) {
     const mollie = getMollieClient();
 
     const amountValue = formatMollieAmount(order.totalAmount);
+    const baseUrl = process.env.BASE_URL.replace(/\/$/, '');
 
     const payment = await mollie.payments.create({
         amount: {
             currency: 'EUR',
             value: amountValue
         },
-        description: `Segnitz Rental Bestellung ${order.orderNo}`,
-        redirectUrl: `${process.env.BASE_URL}/index.html?payment=return&orderId=${encodeURIComponent(order.id)}`,
-        webhookUrl: `${process.env.BASE_URL}/webhooks/mollie`,
+        description: order.description || `Segnitz Rental Bestellung ${order.orderNo}`,
+        redirectUrl: order.redirectUrl || `${baseUrl}/index.html?payment=return&orderId=${encodeURIComponent(order.id)}`,
+        webhookUrl: `${baseUrl}/webhooks/mollie`,
         metadata: {
             orderId: String(order.id),
-            orderNo: String(order.orderNo)
+            orderNo: String(order.orderNo),
+            type: order.type || 'order_payment',
+            itemId: order.itemId ? String(order.itemId) : null
         }
     });
 

@@ -271,10 +271,92 @@ Falls Sie diese Anfrage nicht gestellt haben, ignorieren Sie diese E-Mail.`,
     });
 }
 
+async function sendPickedUpEmail(order) {
+    await sendGraphMail({
+        to: order.customer_email,
+        subject: `Mietauftrag ${order.order_no} wurde abgeholt`,
+        html: `
+            <h2>Ihre Mietartikel wurden abgeholt</h2>
+            <p>Ihr Mietauftrag <strong>${escapeHtml(order.order_no)}</strong> wurde als abgeholt markiert.</p>
+            <p>Bitte bringen Sie die Artikel zum vereinbarten Rückgabetermin zurück.</p>
+        `
+    });
+}
+
+async function sendOrderCancelledEmail(order, reason) {
+    await sendGraphMail({
+        to: order.customer_email,
+        subject: `Mietauftrag ${order.order_no} wurde storniert`,
+        html: `
+            <h2>Ihr Mietauftrag wurde storniert</h2>
+            <p>Ihr Mietauftrag <strong>${escapeHtml(order.order_no)}</strong> wurde storniert.</p>
+            <p><strong>Grund:</strong> ${escapeHtml(reason)}</p>
+        `
+    });
+}
+
+async function sendItemCancelledEmail(order, item) {
+    await sendGraphMail({
+        to: order.customer_email,
+        subject: `Artikel aus Mietauftrag ${order.order_no} wurde storniert`,
+        html: `
+            <h2>Ein Mietartikel wurde storniert</h2>
+            <p>Aus Ihrem Mietauftrag <strong>${escapeHtml(order.order_no)}</strong> wurde folgender Artikel storniert:</p>
+            <p><strong>${escapeHtml(item.title)}</strong></p>
+        `
+    });
+}
+
+async function sendRentalAdjustmentEmailWithPayment(order, item, paymentUrl, amountDue) {
+    await sendGraphMail({
+        to: order.customer_email,
+        subject: `Mietzeitraum zu Auftrag ${order.order_no} wurde angepasst`,
+        html: `
+            <h2>Ihr Mietzeitraum wurde angepasst</h2>
+            <p>Der Mietzeitraum für <strong>${escapeHtml(item.title)}</strong> wurde geändert.</p>
+
+            ${amountDue > 0 ? `
+                <p>Durch die Änderung ergibt sich ein offener Betrag von <strong>${amountDue.toFixed(2)} €</strong>.</p>
+                <p>
+                    <a href="${paymentUrl}">Jetzt online bezahlen</a>
+                </p>
+                <p>Alternativ können Sie den Betrag auch direkt bei uns vor Ort bezahlen.</p>
+            ` : `
+                <p>Es ergibt sich aktuell kein zusätzlicher Zahlungsbetrag.</p>
+            `}
+        `
+    });
+}
+
+async function sendReturnAdditionalChargeEmail(order, item, paymentUrl, amountDue, reason) {
+    await sendGraphMail({
+        to: order.customer_email,
+        subject: `Nachzahlung zu Mietauftrag ${order.order_no}`,
+        html: `
+            <h2>Nachzahlung zu Ihrem Mietartikel</h2>
+            <p>Für den Artikel <strong>${escapeHtml(item.title)}</strong> aus Mietauftrag <strong>${escapeHtml(order.order_no)}</strong> wurde eine Nachzahlung erfasst.</p>
+
+            <p><strong>Grund:</strong> ${escapeHtml(reason || 'Zusatzkosten')}</p>
+            <p><strong>Betrag:</strong> ${amountDue.toFixed(2)} €</p>
+
+            <p>
+                <a href="${paymentUrl}">Jetzt online bezahlen</a>
+            </p>
+
+            <p>Alternativ können Sie den Betrag auch direkt bei uns vor Ort bezahlen.</p>
+        `
+    });
+}
+
 module.exports = {
     escapeHtml,
     sendOrderEmail,
     sendVerificationEmail,
     sendPasswordChangedEmail,
-    sendPasswordResetEmail
+    sendPasswordResetEmail,
+    sendPickedUpEmail,
+    sendOrderCancelledEmail,
+    sendItemCancelledEmail,
+    sendRentalAdjustmentEmailWithPayment,
+    sendReturnAdditionalChargeEmail
 };
