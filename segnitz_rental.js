@@ -29,8 +29,6 @@ const productRoutes = require('./routes/productRoutes');
 const { runDatabaseCleanup } = require('./utils/cleanup');
 const {
     sendOrderEmail,
-    sendRentalAdjustmentEmail,
-    sendReturnSummaryEmail,
     sendVerificationEmail,
     sendPasswordChangedEmail,
     sendPasswordResetEmail,
@@ -2075,8 +2073,6 @@ app.post('/admin/order-items/:itemId/send-return-summary', checkAdmin, async (re
                 error: 'Bestellposition nicht gefunden.'
             });
         }
-
-        await sendReturnSummaryEmail(connection, items[0].order_id, req.params.itemId);
 
         res.json({
             message: 'Abschlussmail wurde versendet.'
