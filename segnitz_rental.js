@@ -61,7 +61,9 @@ const { checkProductAvailability } = require('./utils/availability');
 
 const {
     createMolliePaymentForOrder,
-    getMolliePayment
+    getMolliePayment,
+    createMollieRefundForPayment,
+    getMollieCheckoutUrl
 } = require('./services/mollieService');
 
 
@@ -553,10 +555,7 @@ app.post('/data', async (req, res) => {
                 ]
             );
 
-            const checkoutUrl =
-                typeof payment.getCheckoutUrl === 'function'
-                    ? payment.getCheckoutUrl()
-                    : payment._links?.checkout?.href;
+            const checkoutUrl = getMollieCheckoutUrl(payment);
 
             if (!checkoutUrl) {
                 throw new Error('Mollie Checkout-URL fehlt.');
@@ -2253,10 +2252,7 @@ LIMIT 1`,
                 ]
             );
 
-            paymentUrl =
-                typeof payment.getCheckoutUrl === 'function'
-                    ? payment.getCheckoutUrl()
-                    : payment._links?.checkout?.href;
+            paymentUrl = getMollieCheckoutUrl(payment);
         }
 
         try {
@@ -2488,6 +2484,98 @@ LIMIT 1`,
             );
         }
 
+        if (
+            calculatedDepositRefundAmount > 0 &&
+            depositDecision === 'refund'
+        ) {
+
+            const [payments] = await connection.execute(
+                `SELECT mollie_payment_id
+         FROM rental_order_payments
+         WHERE order_id = ?
+         AND payment_status = 'paid'
+         AND mollie_payment_id IS NOT NULL
+         ORDER BY id ASC
+         LIMIT 1`,
+                [item.order_id]
+            );
+
+            if (payments.length > 0) {
+
+                const originalPaymentId =
+                    payments[0].mollie_payment_id;
+
+                try {
+
+                    const refund =
+                        await createMollieRefundForPayment({
+                            paymentId: originalPaymentId,
+                            amount: calculatedDepositRefundAmount,
+                            description:
+                                `Kautionsrückerstattung ${item.order_no}`,
+
+                            metadata: {
+                                orderId: String(item.order_id),
+                                itemId: String(req.params.itemId),
+                                type: 'deposit_refund'
+                            }
+                        });
+
+                    await connection.execute(
+                        `INSERT INTO rental_order_payments
+                (
+                    order_id,
+                    order_item_id,
+                    payment_type,
+                    payment_method,
+                    payment_status,
+                    amount,
+                    mollie_payment_id,
+                    note,
+                    paid_at
+                )
+                VALUES (?, ?, 'deposit_refund', 'online',
+                        'paid', ?, ?, ?, NOW())`,
+                        [
+                            item.order_id,
+                            req.params.itemId,
+                            -Math.abs(calculatedDepositRefundAmount),
+                            refund.id,
+                            'Kaution automatisch erstattet'
+                        ]
+                    );
+
+                } catch (refundError) {
+
+                    console.error(
+                        'Mollie-Refund fehlgeschlagen:',
+                        refundError
+                    );
+
+                    await connection.execute(
+                        `INSERT INTO rental_order_payments
+                (
+                    order_id,
+                    order_item_id,
+                    payment_type,
+                    payment_method,
+                    payment_status,
+                    amount,
+                    note
+                )
+                VALUES (?, ?, 'deposit_refund',
+                        'online', 'failed', ?, ?)`,
+                        [
+                            item.order_id,
+                            req.params.itemId,
+                            -Math.abs(calculatedDepositRefundAmount),
+                            `Refund fehlgeschlagen: ${refundError.message}`
+                        ]
+                    );
+                }
+            }
+        }
+
         if (normalizedAdditionalChargeAmount && normalizedAdditionalChargeAmount > 0) {
             try {
                 const payment = await createMolliePaymentForOrder({
@@ -2511,10 +2599,7 @@ LIMIT 1`,
                     ]
                 );
 
-                const paymentUrl =
-                    typeof payment.getCheckoutUrl === 'function'
-                        ? payment.getCheckoutUrl()
-                        : payment._links?.checkout?.href;
+                const checkoutUrl = getMollieCheckoutUrl(payment);
 
                 await sendReturnAdditionalChargeEmail(
                     {
@@ -2522,7 +2607,7 @@ LIMIT 1`,
                         customer_email: item.customer_email
                     },
                     item,
-                    paymentUrl,
+                    checkoutUrl,
                     normalizedAdditionalChargeAmount,
                     additionalChargeReason
                 );
