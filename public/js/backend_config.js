@@ -1433,6 +1433,7 @@ function openRentalPeriodModal(orderId, itemId) {
     document.getElementById('rentalPeriodItemId').value = itemId;
     const isPickedUp = (item.itemStatus || item.item_status) === 'picked_up';
     const pickedUpDate = item.pickedUpAt || item.picked_up_at || todayDateString();
+    document.getElementById('rentalPeriodPaymentMethod').value = 'online';
 
     const rentalPeriodStartInput = document.getElementById('rentalPeriodStart');
 
@@ -1706,7 +1707,8 @@ async function saveOrderItemRentalAdjustment(itemId, orderId) {
         adjustedRentalEnd: document.getElementById('rentalPeriodEnd').value || null,
         adjustedPricePerDay: normalizeDecimalInput(
             document.getElementById('rentalPeriodPricePerDay').value
-        )
+        ),
+        paymentMethod: document.getElementById('rentalPeriodPaymentMethod').value
     };
 
     try {
@@ -1772,6 +1774,7 @@ async function saveOrderItemReturn(itemId, orderId) {
         additionalChargeAmount: normalizeDecimalInput(
             document.getElementById('returnAdditionalChargeAmount').value
         ),
+        additionalChargePaymentMethod: document.getElementById('returnAdditionalChargePaymentMethod').value,
         returnNotes: document.getElementById('returnNotes').value.trim()
 
     };
