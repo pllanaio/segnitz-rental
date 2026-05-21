@@ -63,7 +63,11 @@ const {
     createMolliePaymentForOrder,
     getMolliePayment,
     createMollieRefundForPayment,
-    getMollieCheckoutUrl
+    getMollieCheckoutUrl,
+    createMollieCustomer,
+    createMollieFirstPaymentForOrder,
+    createMollieRecurringPayment,
+    getMollieCustomerMandates
 } = require('./services/mollieService');
 
 
@@ -525,12 +529,51 @@ app.post('/data', async (req, res) => {
 
         console.log('Payment-Methode Backend:', paymentMethod);
 
+        let mollieCustomerId = null;
+
+        if (email) {
+            const [users] = await connection.execute(
+                `SELECT id, mollie_customer_id
+         FROM users
+         WHERE username = ?
+         LIMIT 1`,
+                [email]
+            );
+
+            if (users.length > 0 && users[0].mollie_customer_id) {
+                mollieCustomerId = users[0].mollie_customer_id;
+            } else {
+                const customer = await createMollieCustomer({
+                    email,
+                    name: `${firstName || ''} ${lastName || ''}`.trim() || email
+                });
+
+                mollieCustomerId = customer.id;
+
+                if (users.length > 0) {
+                    await connection.execute(
+                        `UPDATE users
+                 SET mollie_customer_id = ?
+                 WHERE id = ?`,
+                        [mollieCustomerId, users[0].id]
+                    );
+                }
+            }
+        }
+
         if (paymentMethod === 'online') {
-            const payment = await createMolliePaymentForOrder({
-                id: orderId,
-                orderNo,
-                totalAmount: orderSummary.totals.grandTotalBeforeDepositReturn
-            });
+            const payment = mollieCustomerId
+                ? await createMollieFirstPaymentForOrder({
+                    id: orderId,
+                    orderNo,
+                    totalAmount: orderSummary.totals.grandTotalBeforeDepositReturn,
+                    customerId: mollieCustomerId
+                })
+                : await createMolliePaymentForOrder({
+                    id: orderId,
+                    orderNo,
+                    totalAmount: orderSummary.totals.grandTotalBeforeDepositReturn
+                });
 
             await connection.execute(
                 `INSERT INTO rental_order_payments
@@ -572,7 +615,8 @@ app.post('/data', async (req, res) => {
                 `UPDATE rental_orders
          SET payment_method = 'online',
              payment_status = 'pending',
-             mollie_payment_id = ?
+             mollie_payment_id = ?,
+             mollie_customer_id = ?
          WHERE id = ?`,
                 [
                     payment.id,
