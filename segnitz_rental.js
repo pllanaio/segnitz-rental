@@ -2607,13 +2607,37 @@ LIMIT 1`,
 
                 await connection.execute(
                     `INSERT INTO rental_order_payments
-     (order_id, order_item_id, payment_type, payment_method, payment_status, amount, mollie_payment_id)
-     VALUES (?, ?, 'return_additional_charge', 'online', 'pending', ?, ?)`,
+     (order_id, order_item_id, payment_type, payment_method, payment_status, amount, mollie_payment_id, note)
+     VALUES (?, NULL, 'initial_payment', 'online', 'pending', ?, ?, ?)`,
                     [
-                        item.order_id,
-                        req.params.itemId,
-                        normalizedAdditionalChargeAmount,
-                        payment.id
+                        orderId,
+                        orderSummary.totals.grandTotalBeforeDepositReturn,
+                        payment.id,
+                        'Gesamtzahlung aus Miete und Kaution'
+                    ]
+                );
+
+                await connection.execute(
+                    `INSERT INTO rental_order_payments
+     (order_id, order_item_id, payment_type, payment_method, payment_status, amount, mollie_payment_id, note)
+     VALUES (?, NULL, 'rental', 'online', 'pending', ?, ?, ?)`,
+                    [
+                        orderId,
+                        orderSummary.totals.rentalTotal,
+                        payment.id,
+                        'Mietanteil der Initialzahlung'
+                    ]
+                );
+
+                await connection.execute(
+                    `INSERT INTO rental_order_payments
+     (order_id, order_item_id, payment_type, payment_method, payment_status, amount, mollie_payment_id, note)
+     VALUES (?, NULL, 'deposit', 'online', 'pending', ?, ?, ?)`,
+                    [
+                        orderId,
+                        orderSummary.totals.depositTotal,
+                        payment.id,
+                        'Kautionsanteil der Initialzahlung'
                     ]
                 );
 
