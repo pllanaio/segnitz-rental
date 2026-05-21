@@ -2489,14 +2489,30 @@ LIMIT 1`,
             depositDecision === 'refund'
         ) {
 
+            const [existingRefunds] = await connection.execute(
+                `SELECT id
+     FROM rental_order_payments
+     WHERE order_item_id = ?
+     AND payment_type = 'deposit_refund'
+     AND payment_status = 'paid'
+     LIMIT 1`,
+                [req.params.itemId]
+            );
+
+            if (existingRefunds.length > 0) {
+                throw new Error(
+                    'Für diesen Artikel wurde die Kaution bereits erstattet.'
+                );
+            }
             const [payments] = await connection.execute(
                 `SELECT mollie_payment_id
-         FROM rental_order_payments
-         WHERE order_id = ?
-         AND payment_status = 'paid'
-         AND mollie_payment_id IS NOT NULL
-         ORDER BY id ASC
-         LIMIT 1`,
+FROM rental_order_payments
+WHERE order_id = ?
+AND payment_type = 'rental'
+AND payment_status = 'paid'
+AND mollie_payment_id IS NOT NULL
+ORDER BY id ASC
+LIMIT 1`,
                 [item.order_id]
             );
 
@@ -2531,6 +2547,7 @@ LIMIT 1`,
                     payment_status,
                     amount,
                     mollie_payment_id,
+                    mollie_refund_id,
                     note,
                     paid_at
                 )
@@ -2540,6 +2557,7 @@ LIMIT 1`,
                             item.order_id,
                             req.params.itemId,
                             -Math.abs(calculatedDepositRefundAmount),
+                            originalPaymentId,
                             refund.id,
                             'Kaution automatisch erstattet'
                         ]
