@@ -1178,6 +1178,71 @@ function renderOrderPayments(order) {
     `;
 }
 
+
+function openManualPaymentModal(orderId, orderItemId, paymentType, amount) {
+    document.getElementById('manualPaymentOrderId').value = orderId;
+    document.getElementById('manualPaymentOrderItemId').value = orderItemId || '';
+    document.getElementById('manualPaymentType').value = paymentType;
+    document.getElementById('manualPaymentAmount').value = Number(amount || 0).toFixed(2);
+    document.getElementById('manualPaymentNote').value = '';
+
+    const modal = new bootstrap.Modal(document.getElementById('manualPaymentModal'));
+    modal.show();
+}
+
+async function submitManualPayment() {
+    const orderId = document.getElementById('manualPaymentOrderId').value;
+    const orderItemId = document.getElementById('manualPaymentOrderItemId').value;
+    const paymentType = document.getElementById('manualPaymentType').value;
+    const amount = Number(document.getElementById('manualPaymentAmount').value);
+    const note = document.getElementById('manualPaymentNote').value.trim();
+
+    if (!orderId || !paymentType || !amount || amount <= 0) {
+        showAlert('Bitte gültige Zahlungsdaten eingeben.', 'warning');
+        return;
+    }
+
+    try {
+        const response = await fetch('/admin/order-payments/manual', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                orderId,
+                orderItemId: orderItemId || null,
+                paymentType,
+                amount,
+                note
+            })
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+            showAlert(result.error || 'Zahlung konnte nicht erfasst werden.', 'danger');
+            return;
+        }
+
+        bootstrap.Modal.getInstance(document.getElementById('manualPaymentModal'))?.hide();
+
+        showAlert(result.message || 'Zahlung wurde erfasst.', 'success');
+
+        const detailsResponse = await fetch(`/admin/orders/${orderId}`);
+        const updatedOrder = await detailsResponse.json();
+
+        if (detailsResponse.ok) {
+            renderOrderDetails(updatedOrder);
+        }
+
+        await loadOrders();
+
+    } catch (error) {
+        console.error('Fehler beim Erfassen der Barzahlung:', error);
+        showAlert('Zahlung konnte nicht erfasst werden.', 'danger');
+    }
+}
+
 function formatPaymentType(type) {
     const labels = {
         rental: 'Miete',
@@ -2221,70 +2286,6 @@ async function markOrderPickedUp(orderId) {
     }
 
     setTimeout(restoreOrderDetailsModalLayer, 300);
-}
-
-function openManualPaymentModal(orderId, orderItemId, paymentType, amount) {
-    document.getElementById('manualPaymentOrderId').value = orderId;
-    document.getElementById('manualPaymentOrderItemId').value = orderItemId || '';
-    document.getElementById('manualPaymentType').value = paymentType;
-    document.getElementById('manualPaymentAmount').value = Number(amount || 0).toFixed(2);
-    document.getElementById('manualPaymentNote').value = '';
-
-    const modal = new bootstrap.Modal(document.getElementById('manualPaymentModal'));
-    modal.show();
-}
-
-async function submitManualPayment() {
-    const orderId = document.getElementById('manualPaymentOrderId').value;
-    const orderItemId = document.getElementById('manualPaymentOrderItemId').value;
-    const paymentType = document.getElementById('manualPaymentType').value;
-    const amount = Number(document.getElementById('manualPaymentAmount').value);
-    const note = document.getElementById('manualPaymentNote').value.trim();
-
-    if (!orderId || !paymentType || !amount || amount <= 0) {
-        showAlert('Bitte gültige Zahlungsdaten eingeben.', 'warning');
-        return;
-    }
-
-    try {
-        const response = await fetch('/admin/order-payments/manual', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                orderId,
-                orderItemId: orderItemId || null,
-                paymentType,
-                amount,
-                note
-            })
-        });
-
-        const result = await response.json();
-
-        if (!response.ok) {
-            showAlert(result.error || 'Zahlung konnte nicht erfasst werden.', 'danger');
-            return;
-        }
-
-        bootstrap.Modal.getInstance(document.getElementById('manualPaymentModal'))?.hide();
-
-        showAlert(result.message || 'Zahlung wurde erfasst.', 'success');
-
-        const detailsResponse = await fetch(`/admin/orders/${orderId}`);
-        const updatedOrder = await detailsResponse.json();
-
-        if (detailsResponse.ok) {
-            renderOrderDetails(updatedOrder);
-        }
-
-        await loadOrders();
-
-    } catch (error) {
-        console.error('Fehler beim Erfassen der Barzahlung:', error);
-        showAlert('Zahlung konnte nicht erfasst werden.', 'danger');
-    }
 }
 
 function logout() {
