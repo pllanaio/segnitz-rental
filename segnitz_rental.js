@@ -36,7 +36,8 @@ const {
     sendOrderCancelledEmail,
     sendItemCancelledEmail,
     sendRentalAdjustmentEmailWithPayment,
-    sendReturnAdditionalChargeEmail
+    sendReturnAdditionalChargeEmail,
+    sendPaymentReceiptEmail
 } = require('./services/mailService');
 
 const {
@@ -530,6 +531,17 @@ app.post('/data', async (req, res) => {
             });
 
             await connection.execute(
+                `INSERT INTO rental_order_payments
+     (order_id, order_item_id, payment_type, payment_method, payment_status, amount, mollie_payment_id)
+     VALUES (?, NULL, 'rental', 'online', 'pending', ?, ?)`,
+                [
+                    orderId,
+                    orderSummary.totals.grandTotalBeforeDepositReturn,
+                    payment.id
+                ]
+            );
+
+            await connection.execute(
                 `UPDATE rental_orders
          SET payment_method = 'online',
              payment_status = 'pending',
@@ -564,6 +576,16 @@ app.post('/data', async (req, res) => {
          payment_status = 'pending'
      WHERE id = ?`,
             [orderId]
+        );
+
+        await connection.execute(
+            `INSERT INTO rental_order_payments
+     (order_id, order_item_id, payment_type, payment_method, payment_status, amount)
+     VALUES (?, NULL, 'rental', 'cash', 'pending', ?)`,
+            [
+                orderId,
+                orderSummary.totals.grandTotalBeforeDepositReturn
+            ]
         );
 
         const customerOrderEmail =
@@ -2920,6 +2942,80 @@ app.get('/orders/:id/payment-status', async (req, res) => {
     }
 });
 
+app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
+    const {
+        orderId,
+        orderItemId,
+        paymentType,
+        amount,
+        note
+    } = req.body;
+
+    if (!orderId || !paymentType || !amount || Number(amount) <= 0) {
+        return res.status(400).json({ error: 'Ungültige Zahlungsdaten.' });
+    }
+
+    let connection;
+
+    try {
+        connection = await mysql.createConnection(dbConfig);
+
+        const recordedByUserId = await getUserIdByEmail(connection, req.session.user);
+
+        const [orders] = await connection.execute(
+            `SELECT id, order_no, customer_email
+             FROM rental_orders
+             WHERE id = ?
+             LIMIT 1`,
+            [orderId]
+        );
+
+        if (orders.length === 0) {
+            return res.status(404).json({ error: 'Bestellung nicht gefunden.' });
+        }
+
+        await connection.execute(
+            `INSERT INTO rental_order_payments
+             (order_id, order_item_id, payment_type, payment_method, payment_status, amount, paid_at, recorded_by_user_id, note)
+             VALUES (?, ?, ?, 'cash', 'paid', ?, NOW(), ?, ?)`,
+            [
+                orderId,
+                orderItemId || null,
+                paymentType,
+                Number(amount),
+                recordedByUserId,
+                note || null
+            ]
+        );
+
+        if (paymentType === 'rental') {
+            await connection.execute(
+                `UPDATE rental_orders
+                 SET payment_method = 'cash',
+                     payment_status = 'paid',
+                     paid_at = NOW()
+                 WHERE id = ?`,
+                [orderId]
+            );
+        }
+
+        await sendPaymentReceiptEmail(orders[0], {
+            amount: Number(amount),
+            payment_type: paymentType,
+            payment_method: 'cash',
+            note
+        });
+
+        res.json({ message: 'Barzahlung wurde erfasst und Quittung versendet.' });
+
+    } catch (error) {
+        console.error('Fehler beim Erfassen der Barzahlung:', error);
+        res.status(500).json({ error: 'Zahlung konnte nicht erfasst werden.' });
+    } finally {
+        if (connection) await connection.end();
+    }
+});
+
 app.post('/webhooks/mollie', async (req, res) => {
     let connection;
 
@@ -2933,6 +3029,32 @@ app.post('/webhooks/mollie', async (req, res) => {
         const payment = await getMolliePayment(paymentId);
 
         connection = await mysql.createConnection(dbConfig);
+
+        const mappedPaymentStatus =
+            payment.status === 'paid'
+                ? 'paid'
+                : payment.status === 'failed'
+                    ? 'failed'
+                    : payment.status === 'canceled'
+                        ? 'cancelled'
+                        : payment.status === 'expired'
+                            ? 'expired'
+                            : 'pending';
+
+        await connection.execute(
+            `UPDATE rental_order_payments
+     SET payment_status = ?,
+         paid_at = CASE
+            WHEN ? = 'paid' THEN NOW()
+            ELSE paid_at
+         END
+     WHERE mollie_payment_id = ?`,
+            [
+                mappedPaymentStatus,
+                mappedPaymentStatus,
+                payment.id
+            ]
+        );
 
         const [orders] = await connection.execute(
             `SELECT id, status, order_confirmation_sent_at

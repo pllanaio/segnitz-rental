@@ -348,6 +348,37 @@ async function sendReturnAdditionalChargeEmail(order, item, paymentUrl, amountDu
     });
 }
 
+async function sendPaymentReceiptEmail(order, payment) {
+    const paymentTypeLabels = {
+        rental: 'Miete / ursprünglicher Mietauftrag',
+        rental_adjustment: 'Nachzahlung wegen Mietzeitraumänderung',
+        return_additional_charge: 'Nachzahlung aus Rückgabe'
+    };
+
+    await sendGraphMail({
+        to: order.customer_email,
+        subject: `Zahlungsbestätigung zu Mietauftrag ${order.order_no}`,
+        html: `
+            <h2>Zahlung erhalten</h2>
+
+            <p>
+                Wir haben Ihre Zahlung zu Mietauftrag
+                <strong>${escapeHtml(order.order_no)}</strong> erhalten.
+            </p>
+
+            <p>
+                Betrag: <strong>${Number(payment.amount).toFixed(2)} €</strong><br>
+                Zahlungsart: <strong>${payment.payment_method === 'cash' ? 'Barzahlung vor Ort' : 'Onlinezahlung'}</strong><br>
+                Zweck: <strong>${escapeHtml(paymentTypeLabels[payment.payment_type] || payment.payment_type)}</strong>
+            </p>
+
+            ${payment.note ? `<p>Hinweis: ${escapeHtml(payment.note)}</p>` : ''}
+
+            <p>Vielen Dank.</p>
+        `
+    });
+}
+
 module.exports = {
     escapeHtml,
     sendOrderEmail,
@@ -358,5 +389,6 @@ module.exports = {
     sendOrderCancelledEmail,
     sendItemCancelledEmail,
     sendRentalAdjustmentEmailWithPayment,
-    sendReturnAdditionalChargeEmail
+    sendReturnAdditionalChargeEmail,
+    sendPaymentReceiptEmail
 };
