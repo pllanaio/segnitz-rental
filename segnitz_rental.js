@@ -63,11 +63,7 @@ const {
     createMolliePaymentForOrder,
     getMolliePayment,
     createMollieRefundForPayment,
-    getMollieCheckoutUrl,
-    createMollieCustomer,
-    createMollieFirstPaymentForOrder,
-    createMollieRecurringPayment,
-    getMollieCustomerMandates
+    getMollieCheckoutUrl
 } = require('./services/mollieService');
 
 
@@ -531,50 +527,11 @@ app.post('/data', async (req, res) => {
 
         if (paymentMethod === 'online') {
 
-            let mollieCustomerId = null;
-
-            if (email) {
-                const [users] = await connection.execute(
-                    `SELECT id, mollie_customer_id
-         FROM users
-         WHERE username = ?
-         LIMIT 1`,
-                    [email]
-                );
-
-                if (users.length > 0 && users[0].mollie_customer_id) {
-                    mollieCustomerId = users[0].mollie_customer_id;
-                } else {
-                    const customer = await createMollieCustomer({
-                        email,
-                        name: `${firstName || ''} ${lastName || ''}`.trim() || email
-                    });
-
-                    mollieCustomerId = customer.id;
-
-                    if (users.length > 0) {
-                        await connection.execute(
-                            `UPDATE users
-                 SET mollie_customer_id = ?
-                 WHERE id = ?`,
-                            [mollieCustomerId, users[0].id]
-                        );
-                    }
-                }
-            }
-
-            const payment = mollieCustomerId
-                ? await createMollieFirstPaymentForOrder({
-                    id: orderId,
-                    orderNo,
-                    totalAmount: orderSummary.totals.grandTotalBeforeDepositReturn,
-                    customerId: mollieCustomerId
-                })
-                : await createMolliePaymentForOrder({
-                    id: orderId,
-                    orderNo,
-                    totalAmount: orderSummary.totals.grandTotalBeforeDepositReturn
-                });
+            const payment = await createMolliePaymentForOrder({
+                id: orderId,
+                orderNo,
+                totalAmount: orderSummary.totals.grandTotalBeforeDepositReturn
+            });
 
             await connection.execute(
                 `INSERT INTO rental_order_payments
@@ -617,11 +574,9 @@ app.post('/data', async (req, res) => {
          SET payment_method = 'online',
              payment_status = 'pending',
              mollie_payment_id = ?,
-             mollie_customer_id = ?
          WHERE id = ?`,
                 [
                     payment.id,
-                    mollieCustomerId,
                     orderId
                 ]
             );
@@ -2672,68 +2627,11 @@ LIMIT 1`,
             }
         }
 
-        const [mandateRows] = await connection.execute(
-            `SELECT mollie_customer_id, mollie_mandate_id
-     FROM rental_orders
-     WHERE id = ?
-     LIMIT 1`,
-            [item.order_id]
-        );
-
         if (normalizedAdditionalChargeAmount && normalizedAdditionalChargeAmount > 0) {
             try {
 
-                if (
-                    mandateRows.length > 0 &&
-                    mandateRows[0].mollie_customer_id &&
-                    mandateRows[0].mollie_mandate_id
-                ) {
-
-                    const payment =
-                        await createMollieRecurringPayment({
-                            customerId:
-                                mandateRows[0].mollie_customer_id,
-
-                            mandateId:
-                                mandateRows[0].mollie_mandate_id,
-
-                            orderId: item.order_id,
-                            orderNo: item.order_no,
-                            itemId: req.params.itemId,
-
-                            amount:
-                                normalizedAdditionalChargeAmount,
-
-                            description:
-                                `Automatische Nachbelastung Rückgabe ${item.order_no}`,
-
-                            type: 'return_additional_charge'
-                        });
-
-                    await connection.execute(
-                        `INSERT INTO rental_order_payments
-         (
-            order_id,
-            order_item_id,
-            payment_type,
-            payment_method,
-            payment_status,
-            amount,
-            mollie_payment_id,
-            note
-         )
-         VALUES
-         (?, ?, 'return_additional_charge',
-          'online', 'pending', ?, ?, ?)`,
-                        [
-                            item.order_id,
-                            req.params.itemId,
-                            normalizedAdditionalChargeAmount,
-                            payment.id,
-                            'Automatische Nachbelastung über Mollie Mandate'
-                        ]
-                    );
-
+                
+                
                 } else {
 
                     const payment = await createMolliePaymentForOrder({
