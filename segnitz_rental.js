@@ -529,39 +529,40 @@ app.post('/data', async (req, res) => {
 
         console.log('Payment-Methode Backend:', paymentMethod);
 
-        let mollieCustomerId = null;
+        if (paymentMethod === 'online') {
 
-        if (email) {
-            const [users] = await connection.execute(
-                `SELECT id, mollie_customer_id
+            let mollieCustomerId = null;
+
+            if (email) {
+                const [users] = await connection.execute(
+                    `SELECT id, mollie_customer_id
          FROM users
          WHERE username = ?
          LIMIT 1`,
-                [email]
-            );
+                    [email]
+                );
 
-            if (users.length > 0 && users[0].mollie_customer_id) {
-                mollieCustomerId = users[0].mollie_customer_id;
-            } else {
-                const customer = await createMollieCustomer({
-                    email,
-                    name: `${firstName || ''} ${lastName || ''}`.trim() || email
-                });
+                if (users.length > 0 && users[0].mollie_customer_id) {
+                    mollieCustomerId = users[0].mollie_customer_id;
+                } else {
+                    const customer = await createMollieCustomer({
+                        email,
+                        name: `${firstName || ''} ${lastName || ''}`.trim() || email
+                    });
 
-                mollieCustomerId = customer.id;
+                    mollieCustomerId = customer.id;
 
-                if (users.length > 0) {
-                    await connection.execute(
-                        `UPDATE users
+                    if (users.length > 0) {
+                        await connection.execute(
+                            `UPDATE users
                  SET mollie_customer_id = ?
                  WHERE id = ?`,
-                        [mollieCustomerId, users[0].id]
-                    );
+                            [mollieCustomerId, users[0].id]
+                        );
+                    }
                 }
             }
-        }
 
-        if (paymentMethod === 'online') {
             const payment = mollieCustomerId
                 ? await createMollieFirstPaymentForOrder({
                     id: orderId,
@@ -620,6 +621,7 @@ app.post('/data', async (req, res) => {
          WHERE id = ?`,
                 [
                     payment.id,
+                    mollieCustomerId,
                     orderId
                 ]
             );
@@ -2779,17 +2781,6 @@ LIMIT 1`,
                         additionalChargeReason
                     );
                 }
-
-                await sendReturnAdditionalChargeEmail(
-                    {
-                        order_no: item.order_no,
-                        customer_email: item.customer_email
-                    },
-                    item,
-                    checkoutUrl,
-                    normalizedAdditionalChargeAmount,
-                    additionalChargeReason
-                );
             } catch (mailError) {
                 console.error('Rückgabe gespeichert, aber Nachzahlungs-Mail fehlgeschlagen:', mailError);
             }
