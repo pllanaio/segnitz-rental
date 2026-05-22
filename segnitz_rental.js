@@ -522,8 +522,6 @@ app.post('/data', async (req, res) => {
             );
         }
 
-        await connection.commit();
-
         const paymentMethod =
             req.body.paymentMethod === 'online'
                 ? 'online'
@@ -600,6 +598,8 @@ WHERE id = ?`,
                 ]
             );
 
+            await connection.commit();
+
             const checkoutUrl = getMollieCheckoutUrl(payment);
 
             if (!checkoutUrl) {
@@ -632,6 +632,8 @@ WHERE id = ?`,
                 'Mietanteil bei Barzahlung'
             ]
         );
+
+        await connection.commit();
 
         if (Number(orderSummary.totals.depositTotal || 0) > 0) {
             await connection.execute(
@@ -2213,7 +2215,9 @@ app.put('/admin/order-items/:itemId/rental-adjustment', checkAdmin, async (req, 
     roi.item_status,
     p.title,
     ro.order_no,
-    ro.customer_email
+    ro.customer_email,
+    ro.mollie_customer_id,
+ro.mollie_mandate_id,
 FROM rental_order_items roi
 JOIN rental_orders ro ON ro.id = roi.order_id
 JOIN rental_products p ON p.id = roi.product_id
