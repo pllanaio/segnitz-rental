@@ -540,7 +540,7 @@ app.post('/data', async (req, res) => {
                 }
             });
 
-            const payment = await createFirstMolliePayment({
+            const payment = await createMolliePaymentForOrder({
                 id: orderId,
                 orderNo,
                 customerId: customer.id,
@@ -2629,7 +2629,7 @@ END
 
         if (
             calculatedDepositRefundAmount > 0 &&
-            depositDecision === 'refund'
+            ['full_refund', 'partial_refund'].includes(depositDecision)
         ) {
 
             const [existingRefunds] = await connection.execute(
