@@ -656,7 +656,7 @@ function renderOrderItemCard(order, item) {
                             class="btn btn-outline-primary btn-sm"
                             ${canEdit ? '' : 'disabled'}
                             onclick="openRentalPeriodModal(${order.id}, ${item.id})">
-                            Zeitraum ändern
+                            Mietzeitraum verlängern
                         </button>
 
                         <button type="button"
@@ -1152,23 +1152,29 @@ function renderItemPayments(order, item) {
         payment.paymentType === 'return_additional_charge'
     );
 
-    const rentalCashPaid = itemPayments.some(payment =>
+    const rentalPaid = itemPayments.some(payment =>
         payment.paymentType === 'rental' &&
-        payment.paymentMethod === 'cash' &&
         payment.paymentStatus === 'paid'
-    );
+    ) || (
+            String(order.payment_status || '').toLowerCase() === 'paid' &&
+            String(order.payment_method || '').toLowerCase() === 'online'
+        );
+
+    const rentalPaidLabel = String(order.payment_method || '').toLowerCase() === 'online'
+        ? 'Online bezahlt'
+        : 'Bezahlt';
 
     return `
         <div class="mt-3 p-3 border rounded bg-white">
             <strong>Zahlungen</strong><br>
 
             Miete:
-            ${rentalCashPaid
-                ? '<span class="badge bg-success">Bar bezahlt</span>'
-                : '<span class="badge bg-warning">Nicht bar verbucht</span>'
-            }
+${rentalPaid
+            ? `<span class="badge bg-success">${rentalPaidLabel}</span>`
+            : '<span class="badge bg-warning">Nicht bezahlt</span>'
+        }
 
-            ${!rentalCashPaid ? `
+${!rentalPaid ? `
                 <button type="button"
                     class="btn btn-outline-success btn-sm ms-2"
                     onclick="openManualPaymentModal(
@@ -1185,9 +1191,9 @@ function renderItemPayments(order, item) {
 
             Mietzeitraum-Nachzahlung:
             ${rentalAdjustment
-                ? formatPaymentStatusBadge(rentalAdjustment.paymentStatus)
-                : '<span class="badge bg-secondary">Keine</span>'
-            }
+            ? formatPaymentStatusBadge(rentalAdjustment.paymentStatus)
+            : '<span class="badge bg-secondary">Keine</span>'
+        }
 
             ${rentalAdjustment && rentalAdjustment.paymentStatus !== 'paid' ? `
                 <button type="button"
@@ -1206,9 +1212,9 @@ function renderItemPayments(order, item) {
 
             Rückgabe-Nachzahlung:
             ${returnCharge
-                ? formatPaymentStatusBadge(returnCharge.paymentStatus)
-                : '<span class="badge bg-secondary">Keine</span>'
-            }
+            ? formatPaymentStatusBadge(returnCharge.paymentStatus)
+            : '<span class="badge bg-secondary">Keine</span>'
+        }
 
             ${returnCharge && returnCharge.paymentStatus !== 'paid' ? `
                 <button type="button"
@@ -1495,7 +1501,7 @@ function openRentalPeriodModal(orderId, itemId) {
 
     updateRentalPeriodPreview();
 
-    ['rentalPeriodStart', 'rentalPeriodEnd', 'rentalPeriodPricePerDay'].forEach(id => {
+    ['rentalPeriodEnd'].forEach(id => {
         const element = document.getElementById(id);
         element.oninput = updateRentalPeriodPreview;
         element.onchange = updateRentalPeriodPreview;
@@ -1505,15 +1511,36 @@ function openRentalPeriodModal(orderId, itemId) {
 }
 
 function updateRentalPeriodPreview() {
-    const start = document.getElementById('rentalPeriodStart').value;
+    const itemId = document.getElementById('rentalPeriodItemId').value;
+    const item = findCurrentOrderItem(itemId);
+
+    if (!item) return;
+
+    const start = document.getElementById('rentalPeriodStart').value || item.rentalStart;
     const end = document.getElementById('rentalPeriodEnd').value;
-    const price = Number(normalizeDecimalInput(document.getElementById('rentalPeriodPricePerDay').value) || 0);
-    const days = calculateRentalDays(start, end);
-    const total = days * price;
+    const price = Number(item.adjustedPricePerDay || item.pricePerDay || 0);
+
+    document.getElementById('rentalPeriodPricePerDay').value = price.toFixed(2);
+
+    const originalDays = calculateRentalDays(item.rentalStart, item.rentalEnd);
+    const newDays = calculateRentalDays(start, end);
+
+    const originalTotal = originalDays * Number(item.pricePerDay || 0);
+    const newTotal = newDays * price;
+    const difference = Math.max(newTotal - originalTotal, 0);
+
+    const originalEnd = new Date(item.adjustedRentalEnd || item.rentalEnd);
+    const selectedEnd = new Date(end);
+
+    const warning = end && selectedEnd <= originalEnd
+        ? '<div class="text-danger mt-2">Das neue Mietende muss nach dem bisherigen Mietende liegen.</div>'
+        : '';
 
     document.getElementById('rentalPeriodPreview').innerHTML = `
-        Tage: ${days}<br>
-        Gesamt netto: ${total.toFixed(2)} €
+        Ursprünglicher Preis: ${originalTotal.toFixed(2)} € inkl. MwSt.<br>
+        Preis nach Verlängerung: ${newTotal.toFixed(2)} € inkl. MwSt.<br>
+        Kunde muss zusätzlich zahlen: <strong>${difference.toFixed(2)} € inkl. MwSt.</strong>
+        ${warning}
     `;
 }
 
@@ -1649,14 +1676,10 @@ function applyOrderItemReturnModalRules(triggerSource = 'auto') {
     const isLateInput = document.getElementById('returnIsLate');
     const returnStatusInput = document.getElementById('returnStatus');
     const depositDecisionInput = document.getElementById('returnDepositDecision');
-    const deductionPercentInput = document.getElementById('returnDepositDeductionPercent');
     const refundAmountInput = document.getElementById('returnDepositRefundAmount');
+    const deductionPercentInput = document.getElementById('returnDepositDeductionPercent');
     const deductionReasonInput = document.getElementById('returnDepositDeductionReason');
 
-    /*
-     * Rückgabe nach Mietende muss immer als verspätet gelten.
-     * Das gilt auch beim Speichern, nicht nur beim Datumswechsel.
-     */
     const lateDays = calculateLateDays(actualReturnDate, adjustedEnd);
 
     if (lateDays > 0) {
@@ -1665,87 +1688,63 @@ function applyOrderItemReturnModalRules(triggerSource = 'auto') {
 
     const isLate = isLateInput.checked;
     const isDamaged = isDamagedInput.checked;
-
-    /*
-     * Status ausschließlich aus Checkboxen ableiten
-     */
-    if (isDamaged && isLate) {
-        returnStatusInput.value = 'returned_late_damaged';
-        depositDecisionInput.value = 'no_refund';
-        deductionPercentInput.value = 100;
-
-    } else if (isDamaged) {
-        returnStatusInput.value = 'returned_damaged';
-        depositDecisionInput.value = 'no_refund';
-        deductionPercentInput.value = 100;
-
-    } else if (isLate) {
-        returnStatusInput.value = 'returned_late';
-        depositDecisionInput.value = 'full_refund';
-        deductionPercentInput.value = 0;
-
-    } else {
-        returnStatusInput.value = 'returned_ok';
-        depositDecisionInput.value = 'full_refund';
-        deductionPercentInput.value = 0;
-    }
-
-    if (depositDecisionInput.value === 'full_refund') {
-        deductionPercentInput.value = 0;
-    }
-
-    if (depositDecisionInput.value === 'no_refund') {
-        deductionPercentInput.value = 100;
-    }
-
+    const repairCosts = Number(
+        normalizeDecimalInput(document.getElementById('returnAdditionalChargeAmount').value) || 0
+    );
     const deposit = Number(item.deposit || 0);
-    const deductionPercent = Number(deductionPercentInput.value || 0);
 
-    const refundAmount = Math.max(
-        deposit - (deposit * deductionPercent / 100),
-        0
-    );
+    let returnStatus = 'returned_ok';
 
+    if (isDamaged && isLate) {
+        returnStatus = 'returned_late_damaged';
+    } else if (isDamaged) {
+        returnStatus = 'returned_damaged';
+    } else if (isLate) {
+        returnStatus = 'returned_late';
+    }
+
+    const refundAmount = isDamaged
+        ? Math.max(deposit - repairCosts, 0)
+        : deposit;
+
+    const retainedAmount = Math.max(deposit - refundAmount, 0);
+    const customerAdditionalDue = isDamaged
+        ? Math.max(repairCosts - deposit, 0)
+        : 0;
+
+    returnStatusInput.value = returnStatus;
+    depositDecisionInput.value = refundAmount > 0 ? 'full_refund' : 'no_refund';
     refundAmountInput.value = refundAmount.toFixed(2);
+    deductionPercentInput.value = deposit > 0
+        ? ((retainedAmount / deposit) * 100).toFixed(2)
+        : 0;
+    deductionReasonInput.value = isDamaged
+        ? 'Reparaturkosten mit Kaution verrechnet'
+        : '';
 
-    const reasons = [];
-
-    if (isDamaged) reasons.push('Beschädigt');
-    if (isLate) reasons.push('Verspätet');
-
-    deductionReasonInput.value = reasons.join(', ');
-
-    const start = document.getElementById('returnAdjustedStart').value || item.rentalStart;
-    const end = document.getElementById('returnAdjustedEnd').value || actualReturnDate || item.rentalEnd;
-
-    const price = Number(
-        normalizeDecimalInput(document.getElementById('returnPricePerDay').value) || 0
-    );
-
-    const days = calculateRentalDays(start, end);
-    const net = days * price;
-    const gross = net * 1.19;
-
-    const additionalCharge = Number(
-        normalizeDecimalInput(
-            document.getElementById('returnAdditionalChargeAmount').value
-        ) || 0
-    );
+    document.getElementById('returnPricePerDay').value =
+        Number(item.adjustedPricePerDay || item.pricePerDay || 0).toFixed(2);
 
     document.getElementById('returnPricePreview').innerHTML = `
-        <strong>Preisübersicht für diesen Artikel</strong><br>
-        Miettage: ${days}<br>
-        Miete netto: ${net.toFixed(2)} €<br>
-        Miete brutto: ${gross.toFixed(2)} €<hr>
-
+        <strong>Rückgabe-Abrechnung</strong><br>
+        Status: ${formatReturnStatusLabel(returnStatus)}<br>
         Kaution: ${deposit.toFixed(2)} €<br>
-        Kaution zurück: ${refundAmount.toFixed(2)} €<br>
-        Kaution einbehalten: ${(deposit - refundAmount).toFixed(2)} €<hr>
-
-        Zusätzliche Reparaturkosten: ${additionalCharge.toFixed(2)} €<br>
-        Kunde zusätzlich zu zahlen: ${additionalCharge.toFixed(2)} €<br>
-        Kunde erhält zurück: ${refundAmount.toFixed(2)} €
+        Reparaturkosten: ${repairCosts.toFixed(2)} €<br>
+        Kaution zurück: <span class="text-success">${refundAmount.toFixed(2)} €</span><br>
+        Mit Kaution verrechnet: <span class="text-danger">${retainedAmount.toFixed(2)} €</span><br>
+        Kunde muss zusätzlich zahlen: <strong>${customerAdditionalDue.toFixed(2)} €</strong>
     `;
+}
+
+function formatReturnStatusLabel(status) {
+    const labels = {
+        returned_ok: 'Ordnungsgemäß zurückgegeben',
+        returned_late: 'Verspätet zurückgegeben',
+        returned_damaged: 'Beschädigt zurückgegeben',
+        returned_late_damaged: 'Verspätet und beschädigt'
+    };
+
+    return labels[status] || status || '-';
 }
 
 async function saveOrderItemRentalAdjustment(itemId, orderId) {
@@ -1821,7 +1820,7 @@ async function saveOrderItemReturn(itemId, orderId) {
         additionalChargeAmount: normalizeDecimalInput(
             document.getElementById('returnAdditionalChargeAmount').value
         ),
-        additionalChargePaymentMethod: document.getElementById('returnAdditionalChargePaymentMethod').value,
+        additionalChargePaymentMethod: 'online',
         returnNotes: document.getElementById('returnNotes').value.trim()
 
     };

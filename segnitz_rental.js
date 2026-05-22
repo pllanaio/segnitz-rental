@@ -1332,7 +1332,7 @@ app.post('/my-orders/:id/cancel', async (req, res) => {
         await connection.beginTransaction();
 
         const [orders] = await connection.execute(
-            `SELECT ro.id, ro.status, ro.customer_email
+            `SELECT ro.id, ro.status, ro.customer_email, MIN(roi.rental_start) AS firstRentalStart
              FROM rental_orders ro
              JOIN rental_order_items roi ON roi.order_id = ro.id
              WHERE ro.id = ?
@@ -1362,6 +1362,13 @@ app.post('/my-orders/:id/cancel', async (req, res) => {
             await connection.rollback();
             return res.status(400).json({
                 error: 'Diese Bestellung wurde bereits abgeholt und kann nicht mehr storniert werden.'
+            });
+        }
+
+        if (order.firstRentalStart && new Date(order.firstRentalStart) <= new Date(new Date().toISOString().slice(0, 10))) {
+            await connection.rollback();
+            return res.status(400).json({
+                error: 'Diese Bestellung kann am Tag des Mietbeginns nicht mehr vom Kunden storniert werden.'
             });
         }
 
@@ -1480,6 +1487,13 @@ app.post('/my-orders/:orderId/items/:itemId/cancel', async (req, res) => {
             await connection.rollback();
             return res.status(400).json({
                 error: 'Dieser Artikel kann nicht mehr storniert werden.'
+            });
+        }
+
+        if (item.rental_start && new Date(item.rental_start) <= new Date(new Date().toISOString().slice(0, 10))) {
+            await connection.rollback();
+            return res.status(400).json({
+                error: 'Dieser Artikel kann am Tag des Mietbeginns nicht mehr vom Kunden storniert werden.'
             });
         }
 
@@ -2278,76 +2292,42 @@ LIMIT 1`,
         const originalTotal = originalDays * Number(item.price_per_day || 0);
         const amountDue = Math.max(adjustedRentalTotal - originalTotal, 0);
 
-                let paymentUrl = null;
+        let paymentUrl = null;
 
-        if (amountDue > 0) {
+if (amountDue > 0) {
+    const payment = await createMolliePaymentForOrder({
+        id: item.order_id,
+        orderNo: item.order_no,
+        totalAmount: amountDue,
+        description: `Nachzahlung Mietzeitraum ${item.order_no}`,
+        type: 'rental_adjustment',
+        itemId: req.params.itemId,
+        redirectUrl: `${process.env.BASE_URL.replace(/\/$/, '')}/index.html?payment=extension&orderId=${encodeURIComponent(item.order_id)}`
+    });
 
-            if (paymentMethod === 'cash') {
+    await connection.execute(
+        `INSERT INTO rental_order_payments
+        (
+            order_id,
+            order_item_id,
+            payment_type,
+            payment_method,
+            payment_status,
+            amount,
+            mollie_payment_id
+        )
+        VALUES
+        (?, ?, 'rental_adjustment', 'online', 'pending', ?, ?)`,
+        [
+            item.order_id,
+            req.params.itemId,
+            amountDue,
+            payment.id
+        ]
+    );
 
-                const recordedByUserId =
-                    await getUserIdByEmail(connection, req.session.user);
-
-                await connection.execute(
-                    `INSERT INTO rental_order_payments
-                    (
-                        order_id,
-                        order_item_id,
-                        payment_type,
-                        payment_method,
-                        payment_status,
-                        amount,
-                        paid_at,
-                        recorded_by_user_id,
-                        note
-                    )
-                    VALUES
-                    (?, ?, 'rental_adjustment',
-                     'cash', 'paid', ?, NOW(), ?, ?)`,
-                    [
-                        item.order_id,
-                        req.params.itemId,
-                        amountDue,
-                        recordedByUserId,
-                        'Nachzahlung Mietzeitraum vor Ort bezahlt'
-                    ]
-                );
-
-            } else {
-
-                const payment = await createMolliePaymentForOrder({
-                    id: item.order_id,
-                    orderNo: item.order_no,
-                    totalAmount: amountDue,
-                    description: `Nachzahlung Mietzeitraum ${item.order_no}`,
-                    type: 'rental_adjustment',
-                    itemId: req.params.itemId
-                });
-
-                await connection.execute(
-                    `INSERT INTO rental_order_payments
-                    (
-                        order_id,
-                        order_item_id,
-                        payment_type,
-                        payment_method,
-                        payment_status,
-                        amount,
-                        mollie_payment_id
-                    )
-                    VALUES
-                    (?, ?, 'rental_adjustment',
-                     'online', 'pending', ?, ?)`,
-                    [
-                        item.order_id,
-                        req.params.itemId,
-                        amountDue,
-                        payment.id
-                    ]
-                );
-
-                paymentUrl = getMollieCheckoutUrl(payment);
-            }
-        }
+    paymentUrl = getMollieCheckoutUrl(payment);
+}
 
         try {
             await sendRentalAdjustmentEmailWithPayment(
@@ -2371,14 +2351,14 @@ LIMIT 1`,
             adjustedRentalTotal
         });
 
-} catch (error) {
-    console.error('Fehler beim Speichern des angepassten Mietzeitraums:', error);
-    res.status(500).json({
-        error: 'Mietzeitraum konnte nicht gespeichert werden.'
-    });
-} finally {
-    if (connection) await connection.end();
-}
+    } catch (error) {
+        console.error('Fehler beim Speichern des angepassten Mietzeitraums:', error);
+        res.status(500).json({
+            error: 'Mietzeitraum konnte nicht gespeichert werden.'
+        });
+    } finally {
+        if (connection) await connection.end();
+    }
 });
 
 app.put('/admin/order-items/:itemId/return', checkAdmin, async (req, res) => {
