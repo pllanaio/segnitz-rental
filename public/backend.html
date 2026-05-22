@@ -310,7 +310,7 @@
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">Mietzeitraum ändern</h5>
+                    <h5 class="modal-title">Mietzeitraum verlängern</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
 
@@ -328,18 +328,8 @@
                         <input type="date" class="form-control" id="rentalPeriodEnd">
                     </div>
 
-                    <div class="mb-3">
-                        <label class="form-label">Preis pro Tag</label>
-                        <input type="number" step="0.01" min="0" class="form-control" id="rentalPeriodPricePerDay">
-                    </div>
-
-                    <div class="mb-3">
-                        <label class="form-label">Zahlungsart für Nachzahlung</label>
-                        <select class="form-select" id="rentalPeriodPaymentMethod">
-                            <option value="online">Zahlungslink per Mollie senden</option>
-                            <option value="cash">Barzahlung vor Ort erfassen</option>
-                        </select>
-                    </div>
+                    <input type="hidden" id="rentalPeriodPricePerDay">
+                    <input type="hidden" id="rentalPeriodPaymentMethod" value="online">
 
                     <div class="alert alert-secondary mb-0" id="rentalPeriodPreview">
                         Preisvorschau erscheint nach Eingabe.
@@ -349,7 +339,7 @@
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Abbrechen</button>
                     <button type="button" class="btn btn-primary" onclick="submitOrderItemRentalPeriod()">
-                        Mietzeitraum speichern
+                        Verlängerung speichern
                     </button>
                 </div>
             </div>
@@ -411,38 +401,11 @@
                             <input type="date" class="form-control" id="returnAdjustedEnd">
                         </div>
 
-                        <div class="col-12 col-md-4">
-                            <label class="form-label">Preis pro Tag</label>
-                            <input type="number" step="0.01" min="0" class="form-control" id="returnPricePerDay">
-                        </div>
-
-                        <div class="col-12 col-md-4">
-                            <label class="form-label">Rückgabestatus</label>
-                            <select class="form-select" id="returnStatus">
-                                <option value="returned_ok">Ordnungsgemäß zurückgegeben</option>
-                                <option value="returned_late">Verspätet zurückgegeben</option>
-                                <option value="returned_damaged">Beschädigt zurückgegeben</option>
-                                <option value="returned_late_damaged">Verspätet und beschädigt</option>
-                            </select>
-                        </div>
-
-                        <div class="col-12 col-md-4">
-                            <label class="form-label">Kautionsentscheidung</label>
-                            <select class="form-select" id="returnDepositDecision">
-                                <option value="pending">Noch offen</option>
-                                <option value="full_refund">Vollständig zurückzahlen</option>
-                                <option value="partial_refund">Teilweise zurückzahlen</option>
-                                <option value="no_refund">Nicht zurückzahlen</option>
-                            </select>
-                        </div>
-
                         <div class="col-12 col-md-6">
                             <div class="form-check">
                                 <input class="form-check-input" type="checkbox" id="returnIsDamaged">
                                 <label class="form-check-label">Beschädigt</label>
                             </div>
-                            <textarea class="form-control mt-2" id="returnDamageDescription" rows="2"
-                                placeholder="Beschreibung der Beschädigung"></textarea>
                         </div>
 
                         <div class="col-12 col-md-6">
@@ -450,25 +413,6 @@
                                 <input class="form-check-input" type="checkbox" id="returnIsLate">
                                 <label class="form-check-label">Verspätet</label>
                             </div>
-                            <textarea class="form-control mt-2" id="returnLateDescription" rows="2"
-                                placeholder="Beschreibung der Verspätung"></textarea>
-                        </div>
-
-                        <div class="col-12 col-md-4">
-                            <label class="form-label">Kautionsabzug (%)</label>
-                            <input type="number" step="0.01" min="0" max="100" class="form-control"
-                                id="returnDepositDeductionPercent">
-                        </div>
-
-                        <div class="col-12 col-md-4">
-                            <label class="form-label">Rückzahlungsbetrag</label>
-                            <input type="number" step="0.01" min="0" class="form-control"
-                                id="returnDepositRefundAmount">
-                        </div>
-
-                        <div class="col-12 col-md-4">
-                            <label class="form-label">Grund für Abzug</label>
-                            <input type="text" class="form-control" id="returnDepositDeductionReason">
                         </div>
 
                         <div class="col-12 col-md-8">
@@ -481,14 +425,6 @@
                             <label class="form-label">Zusätzlicher Betrag</label>
                             <input type="number" step="0.01" min="0" class="form-control"
                                 id="returnAdditionalChargeAmount">
-                        </div>
-
-                        <div class="col-12 col-md-4">
-                            <label class="form-label">Zahlungsart Zusatzbetrag</label>
-                            <select class="form-select" id="returnAdditionalChargePaymentMethod">
-                                <option value="online">Zahlungslink per Mollie senden</option>
-                                <option value="cash">Barzahlung vor Ort erfassen</option>
-                            </select>
                         </div>
 
                         <div class="col-12">
