@@ -2638,20 +2638,20 @@ LIMIT 1`,
 
                     await connection.execute(
                         `INSERT INTO rental_order_payments
-                (
-                    order_id,
-                    order_item_id,
-                    payment_type,
-                    payment_method,
-                    payment_status,
-                    amount,
-                    mollie_payment_id,
-                    mollie_refund_id,
-                    note,
-                    paid_at
-                )
-                VALUES (?, ?, 'deposit_refund', 'online',
-                        'paid', ?, ?, ?, NOW())`,
+(
+    order_id,
+    order_item_id,
+    payment_type,
+    payment_method,
+    payment_status,
+    amount,
+    mollie_payment_id,
+    mollie_refund_id,
+    note,
+    paid_at
+)
+VALUES (?, ?, 'deposit_refund', 'online',
+        'paid', ?, ?, ?, ?, NOW())`,
                         [
                             item.order_id,
                             req.params.itemId,
@@ -2695,21 +2695,21 @@ LIMIT 1`,
 
         if (customerAdditionalDue > 0) {
 
-                try {
+            try {
 
-                    const payment = await createMolliePaymentForOrder({
-                        id: item.order_id,
-                        orderNo: item.order_no,
-                        totalAmount: customerAdditionalDue,
-                        description: `Nachzahlung Rückgabe ${item.order_no}`,
-                        type: 'return_additional_charge',
-                        itemId: req.params.itemId
-                    });
+                const payment = await createMolliePaymentForOrder({
+                    id: item.order_id,
+                    orderNo: item.order_no,
+                    totalAmount: customerAdditionalDue,
+                    description: `Nachzahlung Rückgabe ${item.order_no}`,
+                    type: 'return_additional_charge',
+                    itemId: req.params.itemId
+                });
 
-                    const checkoutUrl = getMollieCheckoutUrl(payment);
+                const checkoutUrl = getMollieCheckoutUrl(payment);
 
-                    await connection.execute(
-                        `INSERT INTO rental_order_payments
+                await connection.execute(
+                    `INSERT INTO rental_order_payments
      (
         order_id,
         order_item_id,
@@ -2720,33 +2720,33 @@ LIMIT 1`,
         mollie_payment_id
      )
      VALUES (?, ?, 'return_additional_charge', 'online', 'pending', ?, ?)`,
-                        [
-                            item.order_id,
-                            req.params.itemId,
-                            customerAdditionalDue,
-                            payment.id
-                        ]
+                    [
+                        item.order_id,
+                        req.params.itemId,
+                        customerAdditionalDue,
+                        payment.id
+                    ]
+                );
+
+                if (checkoutUrl) {
+                    await sendReturnAdditionalChargeEmail(
+                        {
+                            order_no: item.order_no,
+                            customer_email: item.customer_email
+                        },
+                        item,
+                        checkoutUrl,
+                        customerAdditionalDue,
+                        additionalChargeReason
                     );
+                }
 
-                    if (checkoutUrl) {
-                        await sendReturnAdditionalChargeEmail(
-                            {
-                                order_no: item.order_no,
-                                customer_email: item.customer_email
-                            },
-                            item,
-                            checkoutUrl,
-                            customerAdditionalDue,
-                            additionalChargeReason
-                        );
-                    }
+            } catch (mailError) {
 
-                } catch (mailError) {
-
-                    console.error(
-                        'Rückgabe gespeichert, aber Nachzahlungs-Mail fehlgeschlagen:',
-                        mailError
-                    );
+                console.error(
+                    'Rückgabe gespeichert, aber Nachzahlungs-Mail fehlgeschlagen:',
+                    mailError
+                );
             }
         }
 
