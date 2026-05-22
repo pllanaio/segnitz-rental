@@ -633,8 +633,6 @@ WHERE id = ?`,
             ]
         );
 
-        await connection.commit();
-
         if (Number(orderSummary.totals.depositTotal || 0) > 0) {
             await connection.execute(
                 `INSERT INTO rental_order_payments
@@ -647,6 +645,8 @@ WHERE id = ?`,
                 ]
             );
         }
+
+        await connection.commit();
 
         const customerOrderEmail =
             getFormValue(formData, 'email') ||
@@ -2215,9 +2215,9 @@ app.put('/admin/order-items/:itemId/rental-adjustment', checkAdmin, async (req, 
     roi.item_status,
     p.title,
     ro.order_no,
-    ro.customer_email,
-    ro.mollie_customer_id,
-ro.mollie_mandate_id,
+ro.customer_email,
+ro.mollie_customer_id,
+ro.mollie_mandate_id
 FROM rental_order_items roi
 JOIN rental_orders ro ON ro.id = roi.order_id
 JOIN rental_products p ON p.id = roi.product_id
@@ -2328,28 +2328,60 @@ LIMIT 1`,
 
             } else {
 
-                const payment = await createMolliePaymentForOrder({
-                    id: item.order_id,
-                    orderNo: item.order_no,
-                    totalAmount: amountDue,
-                    description: `Nachzahlung Mietzeitraum ${item.order_no}`,
-                    type: 'rental_adjustment',
-                    itemId: req.params.itemId
-                });
+                let payment;
+                const useRecurring =
+                    item.mollie_customer_id &&
+                    item.mollie_mandate_id;
+
+                if (useRecurring) {
+                    payment = await createRecurringMolliePayment({
+                        id: item.order_id,
+                        orderNo: item.order_no,
+                        customerId: item.mollie_customer_id,
+                        mandateId: item.mollie_mandate_id,
+                        totalAmount: amountDue,
+                        description: `Nachzahlung Mietzeitraum ${item.order_no}`,
+                        type: 'rental_adjustment',
+                        itemId: req.params.itemId
+                    });
+                } else {
+                    payment = await createMolliePaymentForOrder({
+                        id: item.order_id,
+                        orderNo: item.order_no,
+                        totalAmount: amountDue,
+                        description: `Nachzahlung Mietzeitraum ${item.order_no}`,
+                        type: 'rental_adjustment',
+                        itemId: req.params.itemId
+                    });
+
+                    paymentUrl = getMollieCheckoutUrl(payment);
+                }
 
                 await connection.execute(
                     `INSERT INTO rental_order_payments
-             (order_id, order_item_id, payment_type, payment_method, payment_status, amount, mollie_payment_id)
-             VALUES (?, ?, 'rental_adjustment', 'online', 'pending', ?, ?)`,
+         (
+            order_id,
+            order_item_id,
+            payment_type,
+            payment_method,
+            payment_status,
+            amount,
+            mollie_payment_id,
+            mollie_customer_id,
+            mollie_mandate_id,
+            sequence_type
+         )
+         VALUES (?, ?, 'rental_adjustment', 'online', 'pending', ?, ?, ?, ?, ?)`,
                     [
                         item.order_id,
                         req.params.itemId,
                         amountDue,
-                        payment.id
+                        payment.id,
+                        item.mollie_customer_id || null,
+                        item.mollie_mandate_id || null,
+                        useRecurring ? 'recurring' : null
                     ]
                 );
-
-                paymentUrl = getMollieCheckoutUrl(payment);
             }
         }
 
@@ -2419,8 +2451,10 @@ app.put('/admin/order-items/:itemId/return', checkAdmin, async (req, res) => {
     roi.deposit,
     roi.item_status,
     p.title,
-    ro.order_no,
-    ro.customer_email
+ro.order_no,
+ro.customer_email,
+ro.mollie_customer_id,
+ro.mollie_mandate_id
 FROM rental_order_items roi
 JOIN rental_orders ro ON ro.id = roi.order_id
 JOIN rental_products p ON p.id = roi.product_id
@@ -2614,7 +2648,7 @@ END
                 `SELECT mollie_payment_id
 FROM rental_order_payments
 WHERE order_id = ?
-AND payment_type = 'rental'
+AND payment_type IN ('initial_payment', 'rental', 'deposit')
 AND payment_status = 'paid'
 AND mollie_payment_id IS NOT NULL
 ORDER BY id ASC
@@ -2743,49 +2777,75 @@ LIMIT 1`,
 
                 try {
 
-                    const payment = await createMolliePaymentForOrder({
-                        id: item.order_id,
-                        orderNo: item.order_no,
-                        totalAmount: normalizedAdditionalChargeAmount,
-                        description: `Nachzahlung Rückgabe ${item.order_no}`,
-                        type: 'return_additional_charge',
-                        itemId: req.params.itemId
-                    });
+                    let payment;
+                    let checkoutUrl = null;
+
+                    const useRecurring =
+                        item.mollie_customer_id &&
+                        item.mollie_mandate_id;
+
+                    if (useRecurring) {
+                        payment = await createRecurringMolliePayment({
+                            id: item.order_id,
+                            orderNo: item.order_no,
+                            customerId: item.mollie_customer_id,
+                            mandateId: item.mollie_mandate_id,
+                            totalAmount: normalizedAdditionalChargeAmount,
+                            description: `Nachzahlung Rückgabe ${item.order_no}`,
+                            type: 'return_additional_charge',
+                            itemId: req.params.itemId
+                        });
+                    } else {
+                        payment = await createMolliePaymentForOrder({
+                            id: item.order_id,
+                            orderNo: item.order_no,
+                            totalAmount: normalizedAdditionalChargeAmount,
+                            description: `Nachzahlung Rückgabe ${item.order_no}`,
+                            type: 'return_additional_charge',
+                            itemId: req.params.itemId
+                        });
+
+                        checkoutUrl = getMollieCheckoutUrl(payment);
+                    }
 
                     await connection.execute(
                         `INSERT INTO rental_order_payments
-                 (
-                    order_id,
-                    order_item_id,
-                    payment_type,
-                    payment_method,
-                    payment_status,
-                    amount,
-                    mollie_payment_id
-                 )
-                 VALUES
-                 (?, ?, 'return_additional_charge',
-                  'online', 'pending', ?, ?)`,
+     (
+        order_id,
+        order_item_id,
+        payment_type,
+        payment_method,
+        payment_status,
+        amount,
+        mollie_payment_id,
+        mollie_customer_id,
+        mollie_mandate_id,
+        sequence_type
+     )
+     VALUES (?, ?, 'return_additional_charge', 'online', 'pending', ?, ?, ?, ?, ?)`,
                         [
                             item.order_id,
                             req.params.itemId,
                             normalizedAdditionalChargeAmount,
-                            payment.id
+                            payment.id,
+                            item.mollie_customer_id || null,
+                            item.mollie_mandate_id || null,
+                            useRecurring ? 'recurring' : null
                         ]
                     );
 
-                    const checkoutUrl = getMollieCheckoutUrl(payment);
-
-                    await sendReturnAdditionalChargeEmail(
-                        {
-                            order_no: item.order_no,
-                            customer_email: item.customer_email
-                        },
-                        item,
-                        checkoutUrl,
-                        normalizedAdditionalChargeAmount,
-                        additionalChargeReason
-                    );
+                    if (checkoutUrl) {
+                        await sendReturnAdditionalChargeEmail(
+                            {
+                                order_no: item.order_no,
+                                customer_email: item.customer_email
+                            },
+                            item,
+                            checkoutUrl,
+                            normalizedAdditionalChargeAmount,
+                            additionalChargeReason
+                        );
+                    }
 
                 } catch (mailError) {
 
@@ -3345,7 +3405,9 @@ app.post('/webhooks/mollie', async (req, res) => {
                         ? 'cancelled'
                         : payment.status === 'expired'
                             ? 'expired'
-                            : 'pending';
+                            : payment.status === 'charged_back'
+                                ? 'charged_back'
+                                : 'pending';
 
         try {
             await connection.execute(
@@ -3373,6 +3435,45 @@ app.post('/webhooks/mollie', async (req, res) => {
                 payment.id
             ]
         );
+
+        if (mappedPaymentStatus === 'charged_back') {
+            await connection.execute(
+                `UPDATE rental_orders ro
+         JOIN rental_order_payments rop ON rop.order_id = ro.id
+         SET ro.payment_status = 'charged_back',
+             ro.return_case_status = 'payment_dispute'
+         WHERE rop.mollie_payment_id = ?`,
+                [payment.id]
+            );
+
+            await connection.execute(
+                `INSERT INTO rental_order_payments
+         (
+            order_id,
+            order_item_id,
+            payment_type,
+            payment_method,
+            payment_status,
+            amount,
+            mollie_payment_id,
+            note
+         )
+         SELECT
+            order_id,
+            order_item_id,
+            'chargeback',
+            payment_method,
+            'charged_back',
+            -ABS(amount),
+            mollie_payment_id,
+            'Chargeback über Mollie erkannt'
+         FROM rental_order_payments
+         WHERE mollie_payment_id = ?
+         AND payment_status = 'charged_back'
+         LIMIT 1`,
+                [payment.id]
+            );
+        }
 
         if (mappedPaymentStatus === 'paid') {
             const [additionalChargeRows] = await connection.execute(
