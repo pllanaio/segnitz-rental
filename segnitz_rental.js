@@ -533,10 +533,21 @@ app.post('/data', async (req, res) => {
 
         if (paymentMethod === 'online') {
 
-            const payment = await createMolliePaymentForOrder({
+            const customer = await createMollieCustomer({
+                name: `${firstName || ''} ${lastName || ''}`.trim(),
+                email,
+                metadata: {
+                    orderId: String(orderId),
+                    orderNo
+                }
+            });
+
+            const payment = await createFirstMolliePayment({
                 id: orderId,
                 orderNo,
-                totalAmount: orderSummary.totals.grandTotalBeforeDepositReturn
+                customerId: customer.id,
+                totalAmount: orderSummary.totals.grandTotalBeforeDepositReturn,
+                type: 'order_payment'
             });
 
             await connection.execute(
@@ -577,11 +588,13 @@ app.post('/data', async (req, res) => {
 
             await connection.execute(
                 `UPDATE rental_orders
-         SET payment_method = 'online',
-             payment_status = 'pending',
-             mollie_payment_id = ?
-         WHERE id = ?`,
+SET mollie_customer_id = ?,
+    payment_method = 'online',
+    payment_status = 'pending',
+    mollie_payment_id = ?
+WHERE id = ?`,
                 [
+                    customer.id,
                     payment.id,
                     orderId
                 ]
