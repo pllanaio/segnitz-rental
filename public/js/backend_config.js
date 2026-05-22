@@ -1137,6 +1137,95 @@ function formatTextValue(value) {
     return String(value);
 }
 
+function renderItemPayments(order, item) {
+    const payments = order.payments || [];
+
+    const itemPayments = payments.filter(payment =>
+        Number(payment.orderItemId) === Number(item.id)
+    );
+
+    const rentalAdjustment = itemPayments.find(payment =>
+        payment.paymentType === 'rental_adjustment'
+    );
+
+    const returnCharge = itemPayments.find(payment =>
+        payment.paymentType === 'return_additional_charge'
+    );
+
+    const rentalCashPaid = itemPayments.some(payment =>
+        payment.paymentType === 'rental' &&
+        payment.paymentMethod === 'cash' &&
+        payment.paymentStatus === 'paid'
+    );
+
+    return `
+        <div class="mt-3 p-3 border rounded bg-white">
+            <strong>Zahlungen</strong><br>
+
+            Miete:
+            ${rentalCashPaid
+                ? '<span class="badge bg-success">Bar bezahlt</span>'
+                : '<span class="badge bg-warning">Nicht bar verbucht</span>'
+            }
+
+            ${!rentalCashPaid ? `
+                <button type="button"
+                    class="btn btn-outline-success btn-sm ms-2"
+                    onclick="openManualPaymentModal(
+                        ${order.id},
+                        ${item.id},
+                        'rental',
+                        ${Number(item.pricePerDay || 0)}
+                    )">
+                    Miete bar verbuchen
+                </button>
+            ` : ''}
+
+            <br>
+
+            Mietzeitraum-Nachzahlung:
+            ${rentalAdjustment
+                ? formatPaymentStatusBadge(rentalAdjustment.paymentStatus)
+                : '<span class="badge bg-secondary">Keine</span>'
+            }
+
+            ${rentalAdjustment && rentalAdjustment.paymentStatus !== 'paid' ? `
+                <button type="button"
+                    class="btn btn-outline-success btn-sm ms-2"
+                    onclick="openManualPaymentModal(
+                        ${rentalAdjustment.orderId},
+                        ${rentalAdjustment.orderItemId || 'null'},
+                        '${rentalAdjustment.paymentType}',
+                        ${Number(rentalAdjustment.amount || 0)}
+                    )">
+                    Barzahlung erfassen
+                </button>
+            ` : ''}
+
+            <br>
+
+            Rückgabe-Nachzahlung:
+            ${returnCharge
+                ? formatPaymentStatusBadge(returnCharge.paymentStatus)
+                : '<span class="badge bg-secondary">Keine</span>'
+            }
+
+            ${returnCharge && returnCharge.paymentStatus !== 'paid' ? `
+                <button type="button"
+                    class="btn btn-outline-success btn-sm ms-2"
+                    onclick="openManualPaymentModal(
+                        ${returnCharge.orderId},
+                        ${returnCharge.orderItemId || 'null'},
+                        '${returnCharge.paymentType}',
+                        ${Number(returnCharge.amount || 0)}
+                    )">
+                    Barzahlung erfassen
+                </button>
+            ` : ''}
+        </div>
+    `;
+}
+
 function renderOrderPayments(order) {
     const payments = order.payments || [];
     const visiblePayments = payments.filter(payment => {
@@ -2378,95 +2467,6 @@ async function markOrderPickedUp(orderId) {
     }
 
     setTimeout(restoreOrderDetailsModalLayer, 300);
-}
-
-function renderItemPayments(order, item) {
-    const payments = order.payments || [];
-
-    const itemPayments = payments.filter(payment =>
-        Number(payment.orderItemId) === Number(item.id)
-    );
-
-    const rentalAdjustment = itemPayments.find(payment =>
-        payment.paymentType === 'rental_adjustment'
-    );
-
-    const returnCharge = itemPayments.find(payment =>
-        payment.paymentType === 'return_additional_charge'
-    );
-
-    const rentalCashPaid = itemPayments.some(payment =>
-        payment.paymentType === 'rental' &&
-        payment.paymentMethod === 'cash' &&
-        payment.paymentStatus === 'paid'
-    );
-
-    return `
-        <div class="mt-3 p-3 border rounded bg-white">
-            <strong>Zahlungen</strong><br>
-
-            Miete:
-            ${rentalCashPaid
-                ? '<span class="badge bg-success">Bar bezahlt</span>'
-                : '<span class="badge bg-warning">Nicht bar verbucht</span>'
-            }
-
-            ${!rentalCashPaid ? `
-                <button type="button"
-                    class="btn btn-outline-success btn-sm ms-2"
-                    onclick="openManualPaymentModal(
-                        ${order.id},
-                        ${item.id},
-                        'rental',
-                        ${Number(item.pricePerDay || 0)}
-                    )">
-                    Miete bar verbuchen
-                </button>
-            ` : ''}
-
-            <br>
-
-            Mietzeitraum-Nachzahlung:
-            ${rentalAdjustment
-                ? formatPaymentStatusBadge(rentalAdjustment.paymentStatus)
-                : '<span class="badge bg-secondary">Keine</span>'
-            }
-
-            ${rentalAdjustment && rentalAdjustment.paymentStatus !== 'paid' ? `
-                <button type="button"
-                    class="btn btn-outline-success btn-sm ms-2"
-                    onclick="openManualPaymentModal(
-                        ${rentalAdjustment.orderId},
-                        ${rentalAdjustment.orderItemId || 'null'},
-                        '${rentalAdjustment.paymentType}',
-                        ${Number(rentalAdjustment.amount || 0)}
-                    )">
-                    Barzahlung erfassen
-                </button>
-            ` : ''}
-
-            <br>
-
-            Rückgabe-Nachzahlung:
-            ${returnCharge
-                ? formatPaymentStatusBadge(returnCharge.paymentStatus)
-                : '<span class="badge bg-secondary">Keine</span>'
-            }
-
-            ${returnCharge && returnCharge.paymentStatus !== 'paid' ? `
-                <button type="button"
-                    class="btn btn-outline-success btn-sm ms-2"
-                    onclick="openManualPaymentModal(
-                        ${returnCharge.orderId},
-                        ${returnCharge.orderItemId || 'null'},
-                        '${returnCharge.paymentType}',
-                        ${Number(returnCharge.amount || 0)}
-                    )">
-                    Barzahlung erfassen
-                </button>
-            ` : ''}
-        </div>
-    `;
 }
 
 function logout() {
