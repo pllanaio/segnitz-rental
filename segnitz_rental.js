@@ -3560,6 +3560,8 @@ app.post('/webhooks/mollie', async (req, res) => {
             newOrderStatus = 'expired';
         } else if (payment.status === 'failed') {
             newOrderStatus = 'payment_failed';
+        } else if (payment.status === 'charged_back') {
+            newOrderStatus = 'payment_dispute';
         }
 
         await connection.execute(
