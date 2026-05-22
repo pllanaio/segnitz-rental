@@ -1369,6 +1369,12 @@ function renderCart() {
     if (cartDepositTotal) {
         cartDepositTotal.textContent = formatCurrency(totals.depositTotal);
     }
+
+    const cartGrandTotal = document.getElementById('cartGrandTotal');
+
+    if (cartGrandTotal) {
+        cartGrandTotal.textContent = `${formatCurrency(grandTotal)} inkl. MwSt.`;
+    }
 }
 
 function renderCartReview() {
@@ -1409,7 +1415,12 @@ function renderCartReview() {
     }).join('');
 
     const totals = calculateCartTotals(items);
+    const grandTotal = totals.rentalTotal + totals.depositTotal;
+    const cartReviewGrandTotal = document.getElementById('cartReviewGrandTotal');
 
+    if (cartReviewGrandTotal) {
+        cartReviewGrandTotal.textContent = `${formatCurrency(grandTotal)} inkl. MwSt.`;
+    }
     const rentalGross = totals.rentalTotal;
     const rentalNet = rentalGross / (1 + VAT_RATE);
     const rentalVat = rentalGross - rentalNet;
