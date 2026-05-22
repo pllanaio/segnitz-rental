@@ -2278,7 +2278,7 @@ LIMIT 1`,
         const originalTotal = originalDays * Number(item.price_per_day || 0);
         const amountDue = Math.max(adjustedRentalTotal - originalTotal, 0);
 
-        let paymentUrl = null;
+                let paymentUrl = null;
 
         if (amountDue > 0) {
 
@@ -2289,20 +2289,20 @@ LIMIT 1`,
 
                 await connection.execute(
                     `INSERT INTO rental_order_payments
-             (
-                order_id,
-                order_item_id,
-                payment_type,
-                payment_method,
-                payment_status,
-                amount,
-                paid_at,
-                recorded_by_user_id,
-                note
-             )
-             VALUES
-             (?, ?, 'rental_adjustment',
-              'cash', 'paid', ?, NOW(), ?, ?)`,
+                    (
+                        order_id,
+                        order_item_id,
+                        payment_type,
+                        payment_method,
+                        payment_status,
+                        amount,
+                        paid_at,
+                        recorded_by_user_id,
+                        note
+                    )
+                    VALUES
+                    (?, ?, 'rental_adjustment',
+                     'cash', 'paid', ?, NOW(), ?, ?)`,
                     [
                         item.order_id,
                         req.params.itemId,
@@ -2325,8 +2325,18 @@ LIMIT 1`,
 
                 await connection.execute(
                     `INSERT INTO rental_order_payments
-         (order_id, order_item_id, payment_type, payment_method, payment_status, amount, mollie_payment_id)
-         VALUES (?, ?, 'rental_adjustment', 'online', 'pending', ?, ?)`,
+                    (
+                        order_id,
+                        order_item_id,
+                        payment_type,
+                        payment_method,
+                        payment_status,
+                        amount,
+                        mollie_payment_id
+                    )
+                    VALUES
+                    (?, ?, 'rental_adjustment',
+                     'online', 'pending', ?, ?)`,
                     [
                         item.order_id,
                         req.params.itemId,
@@ -2337,34 +2347,29 @@ LIMIT 1`,
 
                 paymentUrl = getMollieCheckoutUrl(payment);
             }
+        }
 
-            await connection.execute(
-                `INSERT INTO rental_order_payments
-         (
-            order_id,
-            order_item_id,
-            payment_type,
-            payment_method,
-            payment_status,
-            amount,
-            mollie_payment_id,
-            mollie_customer_id,
-            mollie_mandate_id,
-            sequence_type
-         )
-         VALUES (?, ?, 'rental_adjustment', 'online', 'pending', ?, ?, ?, ?, ?)`,
-                [
-                    item.order_id,
-                    req.params.itemId,
-                    amountDue,
-                    payment.id,
-                    item.mollie_customer_id || null,
-                    item.mollie_mandate_id || null,
-                    useRecurring ? 'recurring' : null
-                ]
+        try {
+            await sendRentalAdjustmentEmailWithPayment(
+                {
+                    order_no: item.order_no,
+                    customer_email: item.customer_email
+                },
+                item,
+                paymentUrl,
+                amountDue
+            );
+        } catch (mailError) {
+            console.error(
+                'Mietzeitraum gespeichert, aber Mailversand fehlgeschlagen:',
+                mailError
             );
         }
-    }
+
+        res.json({
+            message: 'Mietzeitraum wurde gespeichert.',
+            adjustedRentalTotal
+        });
 
         try {
         await sendRentalAdjustmentEmailWithPayment(
