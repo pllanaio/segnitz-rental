@@ -1140,7 +1140,11 @@ function formatTextValue(value) {
 
 function renderOrderPayments(order) {
     const payments = order.payments || [];
-    const hasMandate = Boolean(order.mollie_mandate_id || order.mollieMandateId);
+    const hasMandate = Boolean(
+        order.mollie_mandate_id ||
+        order.mollieMandateId ||
+        payments.some(payment => payment.mollieMandateId)
+    );
     const hasDispute = String(order.payment_status || '').includes('charged_back')
         || String(order.status || '').includes('payment_dispute');
 
@@ -1164,9 +1168,9 @@ function renderOrderPayments(order) {
             <div class="card-header d-flex justify-content-between align-items-center">
                 <strong>Zahlungen</strong>
                 ${hasMandate
-                    ? '<span class="badge bg-success">Automatische Abbuchung möglich</span>'
-                    : '<span class="badge bg-secondary">Kein Mandat</span>'
-                }
+            ? '<span class="badge bg-success">Automatische Abbuchung möglich</span>'
+            : '<span class="badge bg-secondary">Kein Mandat</span>'
+        }
             </div>
 
             <div class="card-body">
