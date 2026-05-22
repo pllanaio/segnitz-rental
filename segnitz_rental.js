@@ -3235,7 +3235,9 @@ app.get('/orders/:id/payment-status', async (req, res) => {
                         ? 'cancelled'
                         : payment.status === 'expired'
                             ? 'expired'
-                            : 'pending';
+                            : payment.status === 'authorized'
+                                ? 'authorized'
+                                : 'pending';
 
         await connection.execute(
             `UPDATE rental_orders
