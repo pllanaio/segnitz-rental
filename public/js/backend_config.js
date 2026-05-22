@@ -1140,42 +1140,118 @@ function formatTextValue(value) {
 
 function renderOrderPayments(order) {
     const payments = order.payments || [];
+    const hasMandate = Boolean(order.mollie_mandate_id || order.mollieMandateId);
+    const hasDispute = String(order.payment_status || '').includes('charged_back')
+        || String(order.status || '').includes('payment_dispute');
 
     if (payments.length === 0) {
         return `
-            <div class="alert alert-info mt-3">
-                Noch keine separaten Zahlungen erfasst.
+            <div class="card mt-4">
+                <div class="card-header">
+                    <strong>Zahlungen</strong>
+                </div>
+                <div class="card-body">
+                    <div class="alert alert-info mb-0">
+                        Noch keine Zahlungen erfasst.
+                    </div>
+                </div>
             </div>
         `;
     }
 
     return `
-        <div class="mt-4">
-            <h5>Zahlungen</h5>
+        <div class="card mt-4">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <strong>Zahlungen</strong>
+                ${hasMandate
+                    ? '<span class="badge bg-success">Automatische Abbuchung möglich</span>'
+                    : '<span class="badge bg-secondary">Kein Mandat</span>'
+                }
+            </div>
 
-            ${payments.map(payment => `
-                <div class="border rounded p-3 mb-2">
-                    <strong>${formatPaymentType(payment.paymentType)}</strong><br>
-                    Betrag: ${Number(payment.amount || 0).toFixed(2)} €<br>
-                    Methode: ${payment.paymentMethod === 'cash' ? 'Barzahlung' : 'Onlinezahlung'}<br>
-                    Status: ${formatPaymentStatusBadge(payment.paymentStatus)}<br>
-                    ${payment.paymentStatus !== 'paid' ? `
-    <button type="button"
-        class="btn btn-outline-success btn-sm mt-2 mb-2"
-        onclick="openManualPaymentModal(
-            ${payment.orderId},
-            ${payment.orderItemId || 'null'},
-            '${payment.paymentType}',
-            ${Number(payment.amount || 0)}
-        )">
-        Barzahlung erfassen
-    </button><br>` : ''}
-                    ${payment.paidAt ? `Bezahlt am: ${payment.paidAt}<br>` : ''}
-                    ${payment.note ? `Notiz: ${formatTextValue(payment.note)}<br>` : ''}
-                </div>
-            `).join('')}
+            <div class="card-body">
+                ${hasDispute ? `
+                    <div class="alert alert-danger">
+                        Zahlungsstreitfall / Chargeback erkannt.
+                    </div>
+                ` : ''}
+
+                ${payments.map(payment => renderPaymentRow(payment, hasMandate)).join('')}
+            </div>
         </div>
     `;
+}
+
+function renderPaymentRow(payment, hasMandate) {
+    const amount = Number(payment.amount || 0);
+    const isOpen = !['paid', 'charged_back', 'refunded'].includes(payment.paymentStatus);
+    const isOnline = payment.paymentMethod !== 'cash';
+    const isPaidOnline = isOnline && payment.paymentStatus === 'paid' && payment.molliePaymentId;
+    const isChargeback = payment.paymentType === 'chargeback' || payment.paymentStatus === 'charged_back';
+
+    return `
+        <div class="border rounded p-3 mb-2 ${isChargeback ? 'border-danger bg-light' : ''}">
+            <div class="d-flex justify-content-between gap-3 flex-wrap">
+                <div>
+                    <strong>${formatPaymentType(payment.paymentType)}</strong><br>
+                    Betrag:
+                    <span class="${amount < 0 ? 'text-success' : ''}">
+                        ${amount.toFixed(2)} €
+                    </span><br>
+                    Methode: ${formatPaymentMethod(payment, hasMandate)}<br>
+                    Status: ${formatPaymentStatusBadge(payment.paymentStatus)}<br>
+                    ${payment.paidAt ? `Bezahlt am: ${payment.paidAt}<br>` : ''}
+                    ${payment.note ? `Notiz: ${formatTextValue(payment.note)}<br>` : ''}
+                    ${payment.molliePaymentId ? `<small class="text-muted">Mollie: ${payment.molliePaymentId}</small>` : ''}
+                </div>
+
+                <div class="d-flex gap-2 flex-wrap align-items-start">
+                    ${isOpen ? `
+                        <button type="button"
+                            class="btn btn-outline-success btn-sm"
+                            onclick="openManualPaymentModal(
+                                ${payment.orderId},
+                                ${payment.orderItemId || 'null'},
+                                '${payment.paymentType}',
+                                ${Math.abs(amount)}
+                            )">
+                            Barzahlung erfassen
+                        </button>
+                    ` : ''}
+
+                    ${isPaidOnline && amount > 0 ? `
+                        <button type="button"
+                            class="btn btn-outline-secondary btn-sm"
+                            disabled>
+                            Rückerstattung
+                        </button>
+                    ` : ''}
+
+                    ${isChargeback ? `
+                        <span class="badge bg-danger align-self-center">
+                            Klärung nötig
+                        </span>
+                    ` : ''}
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function formatPaymentMethod(payment, hasMandate) {
+    if (payment.paymentMethod === 'cash') {
+        return 'Barzahlung';
+    }
+
+    if (payment.sequenceType === 'recurring') {
+        return 'Automatische Mollie-Abbuchung';
+    }
+
+    if (hasMandate) {
+        return 'Onlinezahlung / Mandat vorhanden';
+    }
+
+    return 'Onlinezahlung';
 }
 
 

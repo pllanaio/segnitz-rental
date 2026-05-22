@@ -1743,7 +1743,10 @@ ORDER BY id DESC`,
         mollie_payment_id AS molliePaymentId,
         DATE_FORMAT(paid_at, '%Y-%m-%d %H:%i:%s') AS paidAt,
         note,
-        DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS createdAt
+        DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS createdAt,
+        mollie_customer_id AS mollieCustomerId,
+        mollie_mandate_id AS mollieMandateId,
+        sequence_type AS sequenceType
      FROM rental_order_payments
      WHERE order_id = ?
      ORDER BY created_at DESC`,
