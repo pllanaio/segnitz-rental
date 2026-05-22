@@ -1140,6 +1140,16 @@ function formatTextValue(value) {
 
 function renderOrderPayments(order) {
     const payments = order.payments || [];
+    const visiblePayments = payments.filter(payment => {
+    if (
+        payment.paymentType === 'rental' ||
+        payment.paymentType === 'deposit'
+    ) {
+        return false;
+    }
+
+    return true;
+});
     const hasMandate = Boolean(
         order.mollie_mandate_id ||
         order.mollieMandateId ||
@@ -1148,7 +1158,7 @@ function renderOrderPayments(order) {
     const hasDispute = String(order.payment_status || '').includes('charged_back')
         || String(order.status || '').includes('payment_dispute');
 
-    if (payments.length === 0) {
+    if (visiblePayments.length === 0) {
         return `
             <div class="card mt-4">
                 <div class="card-header">
@@ -1180,7 +1190,7 @@ function renderOrderPayments(order) {
                     </div>
                 ` : ''}
 
-                ${payments.map(payment => renderPaymentRow(payment, hasMandate)).join('')}
+                ${visiblePayments.map(payment => renderPaymentRow(payment, hasMandate)).join('')}
             </div>
         </div>
     `;
