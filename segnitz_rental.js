@@ -61,8 +61,14 @@ const { checkProductAvailability } = require('./utils/availability');
 
 const {
     createMolliePaymentForOrder,
+    createFirstMolliePayment,
+    createRecurringMolliePayment,
+    createMollieCustomer,
     getMolliePayment,
+    getMollieCustomerMandates,
+    getValidMollieMandate,
     createMollieRefundForPayment,
+    listMollieRefundsForPayment,
     getMollieCheckoutUrl
 } = require('./services/mollieService');
 
