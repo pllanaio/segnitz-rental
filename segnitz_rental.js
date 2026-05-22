@@ -2247,6 +2247,12 @@ LIMIT 1`,
             });
         }
 
+        if (new Date(finalEnd) <= new Date(item.rental_end)) {
+            return res.status(400).json({
+                error: 'Es sind nur Verlängerungen möglich. Verkürzungen werden über die Rückgabe abgewickelt.'
+            });
+        }
+
         const days = calculateRentalDays(finalStart, finalEnd);
         const adjustedRentalTotal = days * finalPricePerDay;
 
@@ -2294,19 +2300,19 @@ LIMIT 1`,
 
         let paymentUrl = null;
 
-if (amountDue > 0) {
-    const payment = await createMolliePaymentForOrder({
-        id: item.order_id,
-        orderNo: item.order_no,
-        totalAmount: amountDue,
-        description: `Nachzahlung Mietzeitraum ${item.order_no}`,
-        type: 'rental_adjustment',
-        itemId: req.params.itemId,
-        redirectUrl: `${process.env.BASE_URL.replace(/\/$/, '')}/index.html?payment=extension&orderId=${encodeURIComponent(item.order_id)}`
-    });
+        if (amountDue > 0) {
+            const payment = await createMolliePaymentForOrder({
+                id: item.order_id,
+                orderNo: item.order_no,
+                totalAmount: amountDue,
+                description: `Nachzahlung Mietzeitraum ${item.order_no}`,
+                type: 'rental_adjustment',
+                itemId: req.params.itemId,
+                redirectUrl: `${process.env.BASE_URL.replace(/\/$/, '')}/index.html?payment=extension&orderId=${encodeURIComponent(item.order_id)}`
+            });
 
-    await connection.execute(
-        `INSERT INTO rental_order_payments
+            await connection.execute(
+                `INSERT INTO rental_order_payments
         (
             order_id,
             order_item_id,
@@ -2318,16 +2324,16 @@ if (amountDue > 0) {
         )
         VALUES
         (?, ?, 'rental_adjustment', 'online', 'pending', ?, ?)`,
-        [
-            item.order_id,
-            req.params.itemId,
-            amountDue,
-            payment.id
-        ]
-    );
+                [
+                    item.order_id,
+                    req.params.itemId,
+                    amountDue,
+                    payment.id
+                ]
+            );
 
-    paymentUrl = getMollieCheckoutUrl(payment);
-}
+            paymentUrl = getMollieCheckoutUrl(payment);
+        }
 
         try {
             await sendRentalAdjustmentEmailWithPayment(
@@ -2434,38 +2440,44 @@ LIMIT 1`,
         const days = calculateRentalDays(finalStart, finalEnd);
         const adjustedRentalTotal = days * finalPricePerDay;
         const deposit = Number(item.deposit || 0);
-        const deductionPercent = Number(req.body.depositDeductionPercent || 0);
-        const depositDeductionAmount = deposit * deductionPercent / 100;
-
-        const calculatedDepositRefundAmount =
-            Math.max(deposit - depositDeductionAmount, 0);
-
-        const validReturnStatuses = [
-            'returned_ok',
-            'returned_late',
-            'returned_damaged',
-            'returned_late_damaged'
-        ];
-
-        if (!validReturnStatuses.includes(returnStatus)) {
-            return res.status(400).json({
-                error: 'Ungültiger Rückgabestatus.'
-            });
-        }
 
         const normalizedAdditionalChargeAmount =
             additionalChargeAmount === null || additionalChargeAmount === undefined || additionalChargeAmount === ''
-                ? null
+                ? 0
                 : Number(additionalChargeAmount);
 
-        if (
-            normalizedAdditionalChargeAmount !== null &&
-            (Number.isNaN(normalizedAdditionalChargeAmount) || normalizedAdditionalChargeAmount < 0)
-        ) {
+        if (Number.isNaN(normalizedAdditionalChargeAmount) || normalizedAdditionalChargeAmount < 0) {
             return res.status(400).json({
                 error: 'Zusätzlicher Betrag ist ungültig.'
             });
         }
+
+        const finalReturnStatus =
+            isDamaged && isLate
+                ? 'returned_late_damaged'
+                : isDamaged
+                    ? 'returned_damaged'
+                    : isLate
+                        ? 'returned_late'
+                        : 'returned_ok';
+
+        const calculatedDepositRefundAmount = isDamaged
+            ? Math.max(deposit - normalizedAdditionalChargeAmount, 0)
+            : deposit;
+
+        const depositDeductionAmount = Math.max(deposit - calculatedDepositRefundAmount, 0);
+
+        const deductionPercent = deposit > 0
+            ? (depositDeductionAmount / deposit) * 100
+            : 0;
+
+        const finalDepositDecision = calculatedDepositRefundAmount > 0
+            ? 'full_refund'
+            : 'no_refund';
+
+        const customerAdditionalDue = isDamaged
+            ? Math.max(normalizedAdditionalChargeAmount - deposit, 0)
+            : 0;
 
         await connection.execute(
             `UPDATE rental_order_items
@@ -2498,17 +2510,17 @@ LIMIT 1`,
                 adjustedRentalEnd || null,
                 finalPricePerDay,
                 adjustedRentalTotal,
-                returnStatus,
-                returnStatus,
+                finalReturnStatus,
+                finalReturnStatus,
                 isDamaged ? 1 : 0,
-                damageDescription || null,
+                isDamaged ? 'Beschädigt' : null,
                 isLate ? 1 : 0,
-                lateDescription || null,
-                depositDecision || 'pending',
+                isLate ? 'Verspätet' : null,
+                finalDepositDecision,
                 deductionPercent,
                 depositDeductionAmount,
                 calculatedDepositRefundAmount,
-                depositDeductionReason || null,
+                isDamaged ? 'Reparaturkosten mit Kaution verrechnet' : null,
                 additionalChargeReason || null,
                 normalizedAdditionalChargeAmount,
                 returnNotes || null,
@@ -2558,7 +2570,7 @@ END
          WHERE id = ?`,
                 [
                     finalOrderReturnStatus,
-                    normalizedAdditionalChargeAmount || 0,
+                    customerAdditionalDue || 0,
                     item.order_id
                 ]
             );
@@ -2573,7 +2585,7 @@ END
 
         if (
             calculatedDepositRefundAmount > 0 &&
-            ['full_refund', 'partial_refund'].includes(depositDecision)
+            ['full_refund', 'partial_refund'].includes(finalDepositDecision)
         ) {
 
             const [existingRefunds] = await connection.execute(
@@ -2681,53 +2693,14 @@ LIMIT 1`,
             }
         }
 
-        if (normalizedAdditionalChargeAmount && normalizedAdditionalChargeAmount > 0) {
-
-            if (additionalChargePaymentMethod === 'cash') {
-
-                const recordedByUserId =
-                    await getUserIdByEmail(connection, req.session.user);
-
-                await connection.execute(
-                    `INSERT INTO rental_order_payments
-             (
-                order_id,
-                order_item_id,
-                payment_type,
-                payment_method,
-                payment_status,
-                amount,
-                paid_at,
-                recorded_by_user_id,
-                note
-             )
-             VALUES
-             (?, ?, 'return_additional_charge',
-              'cash', 'paid', ?, NOW(), ?, ?)`,
-                    [
-                        item.order_id,
-                        req.params.itemId,
-                        normalizedAdditionalChargeAmount,
-                        recordedByUserId,
-                        additionalChargeReason || 'Nachzahlung bei Rückgabe bar bezahlt'
-                    ]
-                );
-
-                await connection.execute(
-                    `UPDATE rental_orders
-             SET return_case_status = 'closed'
-             WHERE id = ?`,
-                    [item.order_id]
-                );
-
-            } else {
+        if (customerAdditionalDue > 0) {
 
                 try {
 
                     const payment = await createMolliePaymentForOrder({
                         id: item.order_id,
                         orderNo: item.order_no,
-                        totalAmount: normalizedAdditionalChargeAmount,
+                        totalAmount: customerAdditionalDue,
                         description: `Nachzahlung Rückgabe ${item.order_no}`,
                         type: 'return_additional_charge',
                         itemId: req.params.itemId
@@ -2750,7 +2723,7 @@ LIMIT 1`,
                         [
                             item.order_id,
                             req.params.itemId,
-                            normalizedAdditionalChargeAmount,
+                            customerAdditionalDue,
                             payment.id
                         ]
                     );
@@ -2763,7 +2736,7 @@ LIMIT 1`,
                             },
                             item,
                             checkoutUrl,
-                            normalizedAdditionalChargeAmount,
+                            customerAdditionalDue,
                             additionalChargeReason
                         );
                     }
@@ -2774,7 +2747,6 @@ LIMIT 1`,
                         'Rückgabe gespeichert, aber Nachzahlungs-Mail fehlgeschlagen:',
                         mailError
                     );
-                }
             }
         }
 
