@@ -576,7 +576,7 @@ SET payment_method = 'online',
     mollie_payment_id = ?
 WHERE id = ?`,
                 [
-                    customer.id,
+                    payment.id,
                     orderId
                 ]
             );
@@ -2370,25 +2370,6 @@ LIMIT 1`,
             message: 'Mietzeitraum wurde gespeichert.',
             adjustedRentalTotal
         });
-
-        try {
-        await sendRentalAdjustmentEmailWithPayment(
-            {
-                order_no: item.order_no,
-                customer_email: item.customer_email
-            },
-            item,
-            paymentUrl,
-            amountDue
-        );
-    } catch (mailError) {
-        console.error('Mietzeitraum gespeichert, aber Mailversand fehlgeschlagen:', mailError);
-    }
-
-    res.json({
-        message: 'Mietzeitraum wurde gespeichert.',
-        adjustedRentalTotal
-    });
 
 } catch (error) {
     console.error('Fehler beim Speichern des angepassten Mietzeitraums:', error);
