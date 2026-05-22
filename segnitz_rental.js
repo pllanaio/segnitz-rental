@@ -2308,7 +2308,7 @@ LIMIT 1`,
                 description: `Nachzahlung Mietzeitraum ${item.order_no}`,
                 type: 'rental_adjustment',
                 itemId: req.params.itemId,
-                redirectUrl: `${process.env.BASE_URL.replace(/\/$/, '')}/index.html?payment=extension&orderId=${encodeURIComponent(item.order_id)}`
+                redirectUrl: `${process.env.BASE_URL.replace(/\/$/, '')}/index.html?payment=extension&orderId=${encodeURIComponent(item.order_id)}&paymentType=rental_adjustment`
             });
 
             await connection.execute(
@@ -2703,6 +2703,7 @@ VALUES (?, ?, 'deposit_refund', 'online',
                     totalAmount: customerAdditionalDue,
                     description: `Nachzahlung Rückgabe ${item.order_no}`,
                     type: 'return_additional_charge',
+                    redirectUrl: `${process.env.BASE_URL.replace(/\/$/, '')}/index.html?payment=return_charge&orderId=${encodeURIComponent(item.order_id)}&paymentType=return_additional_charge`,
                     itemId: req.params.itemId
                 });
 
@@ -3103,6 +3104,7 @@ app.post('/orders/:id/mollie-checkout', async (req, res) => {
 
 app.get('/orders/:id/payment-status', async (req, res) => {
     let connection;
+    const paymentType = req.query.paymentType || null;
 
     try {
         connection = await mysql.createConnection(dbConfig);
@@ -3120,6 +3122,78 @@ app.get('/orders/:id/payment-status', async (req, res) => {
 
         if (orders.length === 0) {
             return res.status(404).json({ error: 'Bestellung nicht gefunden.' });
+        }
+
+        if (paymentType) {
+            const [paymentRows] = await connection.execute(
+                `SELECT
+            rop.mollie_payment_id,
+            rop.payment_status,
+            rop.payment_type,
+            ro.order_no AS orderNo
+         FROM rental_order_payments rop
+         JOIN rental_orders ro ON ro.id = rop.order_id
+         WHERE rop.order_id = ?
+         AND rop.payment_type = ?
+         ORDER BY rop.id DESC
+         LIMIT 1`,
+                [req.params.id, paymentType]
+            );
+
+            if (paymentRows.length === 0 || !paymentRows[0].mollie_payment_id) {
+                return res.status(404).json({
+                    error: 'Zahlung nicht gefunden.'
+                });
+            }
+
+            const molliePayment = await getMolliePayment(paymentRows[0].mollie_payment_id);
+
+            const mappedPaymentStatus =
+                molliePayment.status === 'paid'
+                    ? 'paid'
+                    : molliePayment.status === 'failed'
+                        ? 'failed'
+                        : molliePayment.status === 'canceled'
+                            ? 'cancelled'
+                            : molliePayment.status === 'expired'
+                                ? 'expired'
+                                : molliePayment.status === 'authorized'
+                                    ? 'authorized'
+                                    : 'pending';
+
+            await connection.execute(
+                `UPDATE rental_order_payments
+         SET payment_status = ?,
+             paid_at = CASE
+                WHEN ? = 'paid' THEN COALESCE(paid_at, NOW())
+                ELSE paid_at
+             END
+         WHERE mollie_payment_id = ?`,
+                [
+                    mappedPaymentStatus,
+                    mappedPaymentStatus,
+                    molliePayment.id
+                ]
+            );
+
+            if (paymentType === 'return_additional_charge' && mappedPaymentStatus === 'paid') {
+                await connection.execute(
+                    `UPDATE rental_orders
+             SET return_case_status = 'closed'
+             WHERE id = ?
+             AND return_case_status = 'payment_pending'`,
+                    [req.params.id]
+                );
+            }
+
+            return res.json({
+                id: req.params.id,
+                orderNo: paymentRows[0].orderNo,
+                payment_status: mappedPaymentStatus,
+                payment_type: paymentType,
+                mollie_payment_status: molliePayment.status,
+                mollie_payment_method: molliePayment.method || null
+            });
         }
 
         const order = orders[0];
@@ -3300,7 +3374,10 @@ app.post('/webhooks/mollie', async (req, res) => {
                             ? 'expired'
                             : payment.status === 'charged_back'
                                 ? 'charged_back'
-                                : 'pending';
+                                : payment.status === 'authorized'
+                                    ? 'authorized'
+                                    : 'pending';
+                                
 
         try {
             await connection.execute(
