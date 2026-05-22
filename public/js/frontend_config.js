@@ -47,8 +47,10 @@ function syncMainNextButtonVisibility() {
 
 document.addEventListener('DOMContentLoaded', async () => {
     const params = new URLSearchParams(window.location.search);
+    const paymentContext = params.get('payment');
+    const paymentType = params.get('paymentType');
 
-    if (params.get('payment') !== 'return') {
+    if (!['return', 'extension', 'return_charge'].includes(paymentContext)) {
         return;
     }
 
@@ -57,11 +59,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     const resultIcon = document.getElementById('paymentResultIcon');
     const resultTitle = document.getElementById('paymentResultTitle');
     const resultText = document.getElementById('paymentResultText');
-    const nextSteps = document.getElementById('paymentNextSteps');
-
-    if (nextSteps) {
-        nextSteps.remove();
-    }
 
     Array.from(step).forEach(stepElement => {
         stepElement.classList.remove('d-block');
@@ -77,13 +74,35 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     progress(100);
 
-    const setPaymentErrorView = (message) => {
-
-        const nextSteps = document.getElementById('paymentNextSteps');
-
-        if (nextSteps) {
-            nextSteps.remove();
+    const successMessages = {
+        return: {
+            title: 'Mietvorgang erfolgreich bezahlt',
+            text: 'Vielen Dank! Ihre Zahlung wurde erfolgreich bestätigt.',
+            body: 'Ihre Reservierung wurde erfolgreich bezahlt.'
+        },
+        extension: {
+            title: 'Mietzeitraum erfolgreich verlängert',
+            text: 'Die Nachzahlung für die Verlängerung wurde erfolgreich bestätigt.',
+            body: 'Ihr verlängerter Mietzeitraum ist nun bezahlt.'
+        },
+        return_charge: {
+            title: 'Nachzahlung erfolgreich bezahlt',
+            text: 'Die Nachzahlung aus der Rückgabe wurde erfolgreich bestätigt.',
+            body: 'Der Rückgabefall wurde bezahlt und kann abgeschlossen werden.'
         }
+    };
+
+    const statusMessages = {
+        failed: 'Die Zahlung ist fehlgeschlagen.',
+        expired: 'Die Zahlung ist abgelaufen.',
+        cancelled: 'Die Zahlung wurde abgebrochen.',
+        canceled: 'Die Zahlung wurde abgebrochen.',
+        authorized: 'Die Zahlung wurde autorisiert, aber noch nicht endgültig eingezogen.',
+        pending: 'Die Zahlung wurde noch nicht bestätigt.'
+    };
+
+    const setPaymentErrorView = (status) => {
+        const message = statusMessages[status] || statusMessages.pending;
 
         if (resultIcon) {
             resultIcon.innerHTML = '<i class="bi bi-x-lg"></i>';
@@ -95,91 +114,73 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
 
         if (resultText) {
-            resultText.textContent = 'Ihre Zahlung wurde nicht erfolgreich abgeschlossen.';
+            resultText.textContent = message;
         }
 
         if (finalDiv) {
             finalDiv.innerHTML = `
-                <div class="alert alert-danger">
+                <div class="alert alert-warning">
                     ${message}<br>
-                    Bitte versuchen Sie es erneut.
+                    Falls Sie vor Ort bezahlen möchten, kommen Sie während unserer Öffnungszeiten vorbei.
                 </div>
-
-                <button type="button" class="btn btn-primary mt-3" onclick="retryMolliePayment('${orderId}')">
-                    Zahlung erneut versuchen
-                </button>
             `;
         }
     };
 
     const setPaymentSuccessView = (order) => {
+        const message = successMessages[paymentContext] || successMessages.return;
+
         if (resultIcon) {
             resultIcon.innerHTML = '<i class="bi bi-check-lg"></i>';
             resultIcon.className = 'success-icon';
         }
 
         if (resultTitle) {
-            resultTitle.textContent = 'Mietvorgang erfolgreich hinterlegt';
+            resultTitle.textContent = message.title;
         }
 
         if (resultText) {
-            resultText.textContent = 'Vielen Dank! Ihre Zahlung wurde erfolgreich bestätigt.';
+            resultText.textContent = message.text;
         }
 
         if (finalDiv) {
             finalDiv.innerHTML = `
-    <div class="alert alert-success">
-        Ihre Zahlung war erfolgreich.<br>
-        Bestellnummer: <strong>${order.orderNo}</strong>
-    </div>
-
-    <div class="alert alert-success text-start">
-        <strong>Wie geht es weiter?</strong><br>
-        Sie können nun während unserer Öffnungszeiten bei uns vorbeikommen und die
-        reservierten Produkte abholen. Bitte bringen Sie zur Abholung einen gültigen
-        Ausweis mit.
-    </div>
-`;
+                <div class="alert alert-success">
+                    ${message.body}<br>
+                    Bestellnummer: <strong>${order.orderNo || order.order_no || orderId}</strong>
+                </div>
+            `;
         }
     };
 
     if (!orderId || !finalDiv) {
-        setPaymentErrorView('Die Bestellung konnte nicht eindeutig zugeordnet werden.');
+        setPaymentErrorView('failed');
         return;
     }
 
     try {
-        const response = await fetch(`/orders/${orderId}/payment-status`);
+        const query = paymentType
+            ? `?paymentType=${encodeURIComponent(paymentType)}`
+            : '';
+
+        const response = await fetch(`/orders/${orderId}/payment-status${query}`);
         const order = await response.json();
 
         if (!response.ok) {
             throw new Error(order.error || 'Status konnte nicht geladen werden.');
         }
 
-        if (order.payment_status === 'paid') {
+        const status = order.payment_status || order.paymentStatus;
+
+        if (status === 'paid') {
             setPaymentSuccessView(order);
             return;
         }
 
-        if (order.payment_status === 'failed') {
-            setPaymentErrorView('Die Zahlung ist fehlgeschlagen.');
-            return;
-        }
-
-        if (order.payment_status === 'cancelled' || order.payment_status === 'canceled') {
-            setPaymentErrorView('Die Zahlung wurde abgebrochen.');
-            return;
-        }
-
-        if (order.payment_status === 'expired') {
-            setPaymentErrorView('Die Zahlung ist abgelaufen.');
-            return;
-        }
-
-        setPaymentErrorView('Die Zahlung wurde noch nicht bestätigt.');
+        setPaymentErrorView(status);
     } catch (error) {
         console.error('Fehler beim Prüfen des Zahlungsstatus:', error);
-        setPaymentErrorView('Der Zahlungsstatus konnte gerade nicht geprüft werden.');
+        setPaymentErrorView('pending');
     }
 });
 
@@ -1347,6 +1348,7 @@ function renderCart() {
     const rentalGross = totals.rentalTotal;
     const rentalNet = rentalGross / (1 + VAT_RATE);
     const rentalVat = rentalGross - rentalNet;
+    const grandTotal = totals.rentalTotal + totals.depositTotal;
 
     if (cartSummary) {
         cartSummary.classList.remove('d-none');
