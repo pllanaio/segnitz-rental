@@ -49,6 +49,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const params = new URLSearchParams(window.location.search);
     const paymentContext = params.get('payment');
     const paymentType = params.get('paymentType');
+    const itemId = params.get('itemId');
 
     if (!['return', 'extension', 'return_charge'].includes(paymentContext)) {
         return;
@@ -159,8 +160,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     try {
-        const query = paymentType
-            ? `?paymentType=${encodeURIComponent(paymentType)}`
+        const queryParams = new URLSearchParams();
+
+        if (paymentType) {
+            queryParams.set('paymentType', paymentType);
+        }
+
+        if (itemId) {
+            queryParams.set('itemId', itemId);
+        }
+
+        const query = queryParams.toString()
+            ? `?${queryParams.toString()}`
             : '';
 
         const response = await fetch(`/orders/${orderId}/payment-status${query}`);
