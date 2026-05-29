@@ -58,7 +58,13 @@ async function loadMyOrders() {
 
 function canCancelOrder(order) {
     const status = String(order.status || '').trim().toLowerCase();
-    return ['reserved', 'confirmed'].includes(status);
+    const items = order.items || [];
+
+    const hasRentalStartingTodayOrPast = items.some(item =>
+        isRentalStartTodayOrPast(item.rentalStart)
+    );
+
+    return ['reserved', 'confirmed'].includes(status) && !hasRentalStartingTodayOrPast;
 }
 
 function renderMyOrders() {
@@ -286,11 +292,21 @@ function renderReviewCard(item, orderId) {
     `;
 }
 
+function isRentalStartTodayOrPast(rentalStart) {
+    if (!rentalStart) return false;
+
+    const today = new Date().toISOString().slice(0, 10);
+    return String(rentalStart).slice(0, 10) <= today;
+}
+
 function renderMyOrderItemCard(item, order) {
     const financials = calculateOrderItemFinancials(item);
     const itemStatus = item.itemStatus || item.item_status || 'active';
     const orderStatus = String(order?.status || '').trim().toLowerCase();
-    const canCancelItem = itemStatus === 'active' && !['expired', 'cancelled', 'picked_up', 'returned'].includes(orderStatus);
+    const canCancelItem =
+    itemStatus === 'active' &&
+    !['expired', 'cancelled', 'picked_up', 'returned'].includes(orderStatus) &&
+    !isRentalStartTodayOrPast(item.rentalStart);
 
     const imagesHtml = (item.returnImages || []).length === 0
         ? '<div class="text-muted small">Keine Rückgabefotos zu diesem Artikel vorhanden.</div>'
@@ -341,25 +357,35 @@ function renderMyOrderItemCard(item, order) {
                     <strong>Rückgabe:</strong> ${getReturnBadge(item.returnStatus, order?.status)}
                 </div>
 
-                <div class="mt-3 p-2 border rounded bg-light">
-                    <strong>Preisübersicht</strong><br>
-                    Ursprüngliche Miete brutto: ${financials.originalGross.toFixed(2)} €<br>
-                    Aktuelle Miete brutto: ${financials.adjustedGross.toFixed(2)} €<br>
-                    Mietdifferenz:
-                    <span class="${financials.rentalDeltaGross > 0 ? 'text-danger' : financials.rentalDeltaGross < 0 ? 'text-success' : ''}">
-                        ${financials.rentalDeltaGross.toFixed(2)} €
-                    </span><hr>
+<div class="mt-3 p-2 border rounded bg-light">
+    <strong>Preisübersicht</strong><br>
 
-                    Kaution: ${financials.deposit.toFixed(2)} €<br>
-                    Kaution zurück:
-                    <span class="text-success">${financials.depositRefund.toFixed(2)} €</span><br>
-                    Kaution einbehalten:
-                    <span class="text-danger">${financials.depositRetained.toFixed(2)} €</span><hr>
+    Miettage: ${financials.effectiveDays}<br>
+    Tagespreis: ${financials.pricePerDay.toFixed(2)} € inkl. MwSt.<br>
 
-                    Reparaturkosten / Zusatzforderung:
-                    <span class="text-danger">${financials.additionalCharge.toFixed(2)} €</span>
-                    ${financials.additionalChargeReason ? `<br><small>${formatTextValue(financials.additionalChargeReason)}</small>` : ''}
-                </div>
+    Mietzeitraumverlängerung:
+    ${financials.extendedDays > 0
+        ? `${financials.extendedDays} zusätzliche Tag${financials.extendedDays === 1 ? '' : 'e'}`
+        : 'Keine'}<br>
+
+    Miete gesamt:
+    <strong>${financials.rentalTotal.toFixed(2)} € inkl. MwSt.</strong><br>
+
+    Kaution:
+    ${financials.deposit.toFixed(2)} €<br>
+
+    Gesamtpreis inkl. MwSt. und Kaution:
+    <strong>${financials.grossTotalWithDeposit.toFixed(2)} €</strong><br>
+
+    ${financials.additionalCharge > 0 ? `
+        Zusatzforderung:
+        <span class="text-danger">${financials.additionalCharge.toFixed(2)} €</span><br>
+        ${financials.additionalChargeReason ? `<small>${formatTextValue(financials.additionalChargeReason)}</small><br>` : ''}
+    ` : ''}
+
+    Kaution zurück:
+    <span class="text-success">${financials.depositRefund.toFixed(2)} €</span>
+</div>
 
                 <div class="mt-3">
                     <strong>Rückgabefotos</strong>
@@ -383,34 +409,43 @@ function calculateRentalDays(startDate, endDate) {
 }
 
 function calculateOrderItemFinancials(item) {
-    const taxRate = 0.19;
-
     const originalDays = calculateRentalDays(item.rentalStart, item.rentalEnd);
-    const adjustedDays = calculateRentalDays(
-        item.adjustedRentalStart || item.rentalStart,
-        item.adjustedRentalEnd || item.actualReturnDate || item.rentalEnd
+
+    const effectiveStart = item.adjustedRentalStart || item.rentalStart;
+    const effectiveEnd = item.actualReturnDate || item.adjustedRentalEnd || item.rentalEnd;
+
+    const effectiveDays = calculateRentalDays(effectiveStart, effectiveEnd);
+    const extendedDays = Math.max(
+        calculateRentalDays(item.rentalStart, item.adjustedRentalEnd || item.rentalEnd) - originalDays,
+        0
     );
 
-    const originalGross = originalDays * Number(item.pricePerDay || 0) * (1 + taxRate);
-    const adjustedGross = adjustedDays * Number(item.adjustedPricePerDay || item.pricePerDay || 0) * (1 + taxRate);
-    const rentalDeltaGross = adjustedGross - originalGross;
+    const pricePerDay = Number(item.adjustedPricePerDay || item.pricePerDay || 0);
+    const rentalTotal = effectiveDays * pricePerDay;
 
     const deposit = Number(item.deposit || 0);
     const depositRefund = Number(item.depositRefundAmount ?? deposit);
     const depositRetained = Math.max(deposit - depositRefund, 0);
     const additionalCharge = Number(item.additionalChargeAmount || 0);
 
+    const grossTotalWithDeposit = rentalTotal + deposit;
+    const customerAdditionalDue = additionalCharge;
+    const customerCredit = depositRefund;
+
     return {
-        originalGross,
-        adjustedGross,
-        rentalDeltaGross,
+        originalDays,
+        effectiveDays,
+        extendedDays,
+        pricePerDay,
+        rentalTotal,
         deposit,
         depositRefund,
         depositRetained,
         additionalCharge,
-        additionalChargeReason: item.additionalChargeReason || '',
-        customerAdditionalDue: Math.max(rentalDeltaGross, 0) + additionalCharge,
-        customerCredit: Math.max(-rentalDeltaGross, 0) + depositRefund
+        grossTotalWithDeposit,
+        customerAdditionalDue,
+        customerCredit,
+        additionalChargeReason: item.additionalChargeReason || ''
     };
 }
 
