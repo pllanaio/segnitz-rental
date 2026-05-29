@@ -1972,65 +1972,81 @@ function calculateOrderItemFinancials(item) {
 function renderOrderFinancialSummary(order) {
     const items = order.items || [];
 
+    const itemRows = items.map(item => {
+        const f = calculateOrderItemFinancials(item);
+
+        return `
+            <div class="border-bottom py-2">
+                <strong>${item.title}</strong><br>
+                Miettage: ${f.effectiveDays}<br>
+                Tagespreis: ${f.pricePerDay.toFixed(2)} € inkl. MwSt.<br>
+                Miete gesamt: ${f.rentalTotal.toFixed(2)} € inkl. MwSt.<br>
+                Kaution: ${f.deposit.toFixed(2)} €<br>
+                ${f.additionalCharge > 0 ? `Zusatzforderung: ${f.additionalCharge.toFixed(2)} €<br>` : ''}
+                ${f.depositRefund > 0 ? `Kaution zurück: ${f.depositRefund.toFixed(2)} €<br>` : ''}
+            </div>
+        `;
+    }).join('');
+
     const totals = items.reduce((sum, item) => {
         const f = calculateOrderItemFinancials(item);
 
-        sum.originalGross += f.originalGross;
-        sum.adjustedGross += f.adjustedGross;
-        sum.rentalDeltaGross += f.rentalDeltaGross;
+        sum.rentalTotal += f.rentalTotal;
         sum.deposit += f.deposit;
         sum.depositRefund += f.depositRefund;
         sum.depositRetained += f.depositRetained;
         sum.additionalCharges += f.additionalCharge;
-        sum.customerAdditionalDue += f.customerAdditionalDue;
-        sum.customerCredit += f.customerCredit;
 
         return sum;
     }, {
-        originalGross: 0,
-        adjustedGross: 0,
-        rentalDeltaGross: 0,
+        rentalTotal: 0,
         deposit: 0,
         depositRefund: 0,
         depositRetained: 0,
-        additionalCharges: 0,
-        customerAdditionalDue: 0,
-        customerCredit: 0
+        additionalCharges: 0
     });
+
+    const finalBalance =
+        totals.additionalCharges - totals.depositRefund;
+
+    const finalBalanceClass =
+        finalBalance > 0
+            ? 'text-danger'
+            : finalBalance < 0
+                ? 'text-success'
+                : 'text-muted';
+
+    const finalBalanceLabel =
+        finalBalance > 0
+            ? 'Kunde muss insgesamt nachzahlen'
+            : finalBalance < 0
+                ? 'Kunde erhält insgesamt zurück'
+                : 'Bestellung vollständig ausgeglichen';
 
     return `
         <div class="card mt-4">
             <div class="card-header">
                 <strong>Gesamtpreisberechnung</strong>
             </div>
+
             <div class="card-body">
-                <div class="row g-3">
-                    <div class="col-12 col-md-6">
-                        <strong>Miete</strong><br>
-                        Ursprünglich brutto: ${totals.originalGross.toFixed(2)} €<br>
-                        Aktuell brutto: ${totals.adjustedGross.toFixed(2)} €<br>
-                        Differenz: ${totals.rentalDeltaGross.toFixed(2)} €
-                    </div>
+                ${itemRows || '<div class="text-muted">Keine Positionen vorhanden.</div>'}
 
-                    <div class="col-12 col-md-6">
-                        <strong>Kaution</strong><br>
-                        Gesamt: ${totals.deposit.toFixed(2)} €<br>
-                        Zurück an Kunden: ${totals.depositRefund.toFixed(2)} €<br>
-                        Einbehalten: ${totals.depositRetained.toFixed(2)} €
-                    </div>
+                <hr>
 
-                    <div class="col-12 col-md-6">
-                        <strong>Zusatzforderungen</strong><br>
-                        Reparaturkosten / Schäden: ${totals.additionalCharges.toFixed(2)} €
-                    </div>
+                <strong>Gesamtsummen</strong><br>
+                Miete gesamt: ${totals.rentalTotal.toFixed(2)} € inkl. MwSt.<br>
+                Kaution gesamt: ${totals.deposit.toFixed(2)} €<br>
+                Kaution zurück: <span class="text-success">${totals.depositRefund.toFixed(2)} €</span><br>
+                Kaution einbehalten: <span class="text-danger">${totals.depositRetained.toFixed(2)} €</span><br>
+                Zusatzforderungen: <span class="text-danger">${totals.additionalCharges.toFixed(2)} €</span>
 
-                    <div class="col-12 col-md-6">
-                        <strong>Abrechnung</strong><br>
-                        Kunde zusätzlich zu zahlen:
-                        <span class="text-danger">${totals.customerAdditionalDue.toFixed(2)} €</span><br>
+                <hr>
 
-                        Kunde erhält zurück / gutgeschrieben:
-                        <span class="text-success">${totals.customerCredit.toFixed(2)} €</span>
+                <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                    <strong>${finalBalanceLabel}</strong>
+                    <div class="fs-4 fw-bold ${finalBalanceClass}">
+                        ${Math.abs(finalBalance).toFixed(2)} €
                     </div>
                 </div>
             </div>
