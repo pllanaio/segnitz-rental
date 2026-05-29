@@ -713,6 +713,9 @@ function renderOrderItemCard(order, item) {
 
     Kaution zurück:
     <span class="text-success">${financials.depositRefund.toFixed(2)} €</span>
+    <br>
+Kaution einbehalten:
+<span class="text-danger">${financials.depositRetained.toFixed(2)} €</span>
 </div>
 ${renderItemPayments(order, item)}
             </div>
