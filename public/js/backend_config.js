@@ -591,6 +591,12 @@ function renderOrderDetails(order) {
 function renderOrderItemCard(order, item) {
     const itemStatus = item.itemStatus || item.item_status || 'active';
     const financials = calculateOrderItemFinancials(item);
+    const plannedReturnDate = item.adjustedRentalEnd || item.rentalEnd;
+    const actualReturnDate = item.actualReturnDate || item.returnedAt || null;
+    const lateDays = actualReturnDate && plannedReturnDate
+        ? Math.max(calculateRentalDays(plannedReturnDate, actualReturnDate) - 1, 0)
+        : 0;
+    const lateFee = lateDays * Number(item.adjustedPricePerDay || item.pricePerDay || 0);
     const adjustedStart = item.adjustedRentalStart || item.rentalStart;
     const adjustedEnd = item.adjustedRentalEnd || item.actualReturnDate || item.rentalEnd;
     const adjustedPrice = item.adjustedPricePerDay || item.pricePerDay;
@@ -690,25 +696,29 @@ function renderOrderItemCard(order, item) {
 
     Miettage: ${financials.effectiveDays}<br>
     Tagespreis: ${financials.pricePerDay.toFixed(2)} € inkl. MwSt.<br>
-
+    Miete gesamt: <strong>${financials.rentalTotal.toFixed(2)} € inkl. MwSt.</strong><br>
     Mietzeitraumverlängerung:
     ${financials.extendedDays > 0
             ? `${financials.extendedDays} zusätzliche Tag${financials.extendedDays === 1 ? '' : 'e'}`
             : 'Keine'}<br>
-
-    Miete gesamt:
-    <strong>${financials.rentalTotal.toFixed(2)} € inkl. MwSt.</strong><br>
-
     Kaution:
     ${financials.deposit.toFixed(2)} €<br>
-
     Gesamtpreis inkl. MwSt. und Kaution:
     <strong>${financials.grossTotalWithDeposit.toFixed(2)} €</strong><br>
-
     ${financials.additionalCharge > 0 ? `
         Zusatzforderung:
         <span class="text-danger">${financials.additionalCharge.toFixed(2)} €</span><br>
         ${financials.additionalChargeReason ? `<small>${formatTextValue(financials.additionalChargeReason)}</small><br>` : ''}
+    ` : ''}
+
+    <hr>
+    <strong>Rückgabe Soll/Ist</strong><br>
+    Geplante Rückgabe: ${plannedReturnDate || '-'}<br>
+    Tatsächliche Rückgabe: ${actualReturnDate || '-'}<br>
+    Verspätung: ${lateDays} Tag${lateDays === 1 ? '' : 'e'}<br>
+    ${lateDays > 0 ? `
+    Verspätungskosten:
+    <span class="text-danger">${lateFee.toFixed(2)} €</span><br>
     ` : ''}
 
     Kaution zurück:
