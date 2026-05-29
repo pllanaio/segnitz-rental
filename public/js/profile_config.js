@@ -443,7 +443,7 @@ function calculateOrderItemFinancials(item) {
     const additionalCharge = Number(item.additionalChargeAmount || 0);
 
     const grossTotalWithDeposit = rentalTotal + deposit;
-    const customerAdditionalDue = additionalCharge;
+    const customerAdditionalDue = Math.max(additionalCharge - deposit, 0);
     const customerCredit = depositRefund;
 
     return {
@@ -492,6 +492,8 @@ function renderMyOrderFinancialSummary(order) {
         sum.depositRefund += f.depositRefund;
         sum.depositRetained += f.depositRetained;
         sum.additionalCharges += f.additionalCharge;
+        sum.customerAdditionalDue += f.customerAdditionalDue;
+        sum.customerCredit += f.customerCredit;
         sum.originalRentalTotal += f.originalRentalTotal;
         sum.rentalAdjustment += f.rentalAdjustment;
 
@@ -503,6 +505,8 @@ function renderMyOrderFinancialSummary(order) {
         depositRetained: 0,
         originalRentalTotal: 0,
         rentalAdjustment: 0,
+        customerAdditionalDue: 0,
+        customerCredit: 0,
         additionalCharges: 0
     });
 
@@ -510,8 +514,8 @@ function renderMyOrderFinancialSummary(order) {
 
     const finalBalance =
         chargeableRentalAdjustment +
-        totals.additionalCharges -
-        totals.depositRefund;
+        totals.customerAdditionalDue -
+        totals.customerCredit;
 
     const finalBalanceClass =
         finalBalance > 0
