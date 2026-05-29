@@ -2013,8 +2013,10 @@ function renderOrderFinancialSummary(order) {
         rentalAdjustment: 0,
         additionalCharges: 0
     });
+    const chargeableRentalAdjustment = Math.max(totals.rentalAdjustment, 0);
+
     const finalBalance =
-        totals.rentalAdjustment +
+        chargeableRentalAdjustment +
         totals.additionalCharges -
         totals.depositRefund;
 
@@ -2045,9 +2047,12 @@ function renderOrderFinancialSummary(order) {
 
                 <strong>Gesamtsummen</strong><br>
                 Ursprüngliche Miete: ${totals.originalRentalTotal.toFixed(2)} € inkl. MwSt.<br>
-                Mietpreis-Korrektur: <span class="${totals.rentalAdjustment > 0 ? 'text-danger' : totals.rentalAdjustment < 0 ? 'text-success' : ''}">
+                Mietpreis-Korrektur:
+                <span class="${totals.rentalAdjustment > 0 ? 'text-danger' : totals.rentalAdjustment < 0 ? 'text-muted' : ''}">
                 ${totals.rentalAdjustment.toFixed(2)} €
-                </span><br>
+                </span>
+                ${totals.rentalAdjustment < 0 ? '<br><small class="text-muted">Nicht als Mietrückerstattung berücksichtigt.</small>' : ''}
+                <br>
                 Miete gesamt: ${totals.rentalTotal.toFixed(2)} € inkl. MwSt.<br>
                 Kaution gesamt: ${totals.deposit.toFixed(2)} €<br>
                 Kaution zurück: <span class="text-success">${totals.depositRefund.toFixed(2)} €</span><br>

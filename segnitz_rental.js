@@ -3323,6 +3323,27 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
             ]
         );
 
+        if (paymentType === 'rental_adjustment' && orderItemId) {
+            await connection.execute(
+                `UPDATE rental_order_payments
+         SET payment_status = 'cancelled',
+             note = CONCAT(
+                COALESCE(note, ''),
+                CASE WHEN note IS NULL OR note = '' THEN '' ELSE ' | ' END,
+                'Online-Nachzahlung durch Barzahlung ersetzt'
+             )
+         WHERE order_id = ?
+         AND order_item_id = ?
+         AND payment_type = 'rental_adjustment'
+         AND payment_method = 'online'
+         AND payment_status = 'pending'`,
+                [
+                    orderId,
+                    orderItemId
+                ]
+            );
+        }
+
         if (paymentType === 'rental') {
             await connection.execute(
                 `UPDATE rental_orders
@@ -3380,7 +3401,7 @@ app.post('/webhooks/mollie', async (req, res) => {
                                 : payment.status === 'authorized'
                                     ? 'authorized'
                                     : 'pending';
-                                
+
 
         try {
             await connection.execute(
