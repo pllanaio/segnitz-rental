@@ -245,6 +245,7 @@ const loginLimiter = rateLimit({
     max: 5,
     standardHeaders: true,
     legacyHeaders: false,
+    skipSuccessfulRequests: true,
     message: 'Zu viele Login-Versuche. Bitte versuche es in 15 Minuten erneut.'
 });
 

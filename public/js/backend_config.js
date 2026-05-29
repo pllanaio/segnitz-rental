@@ -685,32 +685,34 @@ function renderOrderItemCard(order, item) {
                     </div>
                 ` : ''}
 
-                <div class="mt-3 p-2 border rounded bg-light">
+<div class="mt-3 p-2 border rounded bg-light">
     <strong>Preisübersicht</strong><br>
 
-    Ursprüngliche Miete brutto:
-    ${financials.originalGross.toFixed(2)} €<br>
+    Miettage: ${financials.effectiveDays}<br>
+    Tagespreis: ${financials.pricePerDay.toFixed(2)} € inkl. MwSt.<br>
 
-    Aktuelle Miete brutto:
-    ${financials.adjustedGross.toFixed(2)} €<br>
+    Mietzeitraumverlängerung:
+    ${financials.extendedDays > 0
+        ? `${financials.extendedDays} zusätzliche Tag${financials.extendedDays === 1 ? '' : 'e'}`
+        : 'Keine'}<br>
 
-    Differenz Mietzeitraum:
-    <span class="${financials.rentalDeltaGross > 0 ? 'text-danger' : financials.rentalDeltaGross < 0 ? 'text-success' : ''}">
-        ${financials.rentalDeltaGross.toFixed(2)} €
-    </span><br>
+    Miete gesamt:
+    <strong>${financials.rentalTotal.toFixed(2)} € inkl. MwSt.</strong><br>
 
     Kaution:
     ${financials.deposit.toFixed(2)} €<br>
 
+    Gesamtpreis inkl. MwSt. und Kaution:
+    <strong>${financials.grossTotalWithDeposit.toFixed(2)} €</strong><br>
+
+    ${financials.additionalCharge > 0 ? `
+        Zusatzforderung:
+        <span class="text-danger">${financials.additionalCharge.toFixed(2)} €</span><br>
+        ${financials.additionalChargeReason ? `<small>${formatTextValue(financials.additionalChargeReason)}</small><br>` : ''}
+    ` : ''}
+
     Kaution zurück:
-    <span class="text-success">${financials.depositRefund.toFixed(2)} €</span><br>
-
-    Kaution einbehalten:
-    <span class="text-danger">${financials.depositRetained.toFixed(2)} €</span><br>
-
-    Reparaturkosten / Zusatzforderung:
-    <span class="text-danger">${financials.additionalCharge.toFixed(2)} €</span>
-    ${financials.additionalChargeReason ? `<br><small>${formatTextValue(financials.additionalChargeReason)}</small>` : ''}
+    <span class="text-success">${financials.depositRefund.toFixed(2)} €</span>
 </div>
 ${renderItemPayments(order, item)}
             </div>
@@ -1927,48 +1929,43 @@ async function uploadReturnImagesForCurrentReturn(itemId) {
 }
 
 function calculateOrderItemFinancials(item) {
-    const taxRate = 0.19;
+    const originalDays = calculateRentalDays(item.rentalStart, item.rentalEnd);
 
-    const originalStart = item.rentalStart;
-    const originalEnd = item.rentalEnd;
-    const adjustedStart = item.adjustedRentalStart || item.rentalStart;
-    const adjustedEnd = item.adjustedRentalEnd || item.actualReturnDate || item.rentalEnd;
+    const effectiveStart = item.adjustedRentalStart || item.rentalStart;
+    const effectiveEnd = item.actualReturnDate || item.adjustedRentalEnd || item.rentalEnd;
 
-    const originalDays = calculateRentalDays(originalStart, originalEnd);
-    const adjustedDays = calculateRentalDays(adjustedStart, adjustedEnd);
+    const effectiveDays = calculateRentalDays(effectiveStart, effectiveEnd);
+    const extendedDays = Math.max(
+        calculateRentalDays(item.rentalStart, item.adjustedRentalEnd || item.rentalEnd) - originalDays,
+        0
+    );
 
-    const originalPricePerDay = Number(item.pricePerDay || 0);
-    const adjustedPricePerDay = Number(item.adjustedPricePerDay || item.pricePerDay || 0);
-
-    const originalNet = originalDays * originalPricePerDay;
-    const adjustedNet = adjustedDays * adjustedPricePerDay;
-
-    const originalGross = originalNet * (1 + taxRate);
-    const adjustedGross = adjustedNet * (1 + taxRate);
-
-    const rentalDeltaGross = adjustedGross - originalGross;
+    const pricePerDay = Number(item.adjustedPricePerDay || item.pricePerDay || 0);
+    const rentalTotal = effectiveDays * pricePerDay;
 
     const deposit = Number(item.deposit || 0);
-    const depositRefund = Number(item.depositRefundAmount || deposit);
+    const depositRefund = Number(item.depositRefundAmount ?? deposit);
     const depositRetained = Math.max(deposit - depositRefund, 0);
-
     const additionalCharge = Number(item.additionalChargeAmount || 0);
+
+    const grossTotalWithDeposit = rentalTotal + deposit;
+    const customerAdditionalDue = additionalCharge;
+    const customerCredit = depositRefund;
 
     return {
         originalDays,
-        adjustedDays,
-        originalNet,
-        adjustedNet,
-        originalGross,
-        adjustedGross,
-        rentalDeltaGross,
+        effectiveDays,
+        extendedDays,
+        pricePerDay,
+        rentalTotal,
         deposit,
         depositRefund,
         depositRetained,
         additionalCharge,
-        additionalChargeReason: item.additionalChargeReason || '',
-        customerAdditionalDue: Math.max(rentalDeltaGross, 0) + additionalCharge,
-        customerCredit: Math.max(-rentalDeltaGross, 0) + depositRefund
+        grossTotalWithDeposit,
+        customerAdditionalDue,
+        customerCredit,
+        additionalChargeReason: item.additionalChargeReason || ''
     };
 }
 
