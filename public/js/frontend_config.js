@@ -472,6 +472,9 @@ submitBtn.addEventListener('click', async (event) => {
         submitBtn.classList.remove('d-inline-block');
         submitBtn.classList.add('d-none');
 
+        nextBtn.classList.remove('d-inline-block');
+        nextBtn.classList.add('d-none');
+
         succcessDiv.classList.remove('d-none');
         succcessDiv.classList.add('d-block');
 
