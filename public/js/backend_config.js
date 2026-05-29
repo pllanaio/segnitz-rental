@@ -1989,6 +1989,22 @@ function calculateOrderItemFinancials(item) {
 function renderOrderFinancialSummary(order) {
     const items = order.items || [];
 
+    const payments = order.payments || [];
+
+    const paidRentalAdjustments = payments
+        .filter(payment =>
+            payment.paymentType === 'rental_adjustment' &&
+            payment.paymentStatus === 'paid'
+        )
+        .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+
+    const paidReturnAdditionalCharges = payments
+        .filter(payment =>
+            payment.paymentType === 'return_additional_charge' &&
+            payment.paymentStatus === 'paid'
+        )
+        .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+
     const itemRows = items.map(item => {
         const f = calculateOrderItemFinancials(item);
 
@@ -2033,10 +2049,12 @@ function renderOrderFinancialSummary(order) {
     const chargeableRentalAdjustment = Math.max(totals.rentalAdjustment, 0);
 
     const finalBalance =
-        chargeableRentalAdjustment +
+        chargeableRentalAdjustment -
+        paidRentalAdjustments +
         totals.customerAdditionalDue -
+        paidReturnAdditionalCharges -
         totals.customerCredit;
-
+        
     const finalBalanceClass =
         finalBalance > 0
             ? 'text-danger'
