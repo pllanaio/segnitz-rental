@@ -304,9 +304,9 @@ function renderMyOrderItemCard(item, order) {
     const itemStatus = item.itemStatus || item.item_status || 'active';
     const orderStatus = String(order?.status || '').trim().toLowerCase();
     const canCancelItem =
-    itemStatus === 'active' &&
-    !['expired', 'cancelled', 'picked_up', 'returned'].includes(orderStatus) &&
-    !isRentalStartTodayOrPast(item.rentalStart);
+        itemStatus === 'active' &&
+        !['expired', 'cancelled', 'picked_up', 'returned'].includes(orderStatus) &&
+        !isRentalStartTodayOrPast(item.rentalStart);
 
     const imagesHtml = (item.returnImages || []).length === 0
         ? '<div class="text-muted small">Keine Rückgabefotos zu diesem Artikel vorhanden.</div>'
@@ -365,8 +365,8 @@ function renderMyOrderItemCard(item, order) {
 
     Mietzeitraumverlängerung:
     ${financials.extendedDays > 0
-        ? `${financials.extendedDays} zusätzliche Tag${financials.extendedDays === 1 ? '' : 'e'}`
-        : 'Keine'}<br>
+            ? `${financials.extendedDays} zusätzliche Tag${financials.extendedDays === 1 ? '' : 'e'}`
+            : 'Keine'}<br>
 
     Miete gesamt:
     <strong>${financials.rentalTotal.toFixed(2)} € inkl. MwSt.</strong><br>
@@ -422,6 +422,8 @@ function calculateOrderItemFinancials(item) {
 
     const pricePerDay = Number(item.adjustedPricePerDay || item.pricePerDay || 0);
     const rentalTotal = effectiveDays * pricePerDay;
+    const originalRentalTotal = originalDays * Number(item.pricePerDay || 0);
+    const rentalAdjustment = rentalTotal - originalRentalTotal;
 
     const deposit = Number(item.deposit || 0);
     const depositRefund = Number(item.depositRefundAmount ?? deposit);
@@ -445,6 +447,8 @@ function calculateOrderItemFinancials(item) {
         grossTotalWithDeposit,
         customerAdditionalDue,
         customerCredit,
+        originalRentalTotal,
+        rentalAdjustment,
         additionalChargeReason: item.additionalChargeReason || ''
     };
 }
@@ -476,6 +480,8 @@ function renderMyOrderFinancialSummary(order) {
         sum.depositRefund += f.depositRefund;
         sum.depositRetained += f.depositRetained;
         sum.additionalCharges += f.additionalCharge;
+        sum.originalRentalTotal += f.originalRentalTotal;
+        sum.rentalAdjustment += f.rentalAdjustment;
 
         return sum;
     }, {
@@ -483,11 +489,15 @@ function renderMyOrderFinancialSummary(order) {
         deposit: 0,
         depositRefund: 0,
         depositRetained: 0,
+        originalRentalTotal: 0,
+        rentalAdjustment: 0,
         additionalCharges: 0
     });
 
     const finalBalance =
-        totals.additionalCharges - totals.depositRefund;
+        totals.rentalAdjustment +
+        totals.additionalCharges -
+        totals.depositRefund;
 
     const finalBalanceClass =
         finalBalance > 0
@@ -515,6 +525,10 @@ function renderMyOrderFinancialSummary(order) {
                 <hr>
 
                 <strong>Gesamtsummen</strong><br>
+                Ursprüngliche Miete: ${totals.originalRentalTotal.toFixed(2)} € inkl. MwSt.<br>
+                Mietpreis-Korrektur: <span class="${totals.rentalAdjustment > 0 ? 'text-danger' : totals.rentalAdjustment < 0 ? 'text-success' : ''}">
+                ${totals.rentalAdjustment.toFixed(2)} €
+                </span><br>
                 Miete gesamt: ${totals.rentalTotal.toFixed(2)} € inkl. MwSt.<br>
                 Kaution gesamt: ${totals.deposit.toFixed(2)} €<br>
                 Kaution zurück: <span class="text-success">${totals.depositRefund.toFixed(2)} €</span><br>
