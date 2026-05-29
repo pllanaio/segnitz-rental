@@ -64,7 +64,8 @@ const {
     getMolliePayment,
     createMollieRefundForPayment,
     listMollieRefundsForPayment,
-    getMollieCheckoutUrl
+    getMollieCheckoutUrl,
+    cancelMolliePayment
 } = require('./services/mollieService');
 
 
@@ -1788,6 +1789,69 @@ ORDER BY id DESC`,
     }
 });
 
+app.put('/admin/order-items/:itemId/pickup', checkAdmin, async (req, res) => {
+    let connection;
+
+    try {
+        connection = await mysql.createConnection(dbConfig);
+        await connection.beginTransaction();
+
+        const pickedUpByUserId = await getUserIdByEmail(connection, req.session.user);
+
+        const [items] = await connection.execute(
+            `SELECT roi.id, roi.order_id, roi.item_status, ro.order_no, ro.customer_email
+             FROM rental_order_items roi
+             JOIN rental_orders ro ON ro.id = roi.order_id
+             WHERE roi.id = ?
+             LIMIT 1`,
+            [req.params.itemId]
+        );
+
+        if (items.length === 0) {
+            await connection.rollback();
+            return res.status(404).json({ error: 'Artikel nicht gefunden.' });
+        }
+
+        const item = items[0];
+
+        if (String(item.item_status || 'active') !== 'active') {
+            await connection.rollback();
+            return res.status(409).json({ error: 'Nur aktive Artikel können als abgeholt markiert werden.' });
+        }
+
+        await connection.execute(
+            `UPDATE rental_order_items
+             SET item_status = 'picked_up',
+                 picked_up_at = NOW(),
+                 picked_up_by_user_id = ?
+             WHERE id = ?`,
+            [pickedUpByUserId, req.params.itemId]
+        );
+
+        await connection.execute(
+            `UPDATE rental_orders
+             SET status = 'picked_up',
+                 return_case_status = 'open',
+                 picked_up_at = COALESCE(picked_up_at, NOW()),
+                 picked_up_by_user_id = COALESCE(picked_up_by_user_id, ?)
+             WHERE id = ?
+             AND status IN ('reserved', 'confirmed', 'paid', 'active')`,
+            [pickedUpByUserId, item.order_id]
+        );
+
+        await connection.commit();
+
+        res.json({ message: 'Artikel wurde als abgeholt markiert.' });
+
+    } catch (error) {
+        if (connection) await connection.rollback();
+        console.error('Fehler beim Markieren des Artikels als abgeholt:', error);
+        res.status(500).json({ error: 'Artikel konnte nicht als abgeholt markiert werden.' });
+    } finally {
+        if (connection) await connection.end();
+    }
+});
+
 app.put('/admin/orders/:id/pick-up', checkAdmin, async (req, res) => {
     let connection;
 
@@ -2298,7 +2362,7 @@ LIMIT 1`,
         const originalDays = calculateRentalDays(item.rental_start, item.rental_end);
         const originalTotal = originalDays * Number(item.price_per_day || 0);
         const amountDue = Math.max(adjustedRentalTotal - originalTotal, 0);
-
+        const baseUrl = process.env.BASE_URL.replace(/\/$/, '');
         let paymentUrl = null;
 
         if (amountDue > 0) {
@@ -2306,10 +2370,10 @@ LIMIT 1`,
                 id: item.order_id,
                 orderNo: item.order_no,
                 totalAmount: amountDue,
-                description: `Nachzahlung Mietzeitraum ${item.order_no}`,
+                description: `Nachzahlung Mietzeitraum ${item.order_no} - ${item.title} (#${req.params.itemId})`,
                 type: 'rental_adjustment',
                 itemId: req.params.itemId,
-                redirectUrl: `${process.env.BASE_URL.replace(/\/$/, '')}/index.html?payment=extension&orderId=${encodeURIComponent(item.order_id)}&paymentType=rental_adjustment`
+                redirectUrl: `${baseUrl}/index.html?payment=extension&orderId=${encodeURIComponent(item.order_id)}&paymentType=rental_adjustment&itemId=${encodeURIComponent(req.params.itemId)}`
             });
 
             await connection.execute(
@@ -3106,6 +3170,7 @@ app.post('/orders/:id/mollie-checkout', async (req, res) => {
 app.get('/orders/:id/payment-status', async (req, res) => {
     let connection;
     const paymentType = req.query.paymentType || null;
+    const itemId = req.query.itemId || null;
 
     try {
         connection = await mysql.createConnection(dbConfig);
@@ -3135,10 +3200,11 @@ app.get('/orders/:id/payment-status', async (req, res) => {
          FROM rental_order_payments rop
          JOIN rental_orders ro ON ro.id = rop.order_id
          WHERE rop.order_id = ?
-         AND rop.payment_type = ?
-         ORDER BY rop.id DESC
-         LIMIT 1`,
-                [req.params.id, paymentType]
+        AND rop.payment_type = ?
+        AND (? IS NULL OR rop.order_item_id = ?)
+        ORDER BY rop.id DESC
+        LIMIT 1`,
+                [req.params.id, paymentType, itemId, itemId]
             );
 
             if (paymentRows.length === 0 || !paymentRows[0].mollie_payment_id) {
@@ -3324,19 +3390,45 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
         );
 
         if (paymentType === 'rental_adjustment' && orderItemId) {
+
+            const [pendingOnlinePayments] = await connection.execute(
+                `SELECT id, mollie_payment_id
+                 FROM rental_order_payments
+                 WHERE order_id = ?
+                 AND order_item_id = ?
+                 AND payment_type = 'rental_adjustment'
+                 AND payment_method = 'online'
+                 AND payment_status = 'pending'`,
+                [orderId, orderItemId]
+            );
+
+            for (const pendingPayment of pendingOnlinePayments) {
+                if (!pendingPayment.mollie_payment_id) continue;
+
+                try {
+                    const molliePayment = await getMolliePayment(pendingPayment.mollie_payment_id);
+
+                    if (!['paid', 'canceled', 'expired', 'failed'].includes(molliePayment.status)) {
+                        await cancelMolliePayment(pendingPayment.mollie_payment_id);
+                    }
+                } catch (error) {
+                    console.error('Mollie-Nachzahlung konnte nicht storniert werden:', pendingPayment.mollie_payment_id, error);
+                }
+            }
+
             await connection.execute(
                 `UPDATE rental_order_payments
-         SET payment_status = 'cancelled',
-             note = CONCAT(
+                SET payment_status = 'cancelled',
+                note = CONCAT(
                 COALESCE(note, ''),
                 CASE WHEN note IS NULL OR note = '' THEN '' ELSE ' | ' END,
                 'Online-Nachzahlung durch Barzahlung ersetzt'
-             )
-         WHERE order_id = ?
-         AND order_item_id = ?
-         AND payment_type = 'rental_adjustment'
-         AND payment_method = 'online'
-         AND payment_status = 'pending'`,
+                )
+                WHERE order_id = ?
+                AND order_item_id = ?
+                AND payment_type = 'rental_adjustment'
+                AND payment_method = 'online'
+                AND payment_status = 'pending'`,
                 [
                     orderId,
                     orderItemId
