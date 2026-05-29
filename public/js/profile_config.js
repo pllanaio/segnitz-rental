@@ -386,6 +386,9 @@ function renderMyOrderItemCard(item, order) {
     Kaution zurück:
     <span class="text-success">${financials.depositRefund.toFixed(2)} €</span>
 </div>
+<br>
+Kaution einbehalten:
+<span class="text-danger">${financials.depositRetained.toFixed(2)} €</span>
 
                 <div class="mt-3">
                     <strong>Rückgabefotos</strong>
@@ -494,12 +497,12 @@ function renderMyOrderFinancialSummary(order) {
         additionalCharges: 0
     });
 
-const chargeableRentalAdjustment = Math.max(totals.rentalAdjustment, 0);
+    const chargeableRentalAdjustment = Math.max(totals.rentalAdjustment, 0);
 
-const finalBalance =
-    chargeableRentalAdjustment +
-    totals.additionalCharges -
-    totals.depositRefund;
+    const finalBalance =
+        chargeableRentalAdjustment +
+        totals.additionalCharges -
+        totals.depositRefund;
 
     const finalBalanceClass =
         finalBalance > 0
