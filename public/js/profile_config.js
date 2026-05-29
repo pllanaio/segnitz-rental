@@ -450,48 +450,44 @@ function calculateOrderItemFinancials(item) {
 }
 
 function renderMyOrderFinancialSummary(order) {
-    const taxRate = 0.19;
+    const items = order.items || [];
 
-    const totals = (order.items || []).reduce((sum, item) => {
+    const itemRows = items.map(item => {
         const f = calculateOrderItemFinancials(item);
 
-        sum.originalGross += f.originalGross;
-        sum.adjustedGross += f.adjustedGross;
-        sum.rentalDeltaGross += f.rentalDeltaGross;
+        return `
+            <div class="border-bottom py-2">
+                <strong>${item.title}</strong><br>
+                Miettage: ${f.effectiveDays}<br>
+                Tagespreis: ${f.pricePerDay.toFixed(2)} € inkl. MwSt.<br>
+                Miete gesamt: ${f.rentalTotal.toFixed(2)} € inkl. MwSt.<br>
+                Kaution: ${f.deposit.toFixed(2)} €<br>
+                ${f.additionalCharge > 0 ? `Zusatzforderung: ${f.additionalCharge.toFixed(2)} €<br>` : ''}
+                ${f.depositRefund > 0 ? `Kaution zurück: ${f.depositRefund.toFixed(2)} €<br>` : ''}
+            </div>
+        `;
+    }).join('');
 
+    const totals = items.reduce((sum, item) => {
+        const f = calculateOrderItemFinancials(item);
+
+        sum.rentalTotal += f.rentalTotal;
         sum.deposit += f.deposit;
         sum.depositRefund += f.depositRefund;
         sum.depositRetained += f.depositRetained;
-
         sum.additionalCharges += f.additionalCharge;
 
         return sum;
     }, {
-        originalGross: 0,
-        adjustedGross: 0,
-        rentalDeltaGross: 0,
-
+        rentalTotal: 0,
         deposit: 0,
         depositRefund: 0,
         depositRetained: 0,
-
         additionalCharges: 0
     });
 
-    const adjustedNet = totals.adjustedGross / (1 + taxRate);
-    const vatAmount = totals.adjustedGross - adjustedNet;
-
-    /*
-        Endsaldo:
-        + Mietdifferenz
-        + Zusatzforderungen
-        - Kautionsrückzahlung
-    */
-
     const finalBalance =
-        totals.rentalDeltaGross +
-        totals.additionalCharges -
-        totals.depositRefund;
+        totals.additionalCharges - totals.depositRefund;
 
     const finalBalanceClass =
         finalBalance > 0
@@ -502,9 +498,9 @@ function renderMyOrderFinancialSummary(order) {
 
     const finalBalanceLabel =
         finalBalance > 0
-            ? 'Kunde muss zusätzlich zahlen'
+            ? 'Kunde muss insgesamt nachzahlen'
             : finalBalance < 0
-                ? 'Kunde erhält Rückzahlung'
+                ? 'Kunde erhält insgesamt zurück'
                 : 'Bestellung vollständig ausgeglichen';
 
     return `
@@ -514,68 +510,25 @@ function renderMyOrderFinancialSummary(order) {
             </div>
 
             <div class="card-body">
+                ${itemRows || '<div class="text-muted">Keine Positionen vorhanden.</div>'}
 
-                <div class="row g-4">
+                <hr>
 
-                    <div class="col-12 col-lg-6">
-                        <h6>Miete</h6>
+                <strong>Gesamtsummen</strong><br>
+                Miete gesamt: ${totals.rentalTotal.toFixed(2)} € inkl. MwSt.<br>
+                Kaution gesamt: ${totals.deposit.toFixed(2)} €<br>
+                Kaution zurück: <span class="text-success">${totals.depositRefund.toFixed(2)} €</span><br>
+                Kaution einbehalten: <span class="text-danger">${totals.depositRetained.toFixed(2)} €</span><br>
+                Zusatzforderungen: <span class="text-danger">${totals.additionalCharges.toFixed(2)} €</span>
 
-                        Ursprüngliche Miete brutto:
-                        ${totals.originalGross.toFixed(2)} €<br>
+                <hr>
 
-                        Aktuelle Miete netto:
-                        ${adjustedNet.toFixed(2)} €<br>
-
-                        MwSt. (19 %):
-                        ${vatAmount.toFixed(2)} €<br>
-
-                        Aktuelle Miete brutto:
-                        <strong>${totals.adjustedGross.toFixed(2)} €</strong><br>
-
-                        Mietdifferenz:
-                        <span class="${totals.rentalDeltaGross > 0 ? 'text-danger' : totals.rentalDeltaGross < 0 ? 'text-success' : ''}">
-                            ${totals.rentalDeltaGross.toFixed(2)} €
-                        </span>
+                <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                    <strong>${finalBalanceLabel}</strong>
+                    <div class="fs-4 fw-bold ${finalBalanceClass}">
+                        ${Math.abs(finalBalance).toFixed(2)} €
                     </div>
-
-                    <div class="col-12 col-lg-6">
-                        <h6>Kaution & Schäden</h6>
-
-                        Kaution gesamt:
-                        ${totals.deposit.toFixed(2)} €<br>
-
-                        Kaution zurück:
-                        <span class="text-success">
-                            ${totals.depositRefund.toFixed(2)} €
-                        </span><br>
-
-                        Kaution einbehalten:
-                        <span class="text-danger">
-                            ${totals.depositRetained.toFixed(2)} €
-                        </span><br>
-
-                        Reparaturkosten / Zusatzforderungen:
-                        <span class="text-danger">
-                            ${totals.additionalCharges.toFixed(2)} €
-                        </span>
-                    </div>
-
-                    <div class="col-12">
-                        <hr>
-
-                        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
-                            <div>
-                                <strong>${finalBalanceLabel}</strong>
-                            </div>
-
-                            <div class="fs-4 fw-bold ${finalBalanceClass}">
-                                ${Math.abs(finalBalance).toFixed(2)} €
-                            </div>
-                        </div>
-                    </div>
-
                 </div>
-
             </div>
         </div>
     `;
