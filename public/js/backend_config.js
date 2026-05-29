@@ -2054,7 +2054,7 @@ function renderOrderFinancialSummary(order) {
         totals.customerAdditionalDue -
         paidReturnAdditionalCharges -
         totals.customerCredit;
-        
+
     const finalBalanceClass =
         finalBalance > 0
             ? 'text-danger'
@@ -2092,8 +2092,11 @@ function renderOrderFinancialSummary(order) {
                 Kaution gesamt: ${totals.deposit.toFixed(2)} €<br>
                 Kaution zurück: <span class="text-success">${totals.depositRefund.toFixed(2)} €</span><br>
                 Kaution einbehalten: <span class="text-danger">${totals.depositRetained.toFixed(2)} €</span><br>
-                Zusatzforderungen: <span class="text-danger">${totals.additionalCharges.toFixed(2)} €</span>
-
+                Zusatzforderungen: <span class="text-danger">${totals.additionalCharges.toFixed(2)} €</span><br>
+                Bezahlte Mietzeitraum-Nachzahlungen:
+                <span class="text-success">${paidRentalAdjustments.toFixed(2)} €</span><br>
+                Bezahlte Rückgabe-Nachzahlungen:
+                <span class="text-success">${paidReturnAdditionalCharges.toFixed(2)} €</span>
                 <hr>
 
                 <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
