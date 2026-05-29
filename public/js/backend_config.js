@@ -649,7 +649,7 @@ function renderOrderItemCard(order, item) {
                         <button type="button"
                             class="btn btn-outline-success btn-sm"
                             ${itemStatus === 'active' ? '' : 'disabled'}
-                            onclick="markOrderPickedUp(${order.id})">
+                            onclick="markOrderItemPickedUp(${order.id}, ${item.id})">
                             Als abgeholt markieren
                         </button>
                         <button type="button"
@@ -2373,6 +2373,35 @@ async function markOrderPickedUp(orderId) {
     }
 
     setTimeout(restoreOrderDetailsModalLayer, 300);
+}
+
+async function markOrderItemPickedUp(orderId, itemId) {
+    try {
+        const response = await fetch(`/admin/order-items/${itemId}/pickup`, {
+            method: 'PUT'
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+            showAlert(result.error || 'Artikel konnte nicht als abgeholt markiert werden.', 'danger');
+            return;
+        }
+
+        showAlert(result.message || 'Artikel wurde als abgeholt markiert.', 'success');
+
+        await loadOrders();
+
+        const detailsResponse = await fetch(`/admin/orders/${orderId}`);
+        const updatedOrder = await detailsResponse.json();
+
+        if (detailsResponse.ok) {
+            renderOrderDetails(updatedOrder);
+        }
+    } catch (error) {
+        console.error('Fehler beim Markieren des Artikels als abgeholt:', error);
+        showAlert('Artikel konnte nicht als abgeholt markiert werden.', 'danger');
+    }
 }
 
 function logout() {

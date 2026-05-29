@@ -224,6 +224,16 @@ async function listMollieRefundsForPayment(paymentId) {
     });
 }
 
+async function cancelMolliePayment(paymentId) {
+    if (!paymentId) {
+        throw new Error('paymentId ist erforderlich.');
+    }
+
+    const mollie = getMollieClient();
+
+    return mollie.payments.cancel(paymentId);
+}
+
 module.exports = {
     createMolliePaymentForOrder,
     createFirstMolliePayment,
@@ -237,6 +247,7 @@ module.exports = {
     getMolliePayment,
     createMollieRefundForPayment,
     listMollieRefundsForPayment,
+    cancelMolliePayment,
 
     getMollieCheckoutUrl,
     formatMollieAmount
