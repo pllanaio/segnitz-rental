@@ -382,12 +382,21 @@ function renderMyOrderItemCard(item, order) {
         <span class="text-danger">${financials.additionalCharge.toFixed(2)} €</span><br>
         ${financials.additionalChargeReason ? `<small>${formatTextValue(financials.additionalChargeReason)}</small><br>` : ''}
     ` : ''}
-
     Kaution zurück:
-    <span class="text-success">${financials.depositRefund.toFixed(2)} €</span>
-</div>
-<br>
+<span class="text-success">${financials.depositRefund.toFixed(2)} €</span><br>
+
 Kaution einbehalten:
+<span class="text-danger">${financials.depositRetained.toFixed(2)} €</span>
+
+${item.actualReturnDate || item.returnStatus || item.additionalChargeReason ? `
+    <hr>
+    <strong>Rückgabedetails</strong><br>
+    ${item.actualReturnDate ? `Rückgabedatum: ${item.actualReturnDate}<br>` : ''}
+    ${item.returnStatus ? `Rückgabestatus: ${getReturnBadge(item.returnStatus, order?.status)}<br>` : ''}
+    ${financials.additionalCharge > 0 ? `Reparatur-/Zusatzkosten: <span class="text-danger">${financials.additionalCharge.toFixed(2)} €</span><br>` : ''}
+    ${financials.additionalChargeReason ? `Grund: ${formatTextValue(financials.additionalChargeReason)}<br>` : ''}
+` : ''}
+</div>
 <span class="text-danger">${financials.depositRetained.toFixed(2)} €</span>
 
                 <div class="mt-3">
