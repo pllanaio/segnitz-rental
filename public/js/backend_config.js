@@ -1405,7 +1405,6 @@ ${!rentalPaid ? `
            </div>`
                 : '<span class="badge bg-secondary">Nicht erfasst</span>'
                     }
-        }
 
             ${depositRefundAmount > 0 && !hasCashDepositRefund && String(order.payment_method || '').toLowerCase() === 'cash' ? `
                 <button type="button"
