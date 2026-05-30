@@ -1404,7 +1404,7 @@ ${!rentalPaid ? `
                Reparaturkosten mit Kaution verrechnet
            </div>`
                 : '<span class="badge bg-secondary">Nicht erfasst</span>'
-                    }
+        }
 
             ${depositRefundAmount > 0 && !hasCashDepositRefund && String(order.payment_method || '').toLowerCase() === 'cash' ? `
                 <button type="button"
@@ -2320,10 +2320,22 @@ function renderOrderFinancialSummary(order) {
         0
     );
 
+    const paidDepositRefunds = payments
+        .filter(payment =>
+            payment.paymentType === 'deposit_refund' &&
+            payment.paymentStatus === 'paid'
+        )
+        .reduce((sum, payment) => sum + Math.abs(Number(payment.amount || 0)), 0);
+
+    const refundableDeposit = Math.max(
+        totals.customerCredit - paidDepositRefunds,
+        0
+    );
+
     const finalBalance =
         unpaidRentalAdjustment +
         unpaidReturnAdditionalDue -
-        totals.customerCredit;
+        refundableDeposit;
 
     const finalBalanceClass =
         finalBalance > 0
