@@ -2697,32 +2697,28 @@ END
                     'Für diesen Artikel wurde die Kaution bereits erstattet.'
                 );
             }
-            const [payments] = await connection.execute(
-                `SELECT mollie_payment_id
-FROM rental_order_payments
-WHERE order_id = ?
-AND payment_type IN ('initial_payment', 'rental', 'deposit')
-AND payment_status = 'paid'
-AND mollie_payment_id IS NOT NULL
-ORDER BY id ASC
-LIMIT 1`,
-                [item.order_id]
-            );
 
-            if (payments.length > 0) {
+            if (initialPaymentMethod === 'online') {
+                const [payments] = await connection.execute(
+                    `SELECT mollie_payment_id
+         FROM rental_order_payments
+         WHERE order_id = ?
+         AND payment_type IN ('initial_payment', 'rental', 'deposit')
+         AND payment_status = 'paid'
+         AND mollie_payment_id IS NOT NULL
+         ORDER BY id ASC
+         LIMIT 1`,
+                    [item.order_id]
+                );
 
-                const originalPaymentId =
-                    payments[0].mollie_payment_id;
+                if (payments.length > 0) {
+                    const originalPaymentId = payments[0].mollie_payment_id;
 
-                try {
-
-                    const refund =
-                        await createMollieRefundForPayment({
+                    try {
+                        const refund = await createMollieRefundForPayment({
                             paymentId: originalPaymentId,
                             amount: calculatedDepositRefundAmount,
-                            description:
-                                `Kautionsrückerstattung ${item.order_no}`,
-
+                            description: `Kautionsrückerstattung ${item.order_no} - ${item.title} (#${req.params.itemId})`,
                             metadata: {
                                 orderId: String(item.order_id),
                                 itemId: String(req.params.itemId),
@@ -2730,42 +2726,36 @@ LIMIT 1`,
                             }
                         });
 
-                    await connection.execute(
-                        `INSERT INTO rental_order_payments
-(
-    order_id,
-    order_item_id,
-    payment_type,
-    payment_method,
-    payment_status,
-    amount,
-    mollie_payment_id,
-    mollie_refund_id,
-    note,
-    paid_at
-)
-VALUES (?, ?, 'deposit_refund', 'online',
-        'paid', ?, ?, ?, ?, NOW())`,
-                        [
-                            item.order_id,
-                            req.params.itemId,
-                            -Math.abs(calculatedDepositRefundAmount),
-                            originalPaymentId,
-                            refund.id,
-                            'Kaution automatisch erstattet'
-                        ]
-                    );
+                        await connection.execute(
+                            `INSERT INTO rental_order_payments
+                 (
+                    order_id,
+                    order_item_id,
+                    payment_type,
+                    payment_method,
+                    payment_status,
+                    amount,
+                    mollie_payment_id,
+                    mollie_refund_id,
+                    note,
+                    paid_at
+                 )
+                 VALUES (?, ?, 'deposit_refund', 'online', 'paid', ?, ?, ?, ?, NOW())`,
+                            [
+                                item.order_id,
+                                req.params.itemId,
+                                -Math.abs(calculatedDepositRefundAmount),
+                                originalPaymentId,
+                                refund.id,
+                                'Kaution automatisch per Mollie erstattet'
+                            ]
+                        );
+                    } catch (refundError) {
+                        console.error('Mollie-Refund fehlgeschlagen:', refundError);
 
-                } catch (refundError) {
-
-                    console.error(
-                        'Mollie-Refund fehlgeschlagen:',
-                        refundError
-                    );
-
-                    await connection.execute(
-                        `INSERT INTO rental_order_payments
-                (
+                        await connection.execute(
+                            `INSERT INTO rental_order_payments
+                 (
                     order_id,
                     order_item_id,
                     payment_type,
@@ -2773,31 +2763,70 @@ VALUES (?, ?, 'deposit_refund', 'online',
                     payment_status,
                     amount,
                     note
-                )
-                VALUES (?, ?, 'deposit_refund',
-                        'online', 'failed', ?, ?)`,
-                        [
-                            item.order_id,
-                            req.params.itemId,
-                            -Math.abs(calculatedDepositRefundAmount),
-                            `Refund fehlgeschlagen: ${refundError.message}`
-                        ]
-                    );
+                 )
+                 VALUES (?, ?, 'deposit_refund', 'online', 'failed', ?, ?)`,
+                            [
+                                item.order_id,
+                                req.params.itemId,
+                                -Math.abs(calculatedDepositRefundAmount),
+                                `Refund fehlgeschlagen: ${refundError.message}`
+                            ]
+                        );
+                    }
                 }
+            } else if (initialPaymentMethod === 'cash') {
+                await connection.execute(
+                    `INSERT INTO rental_order_payments
+         (
+            order_id,
+            order_item_id,
+            payment_type,
+            payment_method,
+            payment_status,
+            amount,
+            note,
+            paid_at
+         )
+         VALUES (?, ?, 'deposit_refund', 'cash', 'paid', ?, ?, NOW())`,
+                    [
+                        item.order_id,
+                        req.params.itemId,
+                        -Math.abs(calculatedDepositRefundAmount),
+                        'Kaution bar erstattet'
+                    ]
+                );
             }
         }
 
-        if (customerAdditionalDue > 0) {
-
+        if (customerAdditionalDue > 0 && initialPaymentMethod === 'cash') {
+            await connection.execute(
+                `INSERT INTO rental_order_payments
+         (
+            order_id,
+            order_item_id,
+            payment_type,
+            payment_method,
+            payment_status,
+            amount,
+            note
+         )
+         VALUES (?, ?, 'return_additional_charge', 'cash', 'pending', ?, ?)`,
+                [
+                    item.order_id,
+                    req.params.itemId,
+                    customerAdditionalDue,
+                    'Rückgabe-Nachzahlung vor Ort zu zahlen'
+                ]
+            );
+        } else if (customerAdditionalDue > 0) {
             try {
-
                 const payment = await createMolliePaymentForOrder({
                     id: item.order_id,
                     orderNo: item.order_no,
                     totalAmount: customerAdditionalDue,
-                    description: `Nachzahlung Rückgabe ${item.order_no}`,
+                    description: `Nachzahlung Rückgabe ${item.order_no} - ${item.title} (#${req.params.itemId})`,
                     type: 'return_additional_charge',
-                    redirectUrl: `${process.env.BASE_URL.replace(/\/$/, '')}/index.html?payment=return_charge&orderId=${encodeURIComponent(item.order_id)}&paymentType=return_additional_charge`,
+                    redirectUrl: `${process.env.BASE_URL.replace(/\/$/, '')}/index.html?payment=return_charge&orderId=${encodeURIComponent(item.order_id)}&paymentType=return_additional_charge&itemId=${encodeURIComponent(req.params.itemId)}`,
                     itemId: req.params.itemId
                 });
 
@@ -2805,16 +2834,16 @@ VALUES (?, ?, 'deposit_refund', 'online',
 
                 await connection.execute(
                     `INSERT INTO rental_order_payments
-     (
-        order_id,
-        order_item_id,
-        payment_type,
-        payment_method,
-        payment_status,
-        amount,
-        mollie_payment_id
-     )
-     VALUES (?, ?, 'return_additional_charge', 'online', 'pending', ?, ?)`,
+             (
+                order_id,
+                order_item_id,
+                payment_type,
+                payment_method,
+                payment_status,
+                amount,
+                mollie_payment_id
+             )
+             VALUES (?, ?, 'return_additional_charge', 'online', 'pending', ?, ?)`,
                     [
                         item.order_id,
                         req.params.itemId,
@@ -2835,9 +2864,7 @@ VALUES (?, ?, 'deposit_refund', 'online',
                         additionalChargeReason
                     );
                 }
-
             } catch (mailError) {
-
                 console.error(
                     'Rückgabe gespeichert, aber Nachzahlungs-Mail fehlgeschlagen:',
                     mailError
