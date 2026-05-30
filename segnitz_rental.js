@@ -1317,6 +1317,84 @@ ORDER BY id DESC`,
     }
 });
 
+async function refundFullOnlineOrderPaymentOnCancellation(connection, orderId, order) {
+    const [alreadyRefunded] = await connection.execute(
+        `SELECT id
+         FROM rental_order_payments
+         WHERE order_id = ?
+         AND payment_type = 'order_cancellation_refund'
+         AND payment_status = 'paid'
+         LIMIT 1`,
+        [orderId]
+    );
+
+    if (alreadyRefunded.length > 0) {
+        return null;
+    }
+
+    const [paidPayments] = await connection.execute(
+        `SELECT
+            mollie_payment_id,
+            SUM(amount) AS amount
+         FROM rental_order_payments
+         WHERE order_id = ?
+         AND payment_type IN ('initial_payment', 'rental', 'deposit')
+         AND payment_method = 'online'
+         AND payment_status = 'paid'
+         AND mollie_payment_id IS NOT NULL
+         GROUP BY mollie_payment_id
+         ORDER BY id ASC
+         LIMIT 1`,
+        [orderId]
+    );
+
+    if (paidPayments.length === 0) {
+        return null;
+    }
+
+    const refundAmount = Number(paidPayments[0].amount || 0);
+
+    if (refundAmount <= 0) {
+        return null;
+    }
+
+    const refund = await createMollieRefundForPayment({
+        paymentId: paidPayments[0].mollie_payment_id,
+        amount: refundAmount,
+        description: `Storno Rückerstattung Bestellung ${order.order_no}`,
+        metadata: {
+            orderId: String(orderId),
+            type: 'order_cancellation_refund'
+        }
+    });
+
+    await connection.execute(
+        `INSERT INTO rental_order_payments
+         (
+            order_id,
+            order_item_id,
+            payment_type,
+            payment_method,
+            payment_status,
+            amount,
+            mollie_payment_id,
+            mollie_refund_id,
+            note,
+            paid_at
+         )
+         VALUES (?, NULL, 'order_cancellation_refund', 'online', 'paid', ?, ?, ?, ?, NOW())`,
+        [
+            orderId,
+            -Math.abs(refundAmount),
+            paidPayments[0].mollie_payment_id,
+            refund.id,
+            'Komplette Rückerstattung wegen Stornierung vor Abholung'
+        ]
+    );
+
+    return refund;
+}
+
 app.post('/my-orders/:id/cancel', async (req, res) => {
     let connection;
 
@@ -1334,7 +1412,13 @@ app.post('/my-orders/:id/cancel', async (req, res) => {
         await connection.beginTransaction();
 
         const [orders] = await connection.execute(
-            `SELECT ro.id, ro.status, ro.customer_email, MIN(roi.rental_start) AS firstRentalStart
+            `SELECT
+                ro.id,
+                ro.status,
+                ro.order_no,
+                ro.customer_email,
+                ro.payment_method,
+                MIN(roi.rental_start) AS firstRentalStart
              FROM rental_orders ro
              JOIN rental_order_items roi ON roi.order_id = ro.id
              WHERE ro.id = ?
@@ -1405,6 +1489,12 @@ app.post('/my-orders/:id/cancel', async (req, res) => {
                 cancelledByName,
                 orderId
             ]
+        );
+
+        await refundFullOnlineOrderPaymentOnCancellation(
+            connection,
+            orderId,
+            order
         );
 
         await connection.commit();
@@ -1938,7 +2028,7 @@ app.put('/admin/orders/:id/cancel', checkAdmin, async (req, res) => {
         await connection.beginTransaction();
 
         const [orders] = await connection.execute(
-            `SELECT id, status, order_no, customer_email
+            `SELECT id, status, order_no, customer_email, payment_method
              FROM rental_orders
              WHERE id = ?
              LIMIT 1`,
@@ -2013,6 +2103,12 @@ app.put('/admin/orders/:id/cancel', checkAdmin, async (req, res) => {
                 req.session.user,
                 req.params.id
             ]
+        );
+
+        await refundFullOnlineOrderPaymentOnCancellation(
+            connection,
+            req.params.id,
+            order
         );
 
         await connection.commit();
