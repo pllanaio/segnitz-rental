@@ -1351,15 +1351,60 @@ async function refundFullOnlineOrderPaymentOnCancellation(connection, orderId, o
         return null;
     }
 
-    const refundAmount = Number(paidPayments[0].amount || 0);
+    const paymentId = paidPayments[0].mollie_payment_id;
+    const originalPaidAmount = Number(paidPayments[0].amount || 0);
 
-    if (refundAmount <= 0) {
+    if (originalPaidAmount <= 0) {
+        return null;
+    }
+
+    const existingRefunds = await listMollieRefundsForPayment(paymentId);
+
+    const refundList =
+        existingRefunds?._embedded?.refunds ||
+        existingRefunds?._embedded?.payment_refunds ||
+        existingRefunds ||
+        [];
+
+    const alreadyRefundedAmount = refundList
+        .filter(refund => !['failed', 'canceled', 'cancelled'].includes(String(refund.status || '').toLowerCase()))
+        .reduce((sum, refund) => {
+            return sum + Number(refund.amount?.value || 0);
+        }, 0);
+
+    const refundableAmount = Math.max(
+        Number((originalPaidAmount - alreadyRefundedAmount).toFixed(2)),
+        0
+    );
+
+    if (refundableAmount <= 0) {
+        await connection.execute(
+            `INSERT INTO rental_order_payments
+         (
+            order_id,
+            order_item_id,
+            payment_type,
+            payment_method,
+            payment_status,
+            amount,
+            mollie_payment_id,
+            note,
+            paid_at
+         )
+         VALUES (?, NULL, 'order_cancellation_refund', 'online', 'paid', 0, ?, ?, NOW())`,
+            [
+                orderId,
+                paymentId,
+                'Storno: Kein weiterer Mollie-Refund möglich, Zahlung war bereits vollständig erstattet'
+            ]
+        );
+
         return null;
     }
 
     const refund = await createMollieRefundForPayment({
-        paymentId: paidPayments[0].mollie_payment_id,
-        amount: refundAmount,
+        paymentId,
+        amount: refundableAmount,
         description: `Storno Rückerstattung Bestellung ${order.order_no}`,
         metadata: {
             orderId: String(orderId),
@@ -1384,8 +1429,8 @@ async function refundFullOnlineOrderPaymentOnCancellation(connection, orderId, o
          VALUES (?, NULL, 'order_cancellation_refund', 'online', 'paid', ?, ?, ?, ?, NOW())`,
         [
             orderId,
-            -Math.abs(refundAmount),
-            paidPayments[0].mollie_payment_id,
+            -Math.abs(refundableAmount),
+            paymentId,
             refund.id,
             'Komplette Rückerstattung wegen Stornierung vor Abholung'
         ]
