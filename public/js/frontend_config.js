@@ -69,9 +69,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     prevBtn.classList.add('d-none');
     nextBtn.classList.add('d-none');
     submitBtn.classList.add('d-none');
-
     succcessDiv.classList.remove('d-none');
     succcessDiv.classList.add('d-block');
+
+    const wizardButtons = document.getElementById('q-box__buttons');
+
+    if (wizardButtons) {
+        wizardButtons.style.display = 'none';
+    }
 
     progress(100);
 
@@ -184,6 +189,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         const status = order.payment_status || order.paymentStatus;
 
         if (status === 'paid') {
+
+            const wizardButtons = document.getElementById('q-box__buttons');
+
+            if (wizardButtons) {
+                wizardButtons.style.display = 'none';
+            }
+
             setPaymentSuccessView(order);
             return;
         }
