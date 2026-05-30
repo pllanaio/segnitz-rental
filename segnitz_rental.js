@@ -3683,6 +3683,101 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
     }
 });
 
+app.post('/admin/order-payments/manual-refund', checkAdmin, async (req, res) => {
+    const {
+        orderId,
+        orderItemId,
+        paymentType,
+        amount,
+        note
+    } = req.body;
+
+    if (!orderId || !paymentType || !amount || Number(amount) <= 0) {
+        return res.status(400).json({ error: 'Ungültige Rückerstattungsdaten.' });
+    }
+
+    if (!['deposit_refund', 'order_cancellation_refund'].includes(paymentType)) {
+        return res.status(400).json({
+            error: 'Diese Zahlungsart ist keine Bar-Rückerstattung.'
+        });
+    }
+
+    let connection;
+
+    try {
+        connection = await mysql.createConnection(dbConfig);
+
+        const recordedByUserId = await getUserIdByEmail(connection, req.session.user);
+
+        const [orders] = await connection.execute(
+            `SELECT id, order_no, customer_email, payment_method
+             FROM rental_orders
+             WHERE id = ?
+             LIMIT 1`,
+            [orderId]
+        );
+
+        if (orders.length === 0) {
+            return res.status(404).json({ error: 'Bestellung nicht gefunden.' });
+        }
+
+        const [alreadyRefunded] = await connection.execute(
+            `SELECT id
+             FROM rental_order_payments
+             WHERE order_id = ?
+             AND (? IS NULL OR order_item_id = ?)
+             AND payment_type = ?
+             AND payment_method = 'cash'
+             AND payment_status = 'paid'
+             LIMIT 1`,
+            [
+                orderId,
+                orderItemId || null,
+                orderItemId || null,
+                paymentType
+            ]
+        );
+
+        if (alreadyRefunded.length > 0) {
+            return res.status(409).json({
+                error: 'Diese Bar-Rückerstattung wurde bereits erfasst.'
+            });
+        }
+
+        await connection.execute(
+            `INSERT INTO rental_order_payments
+             (
+                order_id,
+                order_item_id,
+                payment_type,
+                payment_method,
+                payment_status,
+                amount,
+                paid_at,
+                recorded_by_user_id,
+                note
+             )
+             VALUES (?, ?, ?, 'cash', 'paid', ?, NOW(), ?, ?)`,
+            [
+                orderId,
+                orderItemId || null,
+                paymentType,
+                -Math.abs(Number(amount)),
+                recordedByUserId,
+                note || null
+            ]
+        );
+
+        res.json({ message: 'Bar-Rückerstattung wurde erfasst.' });
+
+    } catch (error) {
+        console.error('Fehler beim Erfassen der Bar-Rückerstattung:', error);
+        res.status(500).json({ error: 'Rückerstattung konnte nicht erfasst werden.' });
+    } finally {
+        if (connection) await connection.end();
+    }
+});
+
 app.post('/webhooks/mollie', async (req, res) => {
     let connection;
 
