@@ -1334,17 +1334,16 @@ async function refundFullOnlineOrderPaymentOnCancellation(connection, orderId, o
 
     const [paidPayments] = await connection.execute(
         `SELECT
-            mollie_payment_id,
-            SUM(amount) AS amount
-         FROM rental_order_payments
-         WHERE order_id = ?
-         AND payment_type IN ('initial_payment', 'rental', 'deposit')
-         AND payment_method = 'online'
-         AND payment_status = 'paid'
-         AND mollie_payment_id IS NOT NULL
-         GROUP BY mollie_payment_id
-         ORDER BY id ASC
-         LIMIT 1`,
+        mollie_payment_id,
+        amount
+     FROM rental_order_payments
+     WHERE order_id = ?
+     AND payment_type = 'initial_payment'
+     AND payment_method = 'online'
+     AND payment_status = 'paid'
+     AND mollie_payment_id IS NOT NULL
+     ORDER BY id ASC
+     LIMIT 1`,
         [orderId]
     );
 
