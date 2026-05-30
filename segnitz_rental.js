@@ -1440,6 +1440,10 @@ async function refundFullOnlineOrderPaymentOnCancellation(connection, orderId, o
 }
 
 app.post('/my-orders/:id/cancel', async (req, res) => {
+    return res.status(403).json({
+        error: 'Stornierungen können nur durch einen Administrator durchgeführt werden.'
+    });
+
     let connection;
 
     if (!req.session.user) {
@@ -1571,6 +1575,11 @@ app.post('/my-orders/:id/cancel', async (req, res) => {
 });
 
 app.post('/my-orders/:orderId/items/:itemId/cancel', async (req, res) => {
+
+    return res.status(403).json({
+        error: 'Stornierungen können nur durch einen Administrator durchgeführt werden.'
+    });
+
     let connection;
 
     if (!req.session.user) {
