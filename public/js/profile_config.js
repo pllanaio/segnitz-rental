@@ -27,8 +27,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         document.getElementById('profileBox').classList.remove('d-none');
 
-        await loadMyOrders();
         initMyOrderFilters();
+        await loadMyOrders();
 
     } catch (error) {
         const box = document.getElementById('profileError');
