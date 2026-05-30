@@ -3469,6 +3469,25 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
             }
         }
 
+        if (['rental_adjustment', 'return_additional_charge'].includes(paymentType) && orderItemId) {
+            const [alreadyPaidPayments] = await connection.execute(
+                `SELECT id, payment_method
+         FROM rental_order_payments
+         WHERE order_id = ?
+         AND order_item_id = ?
+         AND payment_type = ?
+         AND payment_status = 'paid'
+         LIMIT 1`,
+                [orderId, orderItemId, paymentType]
+            );
+
+            if (alreadyPaidPayments.length > 0) {
+                return res.status(409).json({
+                    error: 'Diese Nachzahlung wurde bereits beglichen.'
+                });
+            }
+        }
+
         await connection.execute(
             `INSERT INTO rental_order_payments
              (order_id, order_item_id, payment_type, payment_method, payment_status, amount, paid_at, recorded_by_user_id, note)
@@ -3626,6 +3645,35 @@ app.post('/webhooks/mollie', async (req, res) => {
                 payment.id
             ]
         );
+
+        const [cashPaidRows] = await connection.execute(
+            `SELECT cashPaid.id
+     FROM rental_order_payments onlinePayment
+     JOIN rental_order_payments cashPaid
+       ON cashPaid.order_id = onlinePayment.order_id
+      AND cashPaid.order_item_id = onlinePayment.order_item_id
+      AND cashPaid.payment_type = onlinePayment.payment_type
+     WHERE onlinePayment.mollie_payment_id = ?
+     AND onlinePayment.payment_type IN ('rental_adjustment', 'return_additional_charge')
+     AND cashPaid.payment_method = 'cash'
+     AND cashPaid.payment_status = 'paid'
+     LIMIT 1`,
+            [payment.id]
+        );
+
+        if (cashPaidRows.length > 0) {
+            await connection.execute(
+                `UPDATE rental_order_payments
+         SET payment_status = 'cancelled',
+             note = CONCAT(COALESCE(note, ''), ' | Online-Link nach Barzahlung ignoriert')
+         WHERE mollie_payment_id = ?
+         AND payment_status = 'pending'`,
+                [payment.id]
+            );
+
+            await connection.commit();
+            return res.sendStatus(200);
+        }
 
         if (mappedPaymentStatus === 'charged_back') {
             await connection.execute(
