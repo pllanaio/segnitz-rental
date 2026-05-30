@@ -1299,6 +1299,11 @@ function renderItemPayments(order, item) {
         Number(payment.orderItemId) === Number(item.id)
     );
 
+    const hasPaidPayment = paymentType => itemPayments.some(payment =>
+        payment.paymentType === paymentType &&
+        payment.paymentStatus === 'paid'
+    );
+
     const rentalAdjustment = itemPayments.find(payment =>
         payment.paymentType === 'rental_adjustment'
     );
@@ -1350,7 +1355,7 @@ ${!rentalPaid ? `
             : '<span class="badge bg-secondary">Keine</span>'
         }
 
-            ${rentalAdjustment && rentalAdjustment.paymentStatus !== 'paid' ? `
+            ${rentalAdjustment && !hasPaidPayment('rental_adjustment') ? `
                 <button type="button"
                     class="btn btn-outline-success btn-sm ms-2"
                     onclick="openManualPaymentModal(
@@ -1371,7 +1376,7 @@ ${!rentalPaid ? `
             : '<span class="badge bg-secondary">Keine</span>'
         }
 
-            ${returnCharge && returnCharge.paymentStatus !== 'paid' ? `
+            ${returnCharge && !hasPaidPayment('return_additional_charge') ? `
                 <button type="button"
                     class="btn btn-outline-success btn-sm ms-2"
                     onclick="openManualPaymentModal(
@@ -2188,11 +2193,19 @@ function renderOrderFinancialSummary(order) {
     });
     const chargeableRentalAdjustment = Math.max(totals.rentalAdjustment, 0);
 
+    const unpaidRentalAdjustment = Math.max(
+        chargeableRentalAdjustment - paidRentalAdjustments,
+        0
+    );
+
+    const unpaidReturnAdditionalDue = Math.max(
+        totals.customerAdditionalDue - paidReturnAdditionalCharges,
+        0
+    );
+
     const finalBalance =
-        chargeableRentalAdjustment -
-        paidRentalAdjustments +
-        totals.customerAdditionalDue -
-        paidReturnAdditionalCharges -
+        unpaidRentalAdjustment +
+        unpaidReturnAdditionalDue -
         totals.customerCredit;
 
     const finalBalanceClass =
