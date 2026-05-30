@@ -2281,6 +2281,7 @@ app.put('/admin/order-items/:itemId/rental-adjustment', checkAdmin, async (req, 
     p.title,
     ro.order_no,
 ro.customer_email,
+ro.payment_method,
 ro.mollie_customer_id,
 ro.mollie_mandate_id
 FROM rental_order_items roi
@@ -2365,7 +2366,29 @@ LIMIT 1`,
         const baseUrl = process.env.BASE_URL.replace(/\/$/, '');
         let paymentUrl = null;
 
-        if (amountDue > 0) {
+        if (amountDue > 0 && item.payment_method === 'cash') {
+            await connection.execute(
+                `INSERT INTO rental_order_payments
+         (
+            order_id,
+            order_item_id,
+            payment_type,
+            payment_method,
+            payment_status,
+            amount,
+            note
+         )
+         VALUES (?, ?, 'rental_adjustment', 'cash', 'pending', ?, ?)`,
+                [
+                    item.order_id,
+                    req.params.itemId,
+                    amountDue,
+                    'Mietzeitraum-Nachzahlung vor Ort zu zahlen'
+                ]
+            );
+
+            paymentUrl = null;
+        } else if (amountDue > 0) {
             const payment = await createMolliePaymentForOrder({
                 id: item.order_id,
                 orderNo: item.order_no,
@@ -2378,7 +2401,7 @@ LIMIT 1`,
 
             await connection.execute(
                 `INSERT INTO rental_order_payments
-        (
+         (
             order_id,
             order_item_id,
             payment_type,
@@ -2386,9 +2409,8 @@ LIMIT 1`,
             payment_status,
             amount,
             mollie_payment_id
-        )
-        VALUES
-        (?, ?, 'rental_adjustment', 'online', 'pending', ?, ?)`,
+         )
+         VALUES (?, ?, 'rental_adjustment', 'online', 'pending', ?, ?)`,
                 [
                     item.order_id,
                     req.params.itemId,
@@ -2471,6 +2493,8 @@ app.put('/admin/order-items/:itemId/return', checkAdmin, async (req, res) => {
     p.title,
 ro.order_no,
 ro.customer_email,
+ro.payment_method,
+ro.mollie_payment_id,
 ro.mollie_customer_id,
 ro.mollie_mandate_id
 FROM rental_order_items roi
@@ -2536,9 +2560,12 @@ LIMIT 1`,
             ? (depositDeductionAmount / deposit) * 100
             : 0;
 
-        const finalDepositDecision = calculatedDepositRefundAmount > 0
-            ? 'full_refund'
-            : 'no_refund';
+        const finalDepositDecision =
+            calculatedDepositRefundAmount >= deposit
+                ? 'full_refund'
+                : calculatedDepositRefundAmount > 0
+                    ? 'partial_refund'
+                    : 'no_refund';
 
         const customerAdditionalDue = isDamaged
             ? Math.max(normalizedAdditionalChargeAmount - deposit, 0)
@@ -2647,6 +2674,8 @@ END
                 [item.order_id]
             );
         }
+
+        const initialPaymentMethod = item.payment_method || null;
 
         if (
             calculatedDepositRefundAmount > 0 &&
