@@ -3,11 +3,29 @@ let filteredProducts = [];
 let orders = [];
 let currentOrderItems = [];
 let availableCategories = [];
+let currentOrderPage = 1;
+const ordersPerPage = 10;
 
 document.addEventListener('DOMContentLoaded', () => {
     const form = document.getElementById('productForm');
     const cancelEditBtn = document.getElementById('cancelEditBtn');
     const orderSearchInput = document.getElementById('orderSearchInput');
+    [
+        'orderYearFilter',
+        'orderMonthFilter',
+        'orderStatusFilter',
+        'orderReturnStatusFilter',
+        'orderPaymentStatusFilter'
+    ].forEach(id => {
+        const element = document.getElementById(id);
+
+        if (element) {
+            element.addEventListener('change', () => {
+                currentOrderPage = 1;
+                renderOrders();
+            });
+        }
+    });
 
     loadBackendUser();
     loadProducts();
@@ -43,6 +61,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (orderSearchInput) {
         orderSearchInput.addEventListener('input', () => {
+            currentOrderPage = 1;
             renderOrders();
         });
     }
@@ -422,6 +441,7 @@ async function loadOrders() {
         }
 
         orders = result;
+        populateOrderFilters();
         renderOrders();
 
     } catch (error) {
@@ -430,38 +450,128 @@ async function loadOrders() {
     }
 }
 
+function getOrderDate(order) {
+    return order.created_at || order.createdAt || order.created || order.rental_start || order.rentalStart || '';
+}
+
+function getOrderYear(order) {
+    const date = getOrderDate(order);
+    return date ? String(date).slice(0, 4) : '';
+}
+
+function getOrderMonth(order) {
+    const date = getOrderDate(order);
+    return date ? String(date).slice(5, 7) : '';
+}
+
+function setSelectOptions(selectId, values, labelMap = {}) {
+    const select = document.getElementById(selectId);
+    if (!select) return;
+
+    const currentValue = select.value;
+    const firstLabel = select.options[0]?.textContent || 'Alle';
+
+    select.innerHTML = `<option value="">${firstLabel}</option>`;
+
+    values
+        .filter(Boolean)
+        .sort()
+        .forEach(value => {
+            const option = document.createElement('option');
+            option.value = value;
+            option.textContent = labelMap[value] || value;
+            select.appendChild(option);
+        });
+
+    select.value = currentValue;
+}
+
+function populateOrderFilters() {
+    setSelectOptions(
+        'orderYearFilter',
+        [...new Set(orders.map(getOrderYear))].sort().reverse()
+    );
+
+    setSelectOptions(
+        'orderMonthFilter',
+        [...new Set(orders.map(getOrderMonth))],
+        {
+            '01': 'Januar',
+            '02': 'Februar',
+            '03': 'März',
+            '04': 'April',
+            '05': 'Mai',
+            '06': 'Juni',
+            '07': 'Juli',
+            '08': 'August',
+            '09': 'September',
+            '10': 'Oktober',
+            '11': 'November',
+            '12': 'Dezember'
+        }
+    );
+
+    setSelectOptions('orderStatusFilter', [...new Set(orders.map(order => order.status || ''))]);
+    setSelectOptions('orderReturnStatusFilter', [...new Set(orders.map(order => order.return_status || ''))]);
+    setSelectOptions('orderPaymentStatusFilter', [...new Set(orders.map(order => order.payment_status || ''))]);
+}
+
+function getOrderFilterValue(id) {
+    return document.getElementById(id)?.value || '';
+}
+
 function renderOrders() {
     const container = document.getElementById('ordersList');
     const searchInput = document.getElementById('orderSearchInput');
     const query = searchInput ? searchInput.value.trim().toLowerCase() : '';
+    const yearFilter = getOrderFilterValue('orderYearFilter');
+    const monthFilter = getOrderFilterValue('orderMonthFilter');
+    const statusFilter = getOrderFilterValue('orderStatusFilter');
+    const returnStatusFilter = getOrderFilterValue('orderReturnStatusFilter');
+    const paymentStatusFilter = getOrderFilterValue('orderPaymentStatusFilter');
 
     container.innerHTML = '';
 
-    const visibleOrders = orders.filter(order => {
-        return [
-            order.order_no,
-            order.customer_email,
-            order.customer_company,
-            order.customer_first_name,
-            order.customer_last_name,
-            order.customer_phone,
-            order.customer_city,
-            order.status,
-            order.payment_status,
-            order.payment_method,
-            deriveOrderDisplayState(order)
-        ]
-            .join(' ')
-            .toLowerCase()
-            .includes(query);
-    });
+    const visibleOrders = orders
+        .filter(order => {
+            if (yearFilter && getOrderYear(order) !== yearFilter) return false;
+            if (monthFilter && getOrderMonth(order) !== monthFilter) return false;
+            if (statusFilter && String(order.status || '') !== statusFilter) return false;
+            if (returnStatusFilter && String(order.return_status || '') !== returnStatusFilter) return false;
+            if (paymentStatusFilter && String(order.payment_status || '') !== paymentStatusFilter) return false;
+
+            return [
+                order.order_no,
+                order.customer_email,
+                order.customer_company,
+                order.customer_first_name,
+                order.customer_last_name,
+                order.customer_phone,
+                order.customer_city,
+                order.status,
+                order.payment_status,
+                order.payment_method,
+                order.return_status,
+                deriveOrderDisplayState(order)
+            ]
+                .join(' ')
+                .toLowerCase()
+                .includes(query);
+        })
+        .sort((a, b) => String(getOrderDate(b)).localeCompare(String(getOrderDate(a))));
 
     if (visibleOrders.length === 0) {
         container.innerHTML = '<div class="alert alert-info">Keine Bestellungen gefunden.</div>';
         return;
     }
 
-    visibleOrders.forEach(order => {
+    const totalPages = Math.max(Math.ceil(visibleOrders.length / ordersPerPage), 1);
+    currentOrderPage = Math.min(currentOrderPage, totalPages);
+
+    const startIndex = (currentOrderPage - 1) * ordersPerPage;
+    const paginatedOrders = visibleOrders.slice(startIndex, startIndex + ordersPerPage);
+
+    paginatedOrders.forEach(order => {
         const card = document.createElement('div');
         card.className = 'card mb-3';
 
@@ -488,6 +598,36 @@ function renderOrders() {
 
         container.appendChild(card);
     });
+    const pagination = document.createElement('div');
+    pagination.className = 'd-flex justify-content-between align-items-center mt-3 flex-wrap gap-2';
+
+    pagination.innerHTML = `
+    <div class="text-muted small">
+        ${visibleOrders.length} Bestellung${visibleOrders.length === 1 ? '' : 'en'} gefunden,
+        Seite ${currentOrderPage} von ${totalPages}
+    </div>
+
+    <div class="btn-group">
+        <button type="button" class="btn btn-outline-primary btn-sm"
+            ${currentOrderPage <= 1 ? 'disabled' : ''}
+            onclick="changeOrderPage(-1)">
+            Zurück
+        </button>
+
+        <button type="button" class="btn btn-outline-primary btn-sm"
+            ${currentOrderPage >= totalPages ? 'disabled' : ''}
+            onclick="changeOrderPage(1)">
+            Weiter
+        </button>
+    </div>
+`;
+
+    container.appendChild(pagination);
+}
+
+function changeOrderPage(direction) {
+    currentOrderPage += direction;
+    renderOrders();
 }
 
 async function openOrderDetails(orderId) {

@@ -317,10 +317,16 @@ async function sendRentalAdjustmentEmailWithPayment(order, item, paymentUrl, amo
 
             ${amountDue > 0 ? `
                 <p>Durch die Änderung ergibt sich ein offener Betrag von <strong>${amountDue.toFixed(2)} €</strong>.</p>
-                <p>
-                    <a href="${paymentUrl}">Jetzt online bezahlen</a>
-                </p>
-                <p>Alternativ können Sie den Betrag auch direkt bei uns vor Ort bezahlen.</p>
+
+                ${paymentUrl ? `
+                    <p>
+                        <a href="${paymentUrl}">Jetzt online bezahlen</a>
+                    </p>
+                ` : `
+                    <p>
+                        Die Nachzahlung ist bei uns vor Ort zu begleichen.
+                    </p>
+                `}
             ` : `
                 <p>Es ergibt sich aktuell kein zusätzlicher Zahlungsbetrag.</p>
             `}

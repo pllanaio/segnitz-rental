@@ -178,6 +178,41 @@
                     <!-- BESTELLUNGEN -->
                     <div id="ordersView" class="d-none">
                         <h4 class="mb-4">Meine Bestellungen</h4>
+                        <div class="card mb-3">
+                            <div class="card-body">
+                                <div class="row g-2">
+                                    <div class="col-12 col-md-3">
+                                        <select id="myOrderYearFilter" class="form-select">
+                                            <option value="">Alle Jahre</option>
+                                        </select>
+                                    </div>
+
+                                    <div class="col-12 col-md-3">
+                                        <select id="myOrderMonthFilter" class="form-select">
+                                            <option value="">Alle Monate</option>
+                                        </select>
+                                    </div>
+
+                                    <div class="col-12 col-md-2">
+                                        <select id="myOrderStatusFilter" class="form-select">
+                                            <option value="">Alle Status</option>
+                                        </select>
+                                    </div>
+
+                                    <div class="col-12 col-md-2">
+                                        <select id="myOrderReturnStatusFilter" class="form-select">
+                                            <option value="">Alle Rückgabestatus</option>
+                                        </select>
+                                    </div>
+
+                                    <div class="col-12 col-md-2">
+                                        <select id="myOrderPaymentStatusFilter" class="form-select">
+                                            <option value="">Alle Zahlungsstatus</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
 
                         <div id="myOrdersList">
                             <div class="alert alert-info">Bestellungen werden geladen...</div>
