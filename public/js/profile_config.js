@@ -1,5 +1,7 @@
 let myOrders = [];
 let orderIdToCancel = null;
+let currentMyOrderPage = 1;
+const myOrdersPerPage = 10;
 
 document.addEventListener('DOMContentLoaded', async () => {
     try {
@@ -26,6 +28,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         document.getElementById('profileBox').classList.remove('d-none');
 
         await loadMyOrders();
+        initMyOrderFilters();
 
     } catch (error) {
         const box = document.getElementById('profileError');
@@ -33,6 +36,95 @@ document.addEventListener('DOMContentLoaded', async () => {
         box.classList.remove('d-none');
     }
 });
+
+function initMyOrderFilters() {
+    [
+        'myOrderYearFilter',
+        'myOrderMonthFilter',
+        'myOrderStatusFilter',
+        'myOrderReturnStatusFilter',
+        'myOrderPaymentStatusFilter'
+    ].forEach(id => {
+        const element = document.getElementById(id);
+
+        if (element) {
+            element.addEventListener('change', () => {
+                currentMyOrderPage = 1;
+                renderMyOrders();
+            });
+        }
+    });
+}
+
+function getMyOrderDate(order) {
+    return order.created_at || order.createdAt || order.created || order.rental_start || order.rentalStart || '';
+}
+
+function getMyOrderYear(order) {
+    const date = getMyOrderDate(order);
+    return date ? String(date).slice(0, 4) : '';
+}
+
+function getMyOrderMonth(order) {
+    const date = getMyOrderDate(order);
+    return date ? String(date).slice(5, 7) : '';
+}
+
+function getMyOrderFilterValue(id) {
+    return document.getElementById(id)?.value || '';
+}
+
+function setMyOrderSelectOptions(selectId, values, labelMap = {}) {
+    const select = document.getElementById(selectId);
+    if (!select) return;
+
+    const currentValue = select.value;
+    const firstLabel = select.options[0]?.textContent || 'Alle';
+
+    select.innerHTML = `<option value="">${firstLabel}</option>`;
+
+    values
+        .filter(Boolean)
+        .sort()
+        .forEach(value => {
+            const option = document.createElement('option');
+            option.value = value;
+            option.textContent = labelMap[value] || value;
+            select.appendChild(option);
+        });
+
+    select.value = currentValue;
+}
+
+function populateMyOrderFilters() {
+    setMyOrderSelectOptions(
+        'myOrderYearFilter',
+        [...new Set(myOrders.map(getMyOrderYear))].sort().reverse()
+    );
+
+    setMyOrderSelectOptions(
+        'myOrderMonthFilter',
+        [...new Set(myOrders.map(getMyOrderMonth))],
+        {
+            '01': 'Januar',
+            '02': 'Februar',
+            '03': 'März',
+            '04': 'April',
+            '05': 'Mai',
+            '06': 'Juni',
+            '07': 'Juli',
+            '08': 'August',
+            '09': 'September',
+            '10': 'Oktober',
+            '11': 'November',
+            '12': 'Dezember'
+        }
+    );
+
+    setMyOrderSelectOptions('myOrderStatusFilter', [...new Set(myOrders.map(order => order.status || ''))]);
+    setMyOrderSelectOptions('myOrderReturnStatusFilter', [...new Set(myOrders.map(order => deriveMyOrderReturnStatus(order) || ''))]);
+    setMyOrderSelectOptions('myOrderPaymentStatusFilter', [...new Set(myOrders.map(order => order.payment_status || ''))]);
+}
 
 async function loadMyOrders() {
     const container = document.getElementById('myOrdersList');
@@ -49,6 +141,7 @@ async function loadMyOrders() {
         }
 
         myOrders = result;
+        populateMyOrderFilters();
         renderMyOrders();
     } catch (error) {
         console.error('Fehler beim Laden der Bestellungen:', error);
@@ -75,7 +168,38 @@ function renderMyOrders() {
         return;
     }
 
-    container.innerHTML = myOrders.map(order => `
+    const yearFilter = getMyOrderFilterValue('myOrderYearFilter');
+    const monthFilter = getMyOrderFilterValue('myOrderMonthFilter');
+    const statusFilter = getMyOrderFilterValue('myOrderStatusFilter');
+    const returnStatusFilter = getMyOrderFilterValue('myOrderReturnStatusFilter');
+    const paymentStatusFilter = getMyOrderFilterValue('myOrderPaymentStatusFilter');
+
+    const visibleOrders = myOrders
+        .filter(order => {
+            const returnStatus = deriveMyOrderReturnStatus(order);
+
+            if (yearFilter && getMyOrderYear(order) !== yearFilter) return false;
+            if (monthFilter && getMyOrderMonth(order) !== monthFilter) return false;
+            if (statusFilter && String(order.status || '') !== statusFilter) return false;
+            if (returnStatusFilter && String(returnStatus || '') !== returnStatusFilter) return false;
+            if (paymentStatusFilter && String(order.payment_status || '') !== paymentStatusFilter) return false;
+
+            return true;
+        })
+        .sort((a, b) => String(getMyOrderDate(b)).localeCompare(String(getMyOrderDate(a))));
+
+    if (visibleOrders.length === 0) {
+        container.innerHTML = '<div class="alert alert-info">Keine Bestellungen für diese Filter gefunden.</div>';
+        return;
+    }
+
+    const totalPages = Math.max(Math.ceil(visibleOrders.length / myOrdersPerPage), 1);
+    currentMyOrderPage = Math.min(currentMyOrderPage, totalPages);
+
+    const startIndex = (currentMyOrderPage - 1) * myOrdersPerPage;
+    const paginatedOrders = visibleOrders.slice(startIndex, startIndex + myOrdersPerPage);
+
+    container.innerHTML = paginatedOrders.map(order => `
         <div class="card mb-2">
             <div class="card-body d-flex justify-content-between align-items-center gap-3">
                 <div>
@@ -86,22 +210,52 @@ function renderMyOrders() {
                 </div>
 
                 <div class="d-flex gap-2 flex-wrap justify-content-end">
-    <button type="button" class="btn btn-outline-primary btn-sm"
-        onclick="openMyOrderDetails(${order.id})">
-        Details anzeigen
-    </button>
+                    <button type="button" class="btn btn-outline-primary btn-sm"
+                        onclick="openMyOrderDetails(${order.id})">
+                        Details anzeigen
+                    </button>
 
-    ${canCancelOrder(order) ? `
-        <button type="button" class="btn btn-outline-danger btn-sm"
-            onclick="cancelMyOrder(${order.id})">
-            Stornieren
-        </button>
-    ` : ''}
-</div>
-
+                    ${canCancelOrder(order) ? `
+                        <button type="button" class="btn btn-outline-danger btn-sm"
+                            onclick="cancelMyOrder(${order.id})">
+                            Stornieren
+                        </button>
+                    ` : ''}
+                </div>
             </div>
         </div>
     `).join('');
+
+    const pagination = document.createElement('div');
+    pagination.className = 'd-flex justify-content-between align-items-center mt-3 flex-wrap gap-2';
+
+    pagination.innerHTML = `
+        <div class="text-muted small">
+            ${visibleOrders.length} Bestellung${visibleOrders.length === 1 ? '' : 'en'} gefunden,
+            Seite ${currentMyOrderPage} von ${totalPages}
+        </div>
+
+        <div class="btn-group">
+            <button type="button" class="btn btn-outline-primary btn-sm"
+                ${currentMyOrderPage <= 1 ? 'disabled' : ''}
+                onclick="changeMyOrderPage(-1)">
+                Zurück
+            </button>
+
+            <button type="button" class="btn btn-outline-primary btn-sm"
+                ${currentMyOrderPage >= totalPages ? 'disabled' : ''}
+                onclick="changeMyOrderPage(1)">
+                Weiter
+            </button>
+        </div>
+    `;
+
+    container.appendChild(pagination);
+}
+
+function changeMyOrderPage(direction) {
+    currentMyOrderPage += direction;
+    renderMyOrders();
 }
 
 async function openMyOrderDetails(orderId) {

@@ -192,11 +192,47 @@
                     </div>
 
                     <div id="ordersView" class="d-none">
-                        <div class="d-flex justify-content-between align-items-center mb-3">
+                        <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
                             <h4 class="mb-0">Bestellungen</h4>
 
                             <input type="search" id="orderSearchInput" class="form-control w-auto"
                                 placeholder="Bestellung suchen...">
+                        </div>
+
+                        <div class="card mb-3">
+                            <div class="card-body">
+                                <div class="row g-2">
+                                    <div class="col-12 col-md-2">
+                                        <select id="orderYearFilter" class="form-select">
+                                            <option value="">Alle Jahre</option>
+                                        </select>
+                                    </div>
+
+                                    <div class="col-12 col-md-2">
+                                        <select id="orderMonthFilter" class="form-select">
+                                            <option value="">Alle Monate</option>
+                                        </select>
+                                    </div>
+
+                                    <div class="col-12 col-md-2">
+                                        <select id="orderStatusFilter" class="form-select">
+                                            <option value="">Alle Status</option>
+                                        </select>
+                                    </div>
+
+                                    <div class="col-12 col-md-3">
+                                        <select id="orderReturnStatusFilter" class="form-select">
+                                            <option value="">Alle Rückgabestatus</option>
+                                        </select>
+                                    </div>
+
+                                    <div class="col-12 col-md-3">
+                                        <select id="orderPaymentStatusFilter" class="form-select">
+                                            <option value="">Alle Zahlungsstatus</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
 
                         <div id="ordersList">
