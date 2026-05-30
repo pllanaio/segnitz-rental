@@ -1312,6 +1312,18 @@ function renderItemPayments(order, item) {
         payment.paymentType === 'return_additional_charge'
     );
 
+    const depositRefund = itemPayments.find(payment =>
+        payment.paymentType === 'deposit_refund'
+    );
+
+    const depositRefundAmount = Number(item.depositRefundAmount || 0);
+
+    const hasCashDepositRefund = itemPayments.some(payment =>
+        payment.paymentType === 'deposit_refund' &&
+        payment.paymentMethod === 'cash' &&
+        payment.paymentStatus === 'paid'
+    );
+
     const rentalPaid = itemPayments.some(payment =>
         payment.paymentType === 'rental' &&
         payment.paymentStatus === 'paid'
@@ -1373,8 +1385,30 @@ ${!rentalPaid ? `
             Rückgabe-Nachzahlung:
             ${returnCharge
             ? formatPaymentStatusBadge(returnCharge.paymentStatus)
-            : '<span class="badge bg-secondary">Keine</span>'
-        }
+            : '<span class="badge bg-secondary">Keine</span>'}
+
+            <br>
+
+            Kautionsrückerstattung:
+            ${depositRefund
+                        ? formatPaymentStatusBadge(depositRefund.paymentStatus)
+                        : '<span class="badge bg-secondary">Nicht erfasst</span>'
+                    }
+
+            ${depositRefundAmount > 0 && !hasCashDepositRefund && String(order.payment_method || '').toLowerCase() === 'cash' ? `
+                <button type="button"
+                    class="btn btn-outline-danger btn-sm ms-2"
+                    onclick="openManualRefundModal(
+                        ${order.id},
+                        ${item.id},
+                        'deposit_refund',
+                        ${depositRefundAmount}
+                    )">
+                    Kaution bar erstatten
+                </button>
+            ` : ''}
+
+
 
             ${returnCharge && !hasPaidPayment('return_additional_charge') ? `
                 <button type="button"
@@ -1393,6 +1427,9 @@ ${!rentalPaid ? `
 }
 
 function openManualPaymentModal(orderId, orderItemId, paymentType, amount) {
+    document.querySelector('#manualPaymentModal .modal-title').textContent = 'Barzahlung erfassen';
+    document.querySelector('#manualPaymentModal .btn-success').textContent = 'Zahlung erfassen';
+    document.querySelector('#manualPaymentModal .btn-success').onclick = submitManualPayment;
     document.getElementById('manualPaymentOrderId').value = orderId;
     document.getElementById('manualPaymentOrderItemId').value = orderItemId || '';
     document.getElementById('manualPaymentType').value = paymentType;
@@ -1401,6 +1438,20 @@ function openManualPaymentModal(orderId, orderItemId, paymentType, amount) {
 
     const modal = new bootstrap.Modal(document.getElementById('manualPaymentModal'));
     modal.show();
+}
+
+function openManualRefundModal(orderId, orderItemId, paymentType, amount) {
+    document.getElementById('manualPaymentOrderId').value = orderId;
+    document.getElementById('manualPaymentOrderItemId').value = orderItemId || '';
+    document.getElementById('manualPaymentType').value = paymentType;
+    document.getElementById('manualPaymentAmount').value = Number(amount || 0).toFixed(2);
+    document.getElementById('manualPaymentNote').value = 'Bar-Rückerstattung an Kunden ausgezahlt';
+
+    document.querySelector('#manualPaymentModal .modal-title').textContent = 'Bar-Rückerstattung erfassen';
+    document.querySelector('#manualPaymentModal .btn-success').textContent = 'Rückerstattung erfassen';
+    document.querySelector('#manualPaymentModal .btn-success').onclick = submitManualRefund;
+
+    new bootstrap.Modal(document.getElementById('manualPaymentModal')).show();
 }
 
 async function submitManualPayment() {
@@ -1453,6 +1504,59 @@ async function submitManualPayment() {
     } catch (error) {
         console.error('Fehler beim Erfassen der Barzahlung:', error);
         showAlert('Zahlung konnte nicht erfasst werden.', 'danger');
+    }
+}
+
+async function submitManualRefund() {
+    const orderId = document.getElementById('manualPaymentOrderId').value;
+    const orderItemId = document.getElementById('manualPaymentOrderItemId').value;
+    const paymentType = document.getElementById('manualPaymentType').value;
+    const amount = Number(document.getElementById('manualPaymentAmount').value);
+    const note = document.getElementById('manualPaymentNote').value.trim();
+
+    if (!orderId || !paymentType || !amount || amount <= 0) {
+        showAlert('Bitte gültige Rückerstattungsdaten eingeben.', 'warning');
+        return;
+    }
+
+    try {
+        const response = await fetch('/admin/order-payments/manual-refund', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                orderId,
+                orderItemId: orderItemId || null,
+                paymentType,
+                amount,
+                note
+            })
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+            showAlert(result.error || 'Rückerstattung konnte nicht erfasst werden.', 'danger');
+            return;
+        }
+
+        bootstrap.Modal.getInstance(document.getElementById('manualPaymentModal'))?.hide();
+
+        showAlert(result.message || 'Rückerstattung wurde erfasst.', 'success');
+
+        const detailsResponse = await fetch(`/admin/orders/${orderId}`);
+        const updatedOrder = await detailsResponse.json();
+
+        if (detailsResponse.ok) {
+            renderOrderDetails(updatedOrder);
+        }
+
+        await loadOrders();
+
+    } catch (error) {
+        console.error('Fehler beim Erfassen der Rückerstattung:', error);
+        showAlert('Rückerstattung konnte nicht erfasst werden.', 'danger');
     }
 }
 
