@@ -397,7 +397,6 @@ ${item.actualReturnDate || item.returnStatus || item.additionalChargeReason ? `
     ${financials.additionalChargeReason ? `Grund: ${formatTextValue(financials.additionalChargeReason)}<br>` : ''}
 ` : ''}
 </div>
-<span class="text-danger">${financials.depositRetained.toFixed(2)} €</span>
 
                 <div class="mt-3">
                     <strong>Rückgabefotos</strong>
@@ -468,6 +467,22 @@ function calculateOrderItemFinancials(item) {
 function renderMyOrderFinancialSummary(order) {
     const items = order.items || [];
 
+    const payments = order.payments || [];
+
+    const paidRentalAdjustments = payments
+        .filter(payment =>
+            payment.paymentType === 'rental_adjustment' &&
+            payment.paymentStatus === 'paid'
+        )
+        .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+
+    const paidReturnAdditionalCharges = payments
+        .filter(payment =>
+            payment.paymentType === 'return_additional_charge' &&
+            payment.paymentStatus === 'paid'
+        )
+        .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+
     const itemRows = items.map(item => {
         const f = calculateOrderItemFinancials(item);
 
@@ -513,8 +528,10 @@ function renderMyOrderFinancialSummary(order) {
     const chargeableRentalAdjustment = Math.max(totals.rentalAdjustment, 0);
 
     const finalBalance =
-        chargeableRentalAdjustment +
+        chargeableRentalAdjustment -
+        paidRentalAdjustments +
         totals.customerAdditionalDue -
+        paidReturnAdditionalCharges -
         totals.customerCredit;
 
     const finalBalanceClass =
@@ -555,7 +572,11 @@ function renderMyOrderFinancialSummary(order) {
                 Kaution zurück: <span class="text-success">${totals.depositRefund.toFixed(2)} €</span><br>
                 Kaution einbehalten: <span class="text-danger">${totals.depositRetained.toFixed(2)} €</span><br>
                 Zusatzforderungen: <span class="text-danger">${totals.additionalCharges.toFixed(2)} €</span>
-
+                <br>
+                Bezahlte Mietzeitraum-Nachzahlungen:
+                <span class="text-success">${paidRentalAdjustments.toFixed(2)} €</span><br>
+                Bezahlte Rückgabe-Nachzahlungen:
+                <span class="text-success">${paidReturnAdditionalCharges.toFixed(2)} €</span>
                 <hr>
 
                 <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
