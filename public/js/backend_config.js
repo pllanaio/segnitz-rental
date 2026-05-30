@@ -2310,16 +2310,6 @@ function renderOrderFinancialSummary(order) {
     });
     const chargeableRentalAdjustment = Math.max(totals.rentalAdjustment, 0);
 
-    const unpaidRentalAdjustment = Math.max(
-        chargeableRentalAdjustment - paidRentalAdjustments,
-        0
-    );
-
-    const unpaidReturnAdditionalDue = Math.max(
-        totals.customerAdditionalDue - paidReturnAdditionalCharges,
-        0
-    );
-
     const paidDepositRefunds = payments
         .filter(payment =>
             payment.paymentType === 'deposit_refund' &&
@@ -2332,9 +2322,21 @@ function renderOrderFinancialSummary(order) {
         0
     );
 
+    const totalAdditionalDue =
+        chargeableRentalAdjustment +
+        totals.customerAdditionalDue;
+
+    const totalPaidAdditionalCharges =
+        paidRentalAdjustments +
+        paidReturnAdditionalCharges;
+
+    const remainingAdditionalDue = Math.max(
+        totalAdditionalDue - totalPaidAdditionalCharges,
+        0
+    );
+
     const finalBalance =
-        unpaidRentalAdjustment +
-        unpaidReturnAdditionalDue -
+        remainingAdditionalDue -
         refundableDeposit;
 
     const finalBalanceClass =
