@@ -3631,21 +3631,6 @@ app.post('/webhooks/mollie', async (req, res) => {
             return res.sendStatus(200);
         }
 
-        await connection.execute(
-            `UPDATE rental_order_payments
-             SET payment_status = ?,
-                 paid_at = CASE
-                    WHEN ? = 'paid' THEN COALESCE(paid_at, NOW())
-                    ELSE paid_at
-                 END
-             WHERE mollie_payment_id = ?`,
-            [
-                mappedPaymentStatus,
-                mappedPaymentStatus,
-                payment.id
-            ]
-        );
-
         const [cashPaidRows] = await connection.execute(
             `SELECT cashPaid.id
      FROM rental_order_payments onlinePayment
@@ -3674,6 +3659,21 @@ app.post('/webhooks/mollie', async (req, res) => {
             await connection.commit();
             return res.sendStatus(200);
         }
+
+        await connection.execute(
+            `UPDATE rental_order_payments
+             SET payment_status = ?,
+                 paid_at = CASE
+                    WHEN ? = 'paid' THEN COALESCE(paid_at, NOW())
+                    ELSE paid_at
+                 END
+             WHERE mollie_payment_id = ?`,
+            [
+                mappedPaymentStatus,
+                mappedPaymentStatus,
+                payment.id
+            ]
+        );
 
         if (mappedPaymentStatus === 'charged_back') {
             await connection.execute(
