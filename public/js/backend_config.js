@@ -1317,6 +1317,13 @@ function renderItemPayments(order, item) {
     );
 
     const depositRefundAmount = Number(item.depositRefundAmount || 0);
+    const depositAmount = Number(item.deposit || 0);
+    const additionalChargeAmount = Number(item.additionalChargeAmount || 0);
+
+    const isDepositFullyOffsetByRepair =
+        depositRefundAmount <= 0 &&
+        depositAmount > 0 &&
+        additionalChargeAmount >= depositAmount;
 
     const hasCashDepositRefund = itemPayments.some(payment =>
         payment.paymentType === 'deposit_refund' &&
@@ -1391,9 +1398,14 @@ ${!rentalPaid ? `
 
             Kautionsrückerstattung:
             ${depositRefund
-                        ? formatPaymentStatusBadge(depositRefund.paymentStatus)
-                        : '<span class="badge bg-secondary">Nicht erfasst</span>'
+            ? formatPaymentStatusBadge(depositRefund.paymentStatus)
+            : isDepositFullyOffsetByRepair
+                ? `<div class="border border-danger rounded p-2 mt-1 text-danger fw-semibold bg-white">
+               Reparaturkosten mit Kaution verrechnet
+           </div>`
+                : '<span class="badge bg-secondary">Nicht erfasst</span>'
                     }
+        }
 
             ${depositRefundAmount > 0 && !hasCashDepositRefund && String(order.payment_method || '').toLowerCase() === 'cash' ? `
                 <button type="button"

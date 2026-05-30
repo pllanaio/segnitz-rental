@@ -214,13 +214,6 @@ function renderMyOrders() {
                         onclick="openMyOrderDetails(${order.id})">
                         Details anzeigen
                     </button>
-
-                    ${canCancelOrder(order) ? `
-                        <button type="button" class="btn btn-outline-danger btn-sm"
-                            onclick="cancelMyOrder(${order.id})">
-                            Stornieren
-                        </button>
-                    ` : ''}
                 </div>
             </div>
         </div>
@@ -325,15 +318,6 @@ function renderMyOrderDetails(order) {
         ? uniqueReviewItems.map(item => renderReviewCard(item, order.id)).join('')
         : '';
 
-    const cancelButtonHtml = canCancelOrder(order)
-        ? `
-            <button type="button" class="btn btn-outline-danger btn-sm mt-3"
-                onclick="cancelMyOrder(${order.id})">
-                Bestellung stornieren
-            </button>
-        `
-        : '';
-
     body.innerHTML = `
         <div class="row g-4">
             <div class="col-12 col-lg-6">
@@ -378,8 +362,6 @@ function renderMyOrderDetails(order) {
                     ${reviewButtonsHtml}
                 </div>
             ` : ''}
-
-            ${cancelButtonHtml}
         </div>
     `;
 }
@@ -457,10 +439,6 @@ function renderMyOrderItemCard(item, order) {
     const financials = calculateOrderItemFinancials(item);
     const itemStatus = item.itemStatus || item.item_status || 'active';
     const orderStatus = String(order?.status || '').trim().toLowerCase();
-    const canCancelItem =
-        itemStatus === 'active' &&
-        !['expired', 'cancelled', 'picked_up', 'returned'].includes(orderStatus) &&
-        !isRentalStartTodayOrPast(item.rentalStart);
 
     const imagesHtml = (item.returnImages || []).length === 0
         ? '<div class="text-muted small">Keine Rückgabefotos zu diesem Artikel vorhanden.</div>'
@@ -485,14 +463,6 @@ function renderMyOrderItemCard(item, order) {
             <h6 class="mb-1">${item.title}</h6>
             <div class="small text-muted">Position #${item.id}</div>
         </div>
-
-        ${canCancelItem ? `
-            <button type="button"
-                class="btn btn-outline-danger btn-sm"
-                onclick="cancelMyOrderItem(${item.orderId || item.order_id}, ${item.id})">
-                Artikel stornieren
-            </button>
-        ` : ''}
     </div>
                 <div>
                     <strong>Mietzeitraum:</strong>
