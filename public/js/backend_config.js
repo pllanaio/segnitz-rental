@@ -1564,7 +1564,9 @@ function formatPaymentType(type) {
     const labels = {
         rental: 'Miete',
         rental_adjustment: 'Nachzahlung Mietzeitraum',
-        return_additional_charge: 'Nachzahlung Rückgabe'
+        return_additional_charge: 'Nachzahlung Rückgabe',
+        deposit_refund: 'Kautionsrückerstattung',
+        order_cancellation_refund: 'Storno-Rückerstattung'
     };
 
     return labels[type] || type || '-';
