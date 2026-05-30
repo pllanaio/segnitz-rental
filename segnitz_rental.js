@@ -3420,7 +3420,7 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
         const recordedByUserId = await getUserIdByEmail(connection, req.session.user);
 
         const [orders] = await connection.execute(
-            `SELECT id, order_no, customer_email
+            `SELECT id, order_no, customer_email, payment_method
              FROM rental_orders
              WHERE id = ?
              LIMIT 1`,
@@ -3429,6 +3429,44 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
 
         if (orders.length === 0) {
             return res.status(404).json({ error: 'Bestellung nicht gefunden.' });
+        }
+        const order = orders[0];
+        const initialPaymentMethod = order.payment_method;
+
+        if (
+            ['rental_adjustment', 'return_additional_charge'].includes(paymentType) &&
+            initialPaymentMethod !== 'cash'
+        ) {
+            return res.status(409).json({
+                error: 'Barzahlung ist für diese Bestellung nicht erlaubt, da die Bestellung nicht bar bezahlt wurde.'
+            });
+        }
+
+        if (
+            ['rental_adjustment', 'return_additional_charge'].includes(paymentType) &&
+            orderItemId
+        ) {
+            const [alreadyPaidOnlinePayments] = await connection.execute(
+                `SELECT id
+         FROM rental_order_payments
+         WHERE order_id = ?
+         AND order_item_id = ?
+         AND payment_type = ?
+         AND payment_method = 'online'
+         AND payment_status = 'paid'
+         LIMIT 1`,
+                [
+                    orderId,
+                    orderItemId,
+                    paymentType
+                ]
+            );
+
+            if (alreadyPaidOnlinePayments.length > 0) {
+                return res.status(409).json({
+                    error: 'Diese Nachzahlung wurde bereits online bezahlt und darf nicht mehr bar verbucht werden.'
+                });
+            }
         }
 
         await connection.execute(
@@ -3445,17 +3483,23 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
             ]
         );
 
-        if (paymentType === 'rental_adjustment' && orderItemId) {
-
+        if (
+            ['rental_adjustment', 'return_additional_charge'].includes(paymentType) &&
+            orderItemId
+        ) {
             const [pendingOnlinePayments] = await connection.execute(
                 `SELECT id, mollie_payment_id
-                 FROM rental_order_payments
-                 WHERE order_id = ?
-                 AND order_item_id = ?
-                 AND payment_type = 'rental_adjustment'
-                 AND payment_method = 'online'
-                 AND payment_status = 'pending'`,
-                [orderId, orderItemId]
+         FROM rental_order_payments
+         WHERE order_id = ?
+         AND order_item_id = ?
+         AND payment_type = ?
+         AND payment_method = 'online'
+         AND payment_status = 'pending'`,
+                [
+                    orderId,
+                    orderItemId,
+                    paymentType
+                ]
             );
 
             for (const pendingPayment of pendingOnlinePayments) {
@@ -3468,26 +3512,31 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
                         await cancelMolliePayment(pendingPayment.mollie_payment_id);
                     }
                 } catch (error) {
-                    console.error('Mollie-Nachzahlung konnte nicht storniert werden:', pendingPayment.mollie_payment_id, error);
+                    console.error(
+                        'Mollie-Nachzahlung konnte nicht storniert werden:',
+                        pendingPayment.mollie_payment_id,
+                        error
+                    );
                 }
             }
 
             await connection.execute(
                 `UPDATE rental_order_payments
-                SET payment_status = 'cancelled',
-                note = CONCAT(
+         SET payment_status = 'cancelled',
+             note = CONCAT(
                 COALESCE(note, ''),
                 CASE WHEN note IS NULL OR note = '' THEN '' ELSE ' | ' END,
                 'Online-Nachzahlung durch Barzahlung ersetzt'
-                )
-                WHERE order_id = ?
-                AND order_item_id = ?
-                AND payment_type = 'rental_adjustment'
-                AND payment_method = 'online'
-                AND payment_status = 'pending'`,
+             )
+         WHERE order_id = ?
+         AND order_item_id = ?
+         AND payment_type = ?
+         AND payment_method = 'online'
+         AND payment_status = 'pending'`,
                 [
                     orderId,
-                    orderItemId
+                    orderItemId,
+                    paymentType
                 ]
             );
         }
