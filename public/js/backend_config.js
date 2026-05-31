@@ -1352,7 +1352,7 @@ ${rentalPaid
             : '<span class="badge bg-warning">Nicht bezahlt</span>'
         }
 
-${!rentalPaid ? `
+${canAcceptPayments && !rentalPaid ? `
                 <button type="button"
                     class="btn btn-outline-success btn-sm ms-2"
                     onclick="openManualPaymentModal(
@@ -1373,7 +1373,7 @@ ${!rentalPaid ? `
             : '<span class="badge bg-secondary">Keine</span>'
         }
 
-            ${rentalAdjustment && !hasPaidPayment('rental_adjustment') ? `
+            ${canAcceptPayments && rentalAdjustment && !hasPaidPayment('rental_adjustment') ? `
                 <button type="button"
                     class="btn btn-outline-success btn-sm ms-2"
                     onclick="openManualPaymentModal(
@@ -1418,7 +1418,7 @@ ${!rentalPaid ? `
 
 
 
-            ${returnCharge && !hasPaidPayment('return_additional_charge') ? `
+            ${canAcceptPayments && returnCharge && !hasPaidPayment('return_additional_charge') ? `
                 <button type="button"
                     class="btn btn-outline-success btn-sm ms-2"
                     onclick="openManualPaymentModal(
