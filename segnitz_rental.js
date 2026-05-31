@@ -1396,7 +1396,7 @@ async function refundFullOnlineOrderPaymentOnCancellation(connection, orderId, o
             [
                 orderId,
                 paymentId,
-                'Storno: Kein weiterer Mollie-Refund möglich, Zahlung war bereits vollständig erstattet'
+                'Stornierung: Kein weiterer Mollie-Refund möglich, Zahlung war bereits vollständig erstattet'
             ]
         );
 
