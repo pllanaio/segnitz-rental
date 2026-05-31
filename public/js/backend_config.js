@@ -1300,9 +1300,16 @@ function renderItemPayments(order, item) {
         payment.paymentStatus === 'paid'
     );
 
-    const rentalAdjustment = itemPayments.find(payment =>
-        payment.paymentType === 'rental_adjustment'
-    );
+    const rentalAdjustment = itemPayments
+        .filter(payment => payment.paymentType === 'rental_adjustment')
+        .sort((a, b) => Number(b.id || 0) - Number(a.id || 0))[0];
+
+    const openRentalAdjustment = itemPayments
+        .filter(payment =>
+            payment.paymentType === 'rental_adjustment' &&
+            payment.paymentStatus !== 'paid'
+        )
+        .sort((a, b) => Number(b.id || 0) - Number(a.id || 0))[0];
 
     const returnCharge = itemPayments.find(payment =>
         payment.paymentType === 'return_additional_charge'
@@ -1373,14 +1380,14 @@ ${canAcceptPayments && !rentalPaid ? `
             : '<span class="badge bg-secondary">Keine</span>'
         }
 
-            ${canAcceptPayments && rentalAdjustment && !hasPaidPayment('rental_adjustment') ? `
+            ${canAcceptPayments && openRentalAdjustment ? `
                 <button type="button"
                     class="btn btn-outline-success btn-sm ms-2"
                     onclick="openManualPaymentModal(
-                        ${rentalAdjustment.orderId},
-                        ${rentalAdjustment.orderItemId || 'null'},
-                        '${rentalAdjustment.paymentType}',
-                        ${Number(rentalAdjustment.amount || 0)}
+                    ${openRentalAdjustment.orderId}
+                    ${openRentalAdjustment.orderItemId || 'null'}
+                    '${openRentalAdjustment.paymentType}'
+                    ${Number(openRentalAdjustment.amount || 0)}
                     )">
                     Barzahlung erfassen
                 </button>
