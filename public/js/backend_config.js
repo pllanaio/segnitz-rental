@@ -1384,11 +1384,11 @@ ${canAcceptPayments && !rentalPaid ? `
                 <button type="button"
                     class="btn btn-outline-success btn-sm ms-2"
                     onclick="openManualPaymentModal(
-                    ${openRentalAdjustment.orderId}
-                    ${openRentalAdjustment.orderItemId || 'null'}
-                    '${openRentalAdjustment.paymentType}'
+                    ${openRentalAdjustment.orderId},
+                    ${openRentalAdjustment.orderItemId || 'null'},
+                    '${openRentalAdjustment.paymentType}',
                     ${Number(openRentalAdjustment.amount || 0)}
-                    )">
+                )">
                     Barzahlung erfassen
                 </button>
             ` : ''}
