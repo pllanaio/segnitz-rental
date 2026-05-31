@@ -2422,6 +2422,10 @@ app.put('/admin/order-items/:itemId/rental-adjustment', checkAdmin, async (req, 
     roi.price_per_day,
     roi.rental_start,
     roi.rental_end,
+    roi.adjusted_rental_start,
+    roi.adjusted_rental_end,
+    roi.adjusted_price_per_day,
+    roi.adjusted_rental_total,
     roi.item_status,
     p.title,
     ro.order_no,
@@ -2448,9 +2452,17 @@ LIMIT 1`,
             });
         }
 
-        const finalStart = adjustedRentalStart || item.rental_start;
-        const finalEnd = adjustedRentalEnd || item.rental_end;
-        const finalPricePerDay = Number(adjustedPricePerDay || item.price_per_day || 0);
+        const currentStart = item.adjusted_rental_start || item.rental_start;
+        const currentEnd = item.adjusted_rental_end || item.rental_end;
+
+        const finalStart = adjustedRentalStart || currentStart;
+        const finalEnd = adjustedRentalEnd || currentEnd;
+        const finalPricePerDay = Number(
+            adjustedPricePerDay ||
+            item.adjusted_price_per_day ||
+            item.price_per_day ||
+            0
+        );
 
         if (new Date(finalEnd) < new Date(finalStart)) {
             return res.status(400).json({
@@ -2458,7 +2470,7 @@ LIMIT 1`,
             });
         }
 
-        if (new Date(finalEnd) <= new Date(item.rental_end)) {
+        if (new Date(finalEnd) <= new Date(currentEnd)) {
             return res.status(400).json({
                 error: 'Es sind nur Verlängerungen möglich. Verkürzungen werden über die Rückgabe abgewickelt.'
             });
@@ -2507,7 +2519,15 @@ LIMIT 1`,
 
         const originalDays = calculateRentalDays(item.rental_start, item.rental_end);
         const originalTotal = originalDays * Number(item.price_per_day || 0);
-        const amountDue = Math.max(adjustedRentalTotal - originalTotal, 0);
+
+        const previousRentalTotal =
+            item.adjusted_rental_total !== null &&
+                item.adjusted_rental_total !== undefined
+                ? Number(item.adjusted_rental_total)
+                : originalTotal;
+
+        const amountDue = Math.max(adjustedRentalTotal - previousRentalTotal, 0);
+
         const baseUrl = process.env.BASE_URL.replace(/\/$/, '');
         let paymentUrl = null;
 
@@ -2599,6 +2619,19 @@ LIMIT 1`,
     }
 });
 
+function calculateLateDays(actualReturnDate, plannedReturnDate) {
+    if (!actualReturnDate || !plannedReturnDate) return 0;
+
+    const actual = new Date(String(actualReturnDate).slice(0, 10));
+    const planned = new Date(String(plannedReturnDate).slice(0, 10));
+
+    if (actual <= planned) {
+        return 0;
+    }
+
+    return Math.ceil((actual - planned) / (1000 * 60 * 60 * 24));
+}
+
 app.put('/admin/order-items/:itemId/return', checkAdmin, async (req, res) => {
     let connection;
 
@@ -2674,6 +2707,9 @@ LIMIT 1`,
         const days = calculateRentalDays(finalStart, finalEnd);
         const adjustedRentalTotal = days * finalPricePerDay;
         const deposit = Number(item.deposit || 0);
+        const plannedReturnDate = adjustedRentalEnd || item.rental_end;
+        const lateDays = calculateLateDays(actualReturnDate, plannedReturnDate);
+        const lateFee = lateDays * finalPricePerDay;
 
         const normalizedAdditionalChargeAmount =
             additionalChargeAmount === null || additionalChargeAmount === undefined || additionalChargeAmount === ''
@@ -2712,9 +2748,11 @@ LIMIT 1`,
                     ? 'partial_refund'
                     : 'no_refund';
 
-        const customerAdditionalDue = isDamaged
+        const damageAdditionalDue = isDamaged
             ? Math.max(normalizedAdditionalChargeAmount - deposit, 0)
-            : 0;
+            : normalizedAdditionalChargeAmount;
+
+        const customerAdditionalDue = damageAdditionalDue + lateFee;
 
         await connection.execute(
             `UPDATE rental_order_items

@@ -1798,14 +1798,17 @@ function updateRentalPeriodPreview() {
 
     document.getElementById('rentalPeriodPricePerDay').value = price.toFixed(2);
 
-    const originalDays = calculateRentalDays(item.rentalStart, item.rentalEnd);
+    const currentStart = item.adjustedRentalStart || item.rentalStart;
+    const currentEnd = item.adjustedRentalEnd || item.rentalEnd;
+
+    const currentDays = calculateRentalDays(currentStart, currentEnd);
     const newDays = calculateRentalDays(start, end);
 
-    const originalTotal = originalDays * Number(item.pricePerDay || 0);
+    const currentTotal = currentDays * price;
     const newTotal = newDays * price;
-    const difference = Math.max(newTotal - originalTotal, 0);
+    const difference = Math.max(newTotal - currentTotal, 0);
 
-    const originalEnd = new Date(item.adjustedRentalEnd || item.rentalEnd);
+    const originalEnd = new Date(currentEnd);
     const selectedEnd = new Date(end);
 
     const warning = end && selectedEnd <= originalEnd
@@ -1813,7 +1816,7 @@ function updateRentalPeriodPreview() {
         : '';
 
     document.getElementById('rentalPeriodPreview').innerHTML = `
-        Ursprünglicher Preis: ${originalTotal.toFixed(2)} € inkl. MwSt.<br>
+        Bisheriger Preis: ${currentTotal.toFixed(2)} € inkl. MwSt.<br>
         Preis nach Verlängerung: ${newTotal.toFixed(2)} € inkl. MwSt.<br>
         Kunde muss zusätzlich zahlen: <strong>${difference.toFixed(2)} € inkl. MwSt.</strong>
         ${warning}
@@ -2228,9 +2231,8 @@ function calculateOrderItemFinancials(item) {
     const depositRetained = Math.max(deposit - depositRefund, 0);
     const repairCharge = Number(item.additionalChargeAmount || 0);
     const additionalCharge = repairCharge + lateFee;
-
     const grossTotalWithDeposit = rentalTotal + deposit;
-    const customerAdditionalDue = Math.max(additionalCharge - deposit, 0);
+    const customerAdditionalDue = Math.max(repairCharge - deposit, 0) + lateFee;
     const customerCredit = depositRefund;
 
     return {
