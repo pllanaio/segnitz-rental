@@ -3565,12 +3565,18 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
         const recordedByUserId = await getUserIdByEmail(connection, req.session.user);
 
         const [orders] = await connection.execute(
-            `SELECT id, order_no, customer_email, payment_method
+            `SELECT id, order_no, customer_email, payment_method, status
              FROM rental_orders
              WHERE id = ?
              LIMIT 1`,
             [orderId]
         );
+
+        if (['cancelled', 'expired'].includes(String(order.status || '').toLowerCase())) {
+            return res.status(409).json({
+                error: 'Für stornierte oder abgelaufene Bestellungen dürfen keine Zahlungen mehr angenommen werden.'
+            });
+        }
 
         if (orders.length === 0) {
             return res.status(404).json({ error: 'Bestellung nicht gefunden.' });

@@ -1217,15 +1217,18 @@ async function deleteReturnImage(imageId, orderId) {
     }
 }
 
-function cancelOrder(orderId) {
-    document.getElementById('cancelOrderId').value = orderId;
+async function cancelOrder(orderId) {
+    const confirmed = await showConfirm(
+        'Möchten Sie diese Bestellung wirklich vollständig stornieren?',
+        'Bestellung stornieren'
+    );
 
-    const modal = new bootstrap.Modal(document.getElementById('cancelOrderModal'));
-    modal.show();
+    if (!confirmed) return;
+
+    await submitCancelOrder(orderId);
 }
 
-async function submitCancelOrder() {
-    const orderId = document.getElementById('cancelOrderId').value;
+async function submitCancelOrder(orderId) {
 
     try {
         const response = await fetch(`/admin/orders/${orderId}/cancel`, {
@@ -1242,8 +1245,6 @@ async function submitCancelOrder() {
             showAlert(result.error || 'Bestellung konnte nicht storniert werden.', 'danger');
             return;
         }
-
-        bootstrap.Modal.getInstance(document.getElementById('cancelOrderModal'))?.hide();
 
         showAlert(result.message || 'Bestellung wurde storniert.', 'success');
 
@@ -1284,6 +1285,10 @@ function formatTextValue(value) {
 }
 
 function renderItemPayments(order, item) {
+
+    const orderStatus = String(order.status || '').toLowerCase();
+    const canAcceptPayments = !['cancelled', 'expired'].includes(orderStatus);
+
     const payments = order.payments || [];
 
     const itemPayments = payments.filter(payment =>
