@@ -1219,7 +1219,6 @@ async function deleteReturnImage(imageId, orderId) {
 
 function cancelOrder(orderId) {
     document.getElementById('cancelOrderId').value = orderId;
-    document.getElementById('cancelReason').value = '';
 
     const modal = new bootstrap.Modal(document.getElementById('cancelOrderModal'));
     modal.show();
@@ -1227,12 +1226,6 @@ function cancelOrder(orderId) {
 
 async function submitCancelOrder() {
     const orderId = document.getElementById('cancelOrderId').value;
-    const reason = document.getElementById('cancelReason').value.trim();
-
-    if (!reason) {
-        showAlert('Bitte geben Sie einen Stornogrund ein.', 'warning');
-        return;
-    }
 
     try {
         const response = await fetch(`/admin/orders/${orderId}/cancel`, {
@@ -1240,9 +1233,7 @@ async function submitCancelOrder() {
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({
-                cancelReason: reason
-            })
+            body: JSON.stringify({})
         });
 
         const result = await response.json();

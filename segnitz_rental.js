@@ -1322,7 +1322,8 @@ async function refundFullOnlineOrderPaymentOnCancellation(connection, orderId, o
         `SELECT id
          FROM rental_order_payments
          WHERE order_id = ?
-         AND payment_type = 'order_cancellation_refund'
+         AND payment_type = 'deposit_refund'
+         AND note LIKE '%Stornierung%'
          AND payment_status = 'paid'
          LIMIT 1`,
         [orderId]
@@ -1391,7 +1392,7 @@ async function refundFullOnlineOrderPaymentOnCancellation(connection, orderId, o
             note,
             paid_at
          )
-         VALUES (?, NULL, 'order_cancellation_refund', 'online', 'paid', 0, ?, ?, NOW())`,
+         VALUES (?, NULL, 'deposit_refund', 'online', 'paid', 0, ?, ?, NOW())`,
             [
                 orderId,
                 paymentId,
@@ -1426,7 +1427,7 @@ async function refundFullOnlineOrderPaymentOnCancellation(connection, orderId, o
             note,
             paid_at
          )
-         VALUES (?, NULL, 'order_cancellation_refund', 'online', 'paid', ?, ?, ?, ?, NOW())`,
+         VALUES (?, NULL,'deposit_refund', 'online', 'paid', ?, ?, ?, ?, NOW())`,
         [
             orderId,
             -Math.abs(refundableAmount),
@@ -2069,14 +2070,7 @@ app.put('/admin/orders/:id/cancel', checkAdmin, async (req, res) => {
     let connection;
 
     try {
-        const { cancelReason } = req.body;
-
-        if (!cancelReason || !cancelReason.trim()) {
-            return res.status(400).json({
-                error: 'Ein Stornogrund ist erforderlich.'
-            });
-        }
-
+        const cancelReason = 'Bestellung durch Administrator storniert';
         connection = await mysql.createConnection(dbConfig);
         await connection.beginTransaction();
 
@@ -2135,7 +2129,7 @@ app.put('/admin/orders/:id/cancel', checkAdmin, async (req, res) => {
                  cancelled_at = NOW()
              WHERE id = ?`,
             [
-                cancelReason.trim(),
+                cancelReason,
                 cancelledByUserId,
                 req.session.user,
                 req.params.id
@@ -2169,7 +2163,7 @@ app.put('/admin/orders/:id/cancel', checkAdmin, async (req, res) => {
         await connection.commit();
 
         try {
-            await sendOrderCancelledEmail(order, cancelReason.trim());
+            await sendOrderCancelledEmail(order, cancelReason);
         } catch (mailError) {
             console.error('Storno gespeichert, aber Mailversand fehlgeschlagen:', mailError);
         }
