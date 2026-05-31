@@ -2158,11 +2158,13 @@ app.put('/admin/orders/:id/cancel', checkAdmin, async (req, res) => {
             ]
         );
 
-        await refundFullOnlineOrderPaymentOnCancellation(
-            connection,
-            req.params.id,
-            order
-        );
+        if (String(order.payment_method || '').toLowerCase() === 'online') {
+            await refundFullOnlineOrderPaymentOnCancellation(
+                connection,
+                req.params.id,
+                order
+            );
+        }
 
         await connection.commit();
 

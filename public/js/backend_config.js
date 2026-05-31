@@ -1343,6 +1343,9 @@ function renderItemPayments(order, item) {
         ? 'Online bezahlt'
         : 'Bezahlt';
 
+    const itemFinancials = calculateOrderItemFinancials(item);
+    const rentalCashAmount = itemFinancials.originalRentalTotal;
+
     return `
         <div class="mt-3 p-3 border rounded bg-white">
             <strong>Zahlungen</strong><br>
@@ -1360,7 +1363,7 @@ ${!rentalPaid ? `
                         ${order.id},
                         ${item.id},
                         'rental',
-                        ${Number(item.pricePerDay || 0)}
+                        ${Number(rentalCashAmount || 0)}
                     )">
                     Miete bar verbuchen
                 </button>
@@ -1400,9 +1403,7 @@ ${!rentalPaid ? `
             ${depositRefund
             ? formatPaymentStatusBadge(depositRefund.paymentStatus)
             : isDepositFullyOffsetByRepair
-                ? `<div class="border border-danger rounded p-2 mt-1 text-danger fw-semibold bg-white">
-               Reparaturkosten mit Kaution verrechnet
-           </div>`
+                ? `'<span class="badge bg-danger">Reparaturkosten mit Kaution verrechnet</span>'`
                 : '<span class="badge bg-secondary">Nicht erfasst</span>'
         }
 
@@ -1732,15 +1733,17 @@ function calculateRentalDays(startDate, endDate) {
     );
 }
 
-function calculateLateDays(actualReturnDate, adjustedRentalEnd) {
-    if (!actualReturnDate || !adjustedRentalEnd) return 0;
+function calculateLateDays(actualReturnDate, plannedReturnDate) {
+    if (!actualReturnDate || !plannedReturnDate) return 0;
 
-    const actual = new Date(actualReturnDate);
-    const end = new Date(adjustedRentalEnd);
+    const actual = new Date(String(actualReturnDate).slice(0, 10));
+    const planned = new Date(String(plannedReturnDate).slice(0, 10));
 
-    if (actual <= end) return 0;
+    if (actual <= planned) {
+        return 0;
+    }
 
-    return Math.ceil((actual - end) / (1000 * 60 * 60 * 24));
+    return Math.ceil((actual - planned) / (1000 * 60 * 60 * 24));
 }
 
 function todayDateString() {
@@ -2207,7 +2210,10 @@ function calculateOrderItemFinancials(item) {
     const originalDays = calculateRentalDays(item.rentalStart, item.rentalEnd);
 
     const effectiveStart = item.adjustedRentalStart || item.rentalStart;
-    const effectiveEnd = item.actualReturnDate || item.adjustedRentalEnd || item.rentalEnd;
+    const effectiveEnd = item.adjustedRentalEnd || item.rentalEnd;
+    const plannedEnd = item.adjustedRentalEnd || item.rentalEnd;
+    const actualReturnDate = item.actualReturnDate || null;
+    const lateDays = calculateLateDays(actualReturnDate, plannedEnd);
 
     const effectiveDays = calculateRentalDays(effectiveStart, effectiveEnd);
     const extendedDays = Math.max(
@@ -2216,6 +2222,7 @@ function calculateOrderItemFinancials(item) {
     );
 
     const pricePerDay = Number(item.adjustedPricePerDay || item.pricePerDay || 0);
+    const lateFee = lateDays * pricePerDay;
     const rentalTotal = effectiveDays * pricePerDay;
     const originalRentalTotal = originalDays * Number(item.pricePerDay || 0);
     const rentalAdjustment = rentalTotal - originalRentalTotal;
@@ -2223,7 +2230,8 @@ function calculateOrderItemFinancials(item) {
     const deposit = Number(item.deposit || 0);
     const depositRefund = Number(item.depositRefundAmount ?? deposit);
     const depositRetained = Math.max(deposit - depositRefund, 0);
-    const additionalCharge = Number(item.additionalChargeAmount || 0);
+    const repairCharge = Number(item.additionalChargeAmount || 0);
+    const additionalCharge = repairCharge + lateFee;
 
     const grossTotalWithDeposit = rentalTotal + deposit;
     const customerAdditionalDue = Math.max(additionalCharge - deposit, 0);
@@ -2244,6 +2252,9 @@ function calculateOrderItemFinancials(item) {
         customerCredit,
         originalRentalTotal,
         rentalAdjustment,
+        lateDays,
+        lateFee,
+        repairCharge,
         additionalChargeReason: item.additionalChargeReason || ''
     };
 }
