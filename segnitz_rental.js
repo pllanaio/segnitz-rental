@@ -2089,6 +2089,7 @@ app.put('/admin/orders/:id/cancel', checkAdmin, async (req, res) => {
         );
 
         if (orders.length === 0) {
+            await connection.rollback();
             return res.status(404).json({
                 error: 'Bestellung nicht gefunden.'
             });
@@ -2097,8 +2098,28 @@ app.put('/admin/orders/:id/cancel', checkAdmin, async (req, res) => {
         const order = orders[0];
 
         if (['cancelled', 'returned', 'expired', 'picked_up'].includes(order.status)) {
+            await connection.rollback();
             return res.status(409).json({
                 error: 'Diese Bestellung kann nicht storniert werden.'
+            });
+        }
+
+        const [pickedUpItems] = await connection.execute(
+            `SELECT id
+             FROM rental_order_items
+             WHERE order_id = ?
+             AND (
+                item_status = 'picked_up'
+                OR picked_up_at IS NOT NULL
+             )
+             LIMIT 1`,
+            [req.params.id]
+        );
+
+        if (pickedUpItems.length > 0) {
+            await connection.rollback();
+            return res.status(409).json({
+                error: 'Diese Bestellung kann nicht storniert werden, weil mindestens ein Artikel bereits abgeholt wurde.'
             });
         }
 
@@ -2106,36 +2127,14 @@ app.put('/admin/orders/:id/cancel', checkAdmin, async (req, res) => {
 
         await connection.execute(
             `UPDATE rental_orders
-            SET status = CASE
-        WHEN EXISTS (
-            SELECT 1
-            FROM rental_order_items
-            WHERE order_id = ?
-            AND COALESCE(item_status, 'active') = 'active'
-            AND rental_start <= CURDATE()
-        )
-        THEN status
-        ELSE 'cancelled'
-    END,
-    return_case_status = CASE
-        WHEN EXISTS (
-            SELECT 1
-            FROM rental_order_items
-            WHERE order_id = ?
-            AND COALESCE(item_status, 'active') = 'active'
-            AND rental_start <= CURDATE()
-        )
-        THEN 'open'
-        ELSE 'closed'
-    END,
-             cancel_reason = ?,
-             cancelled_by_user_id = ?,
-             cancelled_by_name = ?,
-             cancelled_at = NOW()
+             SET status = 'cancelled',
+                 return_case_status = 'closed',
+                 cancel_reason = ?,
+                 cancelled_by_user_id = ?,
+                 cancelled_by_name = ?,
+                 cancelled_at = NOW()
              WHERE id = ?`,
             [
-                req.params.id,
-                req.params.id,
                 cancelReason.trim(),
                 cancelledByUserId,
                 req.session.user,
@@ -2145,13 +2144,14 @@ app.put('/admin/orders/:id/cancel', checkAdmin, async (req, res) => {
 
         await connection.execute(
             `UPDATE rental_order_items
-     SET item_status = 'cancelled',
-         cancelled_at = NOW(),
-         cancel_reason = 'Artikel durch Administrator storniert',
-         cancelled_by_name = ?
-     WHERE order_id = ?
-     AND COALESCE(item_status, 'active') = 'active'
-     AND rental_start > CURDATE()`,
+             SET item_status = 'cancelled',
+                 cancelled_at = NOW(),
+                 cancel_reason = 'Artikel durch Administrator storniert',
+                 cancelled_by_name = ?
+             WHERE order_id = ?
+             AND COALESCE(item_status, 'active') = 'active'
+             AND picked_up_at IS NULL
+             AND item_status <> 'picked_up'`,
             [
                 req.session.user,
                 req.params.id
