@@ -3572,16 +3572,17 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
             [orderId]
         );
 
+        if (orders.length === 0) {
+            return res.status(404).json({ error: 'Bestellung nicht gefunden.' });
+        }
+        const order = orders[0];
+
         if (['cancelled', 'expired'].includes(String(order.status || '').toLowerCase())) {
             return res.status(409).json({
                 error: 'Für stornierte oder abgelaufene Bestellungen dürfen keine Zahlungen mehr angenommen werden.'
             });
         }
 
-        if (orders.length === 0) {
-            return res.status(404).json({ error: 'Bestellung nicht gefunden.' });
-        }
-        const order = orders[0];
         const initialPaymentMethod = order.payment_method;
 
         if (
