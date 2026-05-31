@@ -1403,7 +1403,7 @@ ${!rentalPaid ? `
             ${depositRefund
             ? formatPaymentStatusBadge(depositRefund.paymentStatus)
             : isDepositFullyOffsetByRepair
-                ? `'<span class="badge bg-danger">Reparaturkosten mit Kaution verrechnet</span>'`
+                ? '<span class="badge bg-danger">Reparaturkosten mit Kaution verrechnet</span>'
                 : '<span class="badge bg-secondary">Nicht erfasst</span>'
         }
 
