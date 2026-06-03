@@ -2271,7 +2271,24 @@ LIMIT 1`,
         const extensionDays = calculateRentalDays(extensionStart, finalEnd);
 
         const amountDue = Math.max(extensionDays * finalPricePerDay, 0);
+        if (amountDue > 0) {
+            const [existingOpenRentalAdjustments] = await connection.execute(
+                `SELECT id
+         FROM rental_order_payments
+         WHERE order_id = ?
+         AND order_item_id = ?
+         AND payment_type = 'rental_adjustment'
+         AND payment_status IN ('pending', 'open', 'authorized')
+         LIMIT 1`,
+                [item.order_id, req.params.itemId]
+            );
 
+            if (existingOpenRentalAdjustments.length > 0) {
+                return res.status(409).json({
+                    error: 'Es existiert bereits eine offene Mietzeitraum-Nachzahlung für diesen Artikel. Bitte diese zuerst begleichen oder stornieren.'
+                });
+            }
+        }
         const baseUrl = process.env.BASE_URL.replace(/\/$/, '');
         let paymentUrl = null;
 
@@ -3517,13 +3534,6 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
             ['rental_adjustment', 'return_additional_charge'].includes(paymentType) &&
             orderItemId
         ) {
-            await refundEligibleDepositsAfterPaymentsSettled(connection, orderId);
-        }
-
-        if (
-            ['rental_adjustment', 'return_additional_charge'].includes(paymentType) &&
-            orderItemId
-        ) {
             const [pendingOnlinePayments] = await connection.execute(
                 `SELECT id, mollie_payment_id
          FROM rental_order_payments
@@ -3576,6 +3586,8 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
                     paymentType
                 ]
             );
+
+            await refundEligibleDepositsAfterPaymentsSettled(connection, orderId);
         }
 
         if (paymentType === 'rental') {
