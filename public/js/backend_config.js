@@ -486,6 +486,36 @@ function setSelectOptions(selectId, values, labelMap = {}) {
     select.value = currentValue;
 }
 
+const orderStatusLabelMap = {
+    reserved: 'Reserviert',
+    confirmed: 'Bestätigt',
+    paid: 'Bezahlt',
+    active: 'Aktiv',
+    picked_up: 'Abgeholt',
+    returned: 'Zurückgegeben',
+    cancelled: 'Storniert',
+    expired: 'Abgelaufen'
+};
+
+const returnStatusLabelMap = {
+    pending: 'Offen',
+    returned_ok: 'Ordnungsgemäß zurückgegeben',
+    returned_late: 'Verspätet zurückgegeben',
+    returned_damaged: 'Beschädigt zurückgegeben',
+    returned_late_damaged: 'Verspätet und beschädigt',
+    not_required: 'Nicht erforderlich'
+};
+
+const paymentStatusLabelMap = {
+    unpaid: 'Unbezahlt',
+    pending: 'Ausstehend',
+    paid: 'Bezahlt',
+    failed: 'Fehlgeschlagen',
+    refunded: 'Erstattet',
+    cancelled: 'Abgebrochen',
+    expired: 'Abgelaufen'
+};
+
 function populateOrderFilters() {
     setSelectOptions(
         'orderYearFilter',
@@ -511,9 +541,23 @@ function populateOrderFilters() {
         }
     );
 
-    setSelectOptions('orderStatusFilter', [...new Set(orders.map(order => order.status || ''))]);
-    setSelectOptions('orderReturnStatusFilter', [...new Set(orders.map(order => order.return_status || ''))]);
-    setSelectOptions('orderPaymentStatusFilter', [...new Set(orders.map(order => order.payment_status || ''))]);
+    setSelectOptions(
+        'orderStatusFilter',
+        [...new Set(orders.map(order => order.status || ''))],
+        orderStatusLabelMap
+    );
+
+    setSelectOptions(
+        'orderReturnStatusFilter',
+        [...new Set(orders.map(order => order.return_status || ''))],
+        returnStatusLabelMap
+    );
+
+    setSelectOptions(
+        'orderPaymentStatusFilter',
+        [...new Set(orders.map(order => order.payment_status || ''))],
+        paymentStatusLabelMap
+    );
 }
 
 function getOrderFilterValue(id) {
@@ -1814,6 +1858,11 @@ function updateRentalPeriodPreview() {
     const extensionStart = extensionStartDate.toISOString().slice(0, 10);
     const extensionDays = calculateRentalDays(extensionStart, end);
 
+    const currentDays = calculateRentalDays(currentStart, currentEnd);
+    const newDays = calculateRentalDays(currentStart, end);
+
+    const currentTotal = currentDays * price;
+    const newTotal = newDays * price;
     const difference = Math.max(extensionDays * price, 0);
 
     const originalEnd = new Date(currentEnd);
@@ -1824,10 +1873,12 @@ function updateRentalPeriodPreview() {
         : '';
 
     document.getElementById('rentalPeriodPreview').innerHTML = `
-        Verlängerungstage: ${extensionDays}<br>
-        Kunde muss zusätzlich zahlen: <strong>${difference.toFixed(2)} € inkl. MwSt.</strong>
-        ${warning}
-    `;
+    Ursprünglicher Preis: ${currentTotal.toFixed(2)} € inkl. MwSt.<br>
+    Preis nach Verlängerung: ${newTotal.toFixed(2)} € inkl. MwSt.<br>
+    Verlängerungstage: ${extensionDays}<br>
+    Kunde muss zusätzlich zahlen: <strong>${difference.toFixed(2)} € inkl. MwSt.</strong>
+    ${warning}
+`;
 }
 
 async function submitOrderItemRentalPeriod() {

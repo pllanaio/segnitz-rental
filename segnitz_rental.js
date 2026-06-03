@@ -1730,6 +1730,7 @@ app.get('/admin/orders', checkAdmin, async (req, res) => {
         payment_method,
         payment_status,
         return_status,
+        DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
         deposit_decision,
         DATE_FORMAT(reserved_until, '%Y-%m-%d %H:%i:%s') AS reserved_until,
         DATE_FORMAT(returned_at, '%Y-%m-%d %H:%i:%s') AS returned_at,
