@@ -1444,135 +1444,6 @@ app.post('/my-orders/:id/cancel', async (req, res) => {
     return res.status(403).json({
         error: 'Stornierungen können nur durch einen Administrator durchgeführt werden.'
     });
-
-    let connection;
-
-    if (!req.session.user) {
-        return res.status(401).json({
-            error: 'Bitte einloggen.'
-        });
-    }
-
-    try {
-        const orderId = req.params.id;
-        const userEmail = req.session.user;
-
-        connection = await mysql.createConnection(dbConfig);
-        await connection.beginTransaction();
-
-        const [orders] = await connection.execute(
-            `SELECT
-                ro.id,
-                ro.status,
-                ro.order_no,
-                ro.customer_email,
-                ro.payment_method,
-                MIN(roi.rental_start) AS firstRentalStart
-             FROM rental_orders ro
-             JOIN rental_order_items roi ON roi.order_id = ro.id
-             WHERE ro.id = ?
-             AND ro.customer_email = ?
-             GROUP BY ro.id
-             LIMIT 1`,
-            [orderId, userEmail]
-        );
-
-        if (orders.length === 0) {
-            await connection.rollback();
-            return res.status(404).json({
-                error: 'Bestellung nicht gefunden.'
-            });
-        }
-
-        const order = orders[0];
-
-        if (!['reserved', 'confirmed'].includes(order.status) || order.status === 'picked_up') {
-            await connection.rollback();
-            return res.status(400).json({
-                error: 'Diese Bestellung kann nicht mehr storniert werden.'
-            });
-        }
-
-        if (order.status === 'picked_up') {
-            await connection.rollback();
-            return res.status(400).json({
-                error: 'Diese Bestellung wurde bereits abgeholt und kann nicht mehr storniert werden.'
-            });
-        }
-
-        if (order.firstRentalStart && new Date(order.firstRentalStart) <= new Date(new Date().toISOString().slice(0, 10))) {
-            await connection.rollback();
-            return res.status(400).json({
-                error: 'Diese Bestellung kann am Tag des Mietbeginns nicht mehr vom Kunden storniert werden.'
-            });
-        }
-
-        const cancelledByName = req.session.user;
-        const cancelReason = 'Bestellung durch Benutzer storniert';
-
-        await connection.execute(
-            `UPDATE rental_orders
-     SET status = 'cancelled',
-         return_case_status = 'closed',
-         cancel_reason = ?,
-         cancelled_by_name = ?,
-         cancelled_at = NOW()
-     WHERE id = ?`,
-            [
-                cancelReason,
-                cancelledByName,
-                orderId
-            ]
-        );
-
-        await connection.execute(
-            `UPDATE rental_order_items
-     SET item_status = 'cancelled',
-         cancelled_at = NOW(),
-         cancel_reason = ?,
-         cancelled_by_name = ?
-     WHERE order_id = ?
-     AND COALESCE(item_status, 'active') = 'active'`,
-            [
-                cancelReason,
-                cancelledByName,
-                orderId
-            ]
-        );
-
-        await refundFullOnlineOrderPaymentOnCancellation(
-            connection,
-            orderId,
-            order
-        );
-
-        await connection.commit();
-
-        return res.json({
-            success: true,
-            message: 'Bestellung wurde storniert.'
-        });
-
-    } catch (error) {
-        console.error('Fehler beim Stornieren der Bestellung:', error);
-
-        if (connection) {
-            try {
-                await connection.rollback();
-            } catch (rollbackError) {
-                console.error('Rollback fehlgeschlagen:', rollbackError);
-            }
-        }
-
-        return res.status(500).json({
-            error: 'Bestellung konnte nicht storniert werden.'
-        });
-
-    } finally {
-        if (connection) {
-            await connection.end();
-        }
-    }
 });
 
 app.post('/my-orders/:orderId/items/:itemId/cancel', async (req, res) => {
@@ -1580,132 +1451,6 @@ app.post('/my-orders/:orderId/items/:itemId/cancel', async (req, res) => {
     return res.status(403).json({
         error: 'Stornierungen können nur durch einen Administrator durchgeführt werden.'
     });
-
-    let connection;
-
-    if (!req.session.user) {
-        return res.status(401).json({
-            error: 'Bitte einloggen.'
-        });
-    }
-
-    try {
-        const { orderId, itemId } = req.params;
-        const userEmail = req.session.user;
-
-        connection = await mysql.createConnection(dbConfig);
-        await connection.beginTransaction();
-
-        const [items] = await connection.execute(
-            `SELECT 
-                roi.id,
-                roi.order_id,
-                roi.item_status,
-                roi.rental_start,
-                ro.status AS order_status,
-                ro.customer_email
-             FROM rental_order_items roi
-             JOIN rental_orders ro ON ro.id = roi.order_id
-             WHERE roi.id = ?
-             AND roi.order_id = ?
-             AND ro.customer_email = ?
-             LIMIT 1`,
-            [itemId, orderId, userEmail]
-        );
-
-        if (items.length === 0) {
-            await connection.rollback();
-            return res.status(404).json({
-                error: 'Artikel nicht gefunden.'
-            });
-        }
-
-        const item = items[0];
-
-        if (!['reserved', 'confirmed'].includes(item.order_status)) {
-            await connection.rollback();
-            return res.status(400).json({
-                error: 'Artikel dieser Bestellung können nicht mehr storniert werden.'
-            });
-        }
-
-        if (item.item_status !== 'active') {
-            await connection.rollback();
-            return res.status(400).json({
-                error: 'Dieser Artikel kann nicht mehr storniert werden.'
-            });
-        }
-
-        if (item.rental_start && new Date(item.rental_start) <= new Date(new Date().toISOString().slice(0, 10))) {
-            await connection.rollback();
-            return res.status(400).json({
-                error: 'Dieser Artikel kann am Tag des Mietbeginns nicht mehr vom Kunden storniert werden.'
-            });
-        }
-
-        await connection.execute(
-            `UPDATE rental_order_items
-     SET item_status = 'cancelled',
-         cancelled_at = NOW(),
-         cancel_reason = 'Artikel durch Benutzer storniert',
-         cancelled_by_name = ?
-     WHERE id = ?`,
-            [req.session.user, itemId]
-        );
-
-        const [activeItems] = await connection.execute(
-            `SELECT COUNT(*) AS count
-             FROM rental_order_items
-             WHERE order_id = ?
-             AND COALESCE(item_status, 'active') IN ('active', 'picked_up')`,
-            [orderId]
-        );
-
-        if (activeItems[0].count === 0) {
-            await connection.execute(
-                `UPDATE rental_orders
-                 SET status = 'cancelled',
-                     return_case_status = 'closed',
-                     cancel_reason = 'Alle Artikel durch Benutzer storniert',
-                     cancelled_by_name = ?,
-                     cancelled_at = NOW()
-                 WHERE id = ?`,
-                [req.session.user, orderId]
-            );
-        } else {
-            await connection.execute(
-                `UPDATE rental_orders
-                 SET return_case_status = 'partial'
-                 WHERE id = ?`,
-                [orderId]
-            );
-        }
-
-        await connection.commit();
-
-        return res.json({
-            success: true,
-            message: 'Artikel wurde storniert.'
-        });
-
-    } catch (error) {
-        console.error('Fehler beim Stornieren des Artikels:', error);
-
-        if (connection) {
-            try {
-                await connection.rollback();
-            } catch (rollbackError) {
-                console.error('Rollback fehlgeschlagen:', rollbackError);
-            }
-        }
-
-        return res.status(500).json({
-            error: 'Artikel konnte nicht storniert werden.'
-        });
-
-    } finally {
-        if (connection) await connection.end();
-    }
 });
 
 app.get('/admin/orders', checkAdmin, async (req, res) => {
@@ -3579,6 +3324,24 @@ app.get('/orders/:id/payment-status', async (req, res) => {
             ]
         );
 
+        await connection.execute(
+            `UPDATE rental_order_payments
+     SET payment_status = ?,
+         paid_at = CASE
+            WHEN ? = 'paid' THEN COALESCE(paid_at, NOW())
+            ELSE paid_at
+         END
+     WHERE order_id = ?
+     AND mollie_payment_id = ?
+     AND payment_type IN ('initial_payment', 'rental', 'deposit')`,
+            [
+                publicPaymentStatus,
+                publicPaymentStatus,
+                order.id,
+                payment.id
+            ]
+        );
+
         return res.json({
             ...order,
             status: newOrderStatus,
@@ -3673,20 +3436,21 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
         }
 
         if (['rental_adjustment', 'return_additional_charge'].includes(paymentType) && orderItemId) {
-            const [alreadyPaidPayments] = await connection.execute(
-                `SELECT id, payment_method
+            const [openPayments] = await connection.execute(
+                `SELECT id
          FROM rental_order_payments
          WHERE order_id = ?
          AND order_item_id = ?
          AND payment_type = ?
-         AND payment_status = 'paid'
+         AND payment_status IN ('pending', 'open')
+         ORDER BY id DESC
          LIMIT 1`,
                 [orderId, orderItemId, paymentType]
             );
 
-            if (alreadyPaidPayments.length > 0) {
+            if (openPayments.length === 0) {
                 return res.status(409).json({
-                    error: 'Diese Nachzahlung wurde bereits beglichen.'
+                    error: 'Für diese Nachzahlung ist kein offener Zahlungsdatensatz vorhanden.'
                 });
             }
         }
