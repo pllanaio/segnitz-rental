@@ -2859,7 +2859,21 @@ END
 
         const initialPaymentMethod = item.payment_method || null;
 
+        const [openRentalAdjustments] = await connection.execute(
+            `SELECT COALESCE(SUM(amount), 0) AS amount
+     FROM rental_order_payments
+     WHERE order_id = ?
+     AND order_item_id = ?
+     AND payment_type = 'rental_adjustment'
+     AND payment_status IN ('pending', 'open')`,
+            [item.order_id, req.params.itemId]
+        );
+
+        const openRentalAdjustmentAmount = Number(openRentalAdjustments[0]?.amount || 0);
+        const canRefundDepositNow = openRentalAdjustmentAmount <= 0;
+
         if (
+            canRefundDepositNow &&
             calculatedDepositRefundAmount > 0 &&
             ['full_refund', 'partial_refund'].includes(finalDepositDecision)
         ) {
