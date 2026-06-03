@@ -2517,16 +2517,14 @@ LIMIT 1`,
             [item.order_id]
         );
 
-        const originalDays = calculateRentalDays(item.rental_start, item.rental_end);
-        const originalTotal = originalDays * Number(item.price_per_day || 0);
+        const extensionStartDate = new Date(currentEnd);
+        extensionStartDate.setDate(extensionStartDate.getDate() + 1);
 
-        const previousRentalTotal =
-            item.adjusted_rental_total !== null &&
-                item.adjusted_rental_total !== undefined
-                ? Number(item.adjusted_rental_total)
-                : originalTotal;
+        const extensionStart = extensionStartDate.toISOString().slice(0, 10);
 
-        const amountDue = Math.max(adjustedRentalTotal - previousRentalTotal, 0);
+        const extensionDays = calculateRentalDays(extensionStart, finalEnd);
+
+        const amountDue = Math.max(extensionDays * finalPricePerDay, 0);
 
         const baseUrl = process.env.BASE_URL.replace(/\/$/, '');
         let paymentUrl = null;
