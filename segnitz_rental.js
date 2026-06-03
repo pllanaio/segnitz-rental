@@ -3455,19 +3455,45 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
             }
         }
 
-        await connection.execute(
-            `INSERT INTO rental_order_payments
-             (order_id, order_item_id, payment_type, payment_method, payment_status, amount, paid_at, recorded_by_user_id, note)
-             VALUES (?, ?, ?, 'cash', 'paid', ?, NOW(), ?, ?)`,
-            [
-                orderId,
-                orderItemId || null,
-                paymentType,
-                Number(amount),
-                recordedByUserId,
-                note || null
-            ]
-        );
+        if (['rental_adjustment', 'return_additional_charge'].includes(paymentType) && orderItemId) {
+            await connection.execute(
+                `UPDATE rental_order_payments
+         SET payment_status = 'paid',
+             payment_method = 'cash',
+             amount = ?,
+             paid_at = NOW(),
+             recorded_by_user_id = ?,
+             note = COALESCE(?, note)
+         WHERE order_id = ?
+         AND order_item_id = ?
+         AND payment_type = ?
+         AND payment_status IN ('pending', 'open')
+         ORDER BY id DESC
+         LIMIT 1`,
+                [
+                    Number(amount),
+                    recordedByUserId,
+                    note || null,
+                    orderId,
+                    orderItemId,
+                    paymentType
+                ]
+            );
+        } else {
+            await connection.execute(
+                `INSERT INTO rental_order_payments
+         (order_id, order_item_id, payment_type, payment_method, payment_status, amount, paid_at, recorded_by_user_id, note)
+         VALUES (?, ?, ?, 'cash', 'paid', ?, NOW(), ?, ?)`,
+                [
+                    orderId,
+                    orderItemId || null,
+                    paymentType,
+                    Number(amount),
+                    recordedByUserId,
+                    note || null
+                ]
+            );
+        }
 
         if (
             ['rental_adjustment', 'return_additional_charge'].includes(paymentType) &&
