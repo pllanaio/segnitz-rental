@@ -1690,7 +1690,14 @@ app.put('/admin/order-items/:itemId/pickup', checkAdmin, async (req, res) => {
         const pickedUpByUserId = await getUserIdByEmail(connection, req.session.user);
 
         const [items] = await connection.execute(
-            `SELECT roi.id, roi.order_id, roi.item_status, ro.order_no, ro.customer_email
+            `SELECT
+                roi.id,
+                roi.order_id,
+                roi.item_status,
+                ro.order_no,
+                ro.customer_email,
+                ro.payment_method,
+                ro.payment_status
              FROM rental_order_items roi
              JOIN rental_orders ro ON ro.id = roi.order_id
              WHERE roi.id = ?
@@ -1704,6 +1711,16 @@ app.put('/admin/order-items/:itemId/pickup', checkAdmin, async (req, res) => {
         }
 
         const item = items[0];
+
+        if (
+            String(item.payment_method || '').toLowerCase() === 'cash' &&
+            String(item.payment_status || '').toLowerCase() !== 'paid'
+        ) {
+            await connection.rollback();
+            return res.status(409).json({
+                error: 'Der Artikel kann erst abgeholt werden, wenn Miete und Kaution bar kassiert wurden.'
+            });
+        }
 
         if (String(item.item_status || 'active') !== 'active') {
             await connection.rollback();
@@ -2795,7 +2812,10 @@ END
             [item.order_id, req.params.itemId]
         );
 
-        const canRefundDepositNow = openBlockingPayments.length === 0;
+        const hasCurrentReturnAdditionalCharge = customerAdditionalDue > 0;
+        const canRefundDepositNow =
+            openBlockingPayments.length === 0 &&
+            !hasCurrentReturnAdditionalCharge;
 
         if (
             canRefundDepositNow &&
