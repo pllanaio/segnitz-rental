@@ -1808,12 +1808,13 @@ function updateRentalPeriodPreview() {
     const currentStart = item.adjustedRentalStart || item.rentalStart;
     const currentEnd = item.adjustedRentalEnd || item.rentalEnd;
 
-    const currentDays = calculateRentalDays(currentStart, currentEnd);
-    const newDays = calculateRentalDays(start, end);
+    const extensionStartDate = new Date(currentEnd);
+    extensionStartDate.setDate(extensionStartDate.getDate() + 1);
 
-    const currentTotal = currentDays * price;
-    const newTotal = newDays * price;
-    const difference = Math.max(newTotal - currentTotal, 0);
+    const extensionStart = extensionStartDate.toISOString().slice(0, 10);
+    const extensionDays = calculateRentalDays(extensionStart, end);
+
+    const difference = Math.max(extensionDays * price, 0);
 
     const originalEnd = new Date(currentEnd);
     const selectedEnd = new Date(end);
@@ -1823,8 +1824,7 @@ function updateRentalPeriodPreview() {
         : '';
 
     document.getElementById('rentalPeriodPreview').innerHTML = `
-        Bisheriger Preis: ${currentTotal.toFixed(2)} € inkl. MwSt.<br>
-        Preis nach Verlängerung: ${newTotal.toFixed(2)} € inkl. MwSt.<br>
+        Verlängerungstage: ${extensionDays}<br>
         Kunde muss zusätzlich zahlen: <strong>${difference.toFixed(2)} € inkl. MwSt.</strong>
         ${warning}
     `;
