@@ -2753,6 +2753,21 @@ LIMIT 1`,
             [item.order_id]
         );
 
+        const [openBlockingPaymentsBeforeOrderClose] = await connection.execute(
+            `SELECT id
+     FROM rental_order_payments
+     WHERE order_id = ?
+     AND order_item_id = ?
+     AND payment_type IN ('rental_adjustment', 'return_additional_charge')
+     AND payment_status IN ('pending', 'open', 'authorized')
+     LIMIT 1`,
+            [item.order_id, req.params.itemId]
+        );
+
+        const hasBlockingPaymentForReturnCase =
+            openBlockingPaymentsBeforeOrderClose.length > 0 ||
+            customerAdditionalDue > 0;
+
         if (remainingOpenItems[0].count === 0) {
             const [returnStatusRows] = await connection.execute(
                 `SELECT return_status AS returnStatus
@@ -2780,13 +2795,13 @@ LIMIT 1`,
              return_status = ?,
              returned_at = NOW(),
              return_case_status = CASE
-    WHEN ? > 0 THEN 'payment_pending'
+    WHEN ? THEN 'payment_pending'
     ELSE 'closed'
 END
          WHERE id = ?`,
                 [
                     finalOrderReturnStatus,
-                    customerAdditionalDue || 0,
+                    hasBlockingPaymentForReturnCase,
                     item.order_id
                 ]
             );
@@ -4089,7 +4104,7 @@ async function refundEligibleDepositsAfterPaymentsSettled(connection, orderId) {
              WHERE order_id = ?
              AND order_item_id = ?
              AND payment_type = 'deposit_refund'
-             AND payment_status = 'paid'
+             AND payment_status IN ('pending', 'open', 'paid')
              LIMIT 1`,
             [orderId, item.id]
         );
