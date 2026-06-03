@@ -791,7 +791,7 @@ function renderOrderItemCard(order, item) {
     const canEdit = ['active', 'picked_up'].includes(itemStatus) && !isExpired;
     const canCancelItem = itemStatus === 'active' && !isExpired;
     const isPickedUp = itemStatus === 'picked_up';
-    const canReturn = !isCancelled && !isReturned && !isExpired;
+    const canReturn = itemStatus === 'picked_up' && !isCancelled && !isReturned && !isExpired;
 
     return `
         <div class="card mb-3 ${isExpired ? 'opacity-50 bg-light' : ''}">
@@ -1309,7 +1309,17 @@ async function submitCancelOrder(orderId) {
 
 function canCancelOrder(order) {
     const status = String(order.status || '').trim().toLowerCase();
-    return !['cancelled', 'returned', 'expired'].includes(status);
+
+    if (['cancelled', 'returned', 'expired', 'picked_up'].includes(status)) {
+        return false;
+    }
+
+    const items = order.items || [];
+
+    return !items.some(item => {
+        const itemStatus = item.itemStatus || item.item_status;
+        return itemStatus === 'picked_up' || item.pickedUpAt || item.picked_up_at;
+    });
 }
 
 function formatTextValue(value) {
@@ -1361,6 +1371,12 @@ function renderItemPayments(order, item) {
 
     const depositRefund = itemPayments.find(payment =>
         payment.paymentType === 'deposit_refund'
+    );
+
+    const openCashDepositRefund = itemPayments.find(payment =>
+        payment.paymentType === 'deposit_refund' &&
+        payment.paymentMethod === 'cash' &&
+        ['pending', 'open'].includes(payment.paymentStatus)
     );
 
     const depositRefundAmount = Number(item.depositRefundAmount || 0);
@@ -1454,14 +1470,14 @@ ${canAcceptPayments && !rentalPaid ? `
                 : '<span class="badge bg-secondary">Nicht erfasst</span>'
         }
 
-            ${depositRefundAmount > 0 && !hasCashDepositRefund && String(order.payment_method || '').toLowerCase() === 'cash' ? `
+            ${openCashDepositRefund && !hasCashDepositRefund ? `
                 <button type="button"
                     class="btn btn-outline-danger btn-sm ms-2"
                     onclick="openManualRefundModal(
                         ${order.id},
                         ${item.id},
                         'deposit_refund',
-                        ${depositRefundAmount}
+                        ${Math.abs(Number(openCashDepositRefund.amount || 0))}
                     )">
                     Kaution bar erstatten
                 </button>
@@ -2018,6 +2034,8 @@ function applyOrderItemReturnModalRules(triggerSource = 'auto') {
     const deductionReasonInput = document.getElementById('returnDepositDeductionReason');
 
     const lateDays = calculateLateDays(actualReturnDate, adjustedEnd);
+    const pricePerDay = Number(item.adjustedPricePerDay || item.pricePerDay || 0);
+    const lateFee = lateDays * pricePerDay;
 
     if (lateDays > 0) {
         isLateInput.checked = true;
@@ -2045,9 +2063,11 @@ function applyOrderItemReturnModalRules(triggerSource = 'auto') {
         : deposit;
 
     const retainedAmount = Math.max(deposit - refundAmount, 0);
-    const customerAdditionalDue = isDamaged
-        ? Math.max(repairCosts - deposit, 0)
-        : 0;
+    const customerAdditionalDue = (
+        isDamaged
+            ? Math.max(repairCosts - deposit, 0)
+            : repairCosts
+    ) + lateFee;
 
     returnStatusInput.value = returnStatus;
     depositDecisionInput.value = refundAmount > 0 ? 'full_refund' : 'no_refund';
@@ -2069,6 +2089,8 @@ function applyOrderItemReturnModalRules(triggerSource = 'auto') {
         Reparaturkosten: ${repairCosts.toFixed(2)} €<br>
         Kaution zurück: <span class="text-success">${refundAmount.toFixed(2)} €</span><br>
         Mit Kaution verrechnet: <span class="text-danger">${retainedAmount.toFixed(2)} €</span><br>
+        Verspätung: ${lateDays} Tag${lateDays === 1 ? '' : 'e'}<br>
+        Verspätungskosten: ${lateFee.toFixed(2)} €<br>
         Kunde muss zusätzlich zahlen: <strong>${customerAdditionalDue.toFixed(2)} €</strong>
     `;
 }

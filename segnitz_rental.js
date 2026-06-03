@@ -1936,6 +1936,89 @@ app.put('/admin/orders/:id/cancel', checkAdmin, async (req, res) => {
     }
 });
 
+async function refundOnlineOrderItemOnCancellation(connection, item) {
+    const [alreadyRefunded] = await connection.execute(
+        `SELECT id
+         FROM rental_order_payments
+         WHERE order_item_id = ?
+         AND payment_type = 'order_cancellation_refund'
+         AND payment_status = 'paid'
+         LIMIT 1`,
+        [item.id]
+    );
+
+    if (alreadyRefunded.length > 0) {
+        return null;
+    }
+
+    const rentalDays = calculateRentalDays(item.rental_start, item.rental_end);
+    const refundAmount = Number((
+        rentalDays * Number(item.price_per_day || 0) +
+        Number(item.deposit || 0)
+    ).toFixed(2));
+
+    if (refundAmount <= 0) {
+        return null;
+    }
+
+    const [payments] = await connection.execute(
+        `SELECT mollie_payment_id
+         FROM rental_order_payments
+         WHERE order_id = ?
+         AND payment_type = 'initial_payment'
+         AND payment_method = 'online'
+         AND payment_status = 'paid'
+         AND mollie_payment_id IS NOT NULL
+         ORDER BY id ASC
+         LIMIT 1`,
+        [item.order_id]
+    );
+
+    if (payments.length === 0) {
+        return null;
+    }
+
+    const paymentId = payments[0].mollie_payment_id;
+
+    const refund = await createMollieRefundForPayment({
+        paymentId,
+        amount: refundAmount,
+        description: `Artikel-Storno ${item.order_no} - ${item.title} (#${item.id})`,
+        metadata: {
+            orderId: String(item.order_id),
+            itemId: String(item.id),
+            type: 'item_cancellation_refund'
+        }
+    });
+
+    await connection.execute(
+        `INSERT INTO rental_order_payments
+         (
+            order_id,
+            order_item_id,
+            payment_type,
+            payment_method,
+            payment_status,
+            amount,
+            mollie_payment_id,
+            mollie_refund_id,
+            note,
+            paid_at
+         )
+         VALUES (?, ?, 'order_cancellation_refund', 'online', 'paid', ?, ?, ?, ?, NOW())`,
+        [
+            item.order_id,
+            item.id,
+            -Math.abs(refundAmount),
+            paymentId,
+            refund.id,
+            'Anteilig erstattet wegen Artikel-Storno vor Abholung'
+        ]
+    );
+
+    return refund;
+}
+
 app.put('/admin/order-items/:itemId/cancel', checkAdmin, async (req, res) => {
     let connection;
 
@@ -1949,6 +2032,10 @@ app.put('/admin/order-items/:itemId/cancel', checkAdmin, async (req, res) => {
     roi.order_id,
     roi.item_status,
     roi.rental_start,
+    roi.rental_end,
+    roi.price_per_day,
+    roi.deposit,
+    ro.payment_method,
     roi.picked_up_at,
     p.title,
     ro.order_no,
@@ -2000,6 +2087,9 @@ LIMIT 1`,
                 req.params.itemId
             ]
         );
+        if (String(item.payment_method || '').toLowerCase() === 'online') {
+            await refundOnlineOrderItemOnCancellation(connection, item);
+        }
 
         const [openItems] = await connection.execute(
             `SELECT COUNT(*) AS count
@@ -2449,6 +2539,13 @@ LIMIT 1`,
         }
 
         const item = items[0];
+
+        if (item.item_status !== 'picked_up') {
+            return res.status(409).json({
+                error: 'Nur abgeholte Artikel können zurückgegeben werden.'
+            });
+        }
+
         if (item.item_status === 'cancelled') {
             return res.status(409).json({
                 error: 'Stornierte Artikel können nicht zurückgegeben werden.'
@@ -2745,12 +2842,12 @@ END
             note,
             paid_at
          )
-         VALUES (?, ?, 'deposit_refund', 'cash', 'paid', ?, ?, NOW())`,
+         VALUES (?, ?, 'deposit_refund', 'cash', 'pending', ?, ?, NULL)`,
                     [
                         item.order_id,
                         req.params.itemId,
                         -Math.abs(calculatedDepositRefundAmount),
-                        'Kaution bar erstattet'
+                        'Kaution zur Barauszahlung vorgemerkt'
                     ]
                 );
             }
@@ -3677,6 +3774,44 @@ app.post('/admin/order-payments/manual-refund', checkAdmin, async (req, res) => 
             return res.status(409).json({
                 error: 'Diese Bar-Rückerstattung wurde bereits erfasst.'
             });
+        }
+
+        const [openRefunds] = await connection.execute(
+            `SELECT id
+     FROM rental_order_payments
+     WHERE order_id = ?
+     AND (? IS NULL OR order_item_id = ?)
+     AND payment_type = ?
+     AND payment_method = 'cash'
+     AND payment_status IN ('pending', 'open')
+     ORDER BY id DESC
+     LIMIT 1`,
+            [
+                orderId,
+                orderItemId || null,
+                orderItemId || null,
+                paymentType
+            ]
+        );
+
+        if (openRefunds.length > 0) {
+            await connection.execute(
+                `UPDATE rental_order_payments
+         SET payment_status = 'paid',
+             amount = ?,
+             paid_at = NOW(),
+             recorded_by_user_id = ?,
+             note = COALESCE(?, note)
+         WHERE id = ?`,
+                [
+                    -Math.abs(Number(amount)),
+                    recordedByUserId,
+                    note || null,
+                    openRefunds[0].id
+                ]
+            );
+
+            return res.json({ message: 'Bar-Rückerstattung wurde erfasst.' });
         }
 
         await connection.execute(
