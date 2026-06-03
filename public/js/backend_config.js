@@ -820,29 +820,34 @@ function renderInitialCashPaymentBlock(order) {
     }
 
     return `
-        <div class="col-12">
-            <div class="card border-warning">
-                <div class="card-body">
-                    <h5>Barzahlung bei Abholung</h5>
-                    <p class="mb-2">
-                        Offener Betrag für Miete und Kaution:
-                        <strong>${amount.toFixed(2)} €</strong>
-                    </p>
+    <div class="col-12">
+        <div class="card checkout-summary mb-3">
+            <div class="card-body">
+                <div class="summary-section-label">Barzahlung bei Abholung</div>
 
-                    <button type="button"
-                        class="btn btn-success"
-                        onclick="openManualPaymentModal(
-                            ${order.id},
-                            null,
-                            'initial_payment',
-                            ${amount}
-                        )">
-                        Miete und Kaution bar kassieren
-                    </button>
+                <div class="checkout-summary-row">
+                    <span>Offener Betrag für Miete und Kaution</span>
+                    <strong>${amount.toFixed(2)} €</strong>
                 </div>
+
+                <div class="small text-muted mb-3">
+                    Die Bestellung kann erst abgeholt werden, wenn dieser Betrag vollständig kassiert wurde.
+                </div>
+
+                <button type="button"
+                    class="btn btn-success"
+                    onclick="openManualPaymentModal(
+                        ${order.id},
+                        null,
+                        'initial_payment',
+                        ${amount}
+                    )">
+                    Miete und Kaution bar kassieren
+                </button>
             </div>
         </div>
-    `;
+    </div>
+`;
 }
 
 function renderOrderItemCard(order, item) {
@@ -974,6 +979,43 @@ function renderOrderItemCard(order, item) {
     <div class="checkout-summary-total-row">
         <span>Gesamt inkl. Kaution</span>
         <strong>${financials.grossTotalWithDeposit.toFixed(2)} €</strong>
+    </div>
+</div>
+<div class="admin-price-panel mt-3">
+    <div class="summary-section-label">Rückgabe Soll/Ist</div>
+
+    <div class="checkout-summary-row">
+        <span>Geplante Rückgabe</span>
+        <strong>${plannedReturnDate || '-'}</strong>
+    </div>
+
+    <div class="checkout-summary-row">
+        <span>Tatsächliche Rückgabe</span>
+        <strong>${actualReturnDate || '-'}</strong>
+    </div>
+
+    <div class="checkout-summary-row">
+        <span>Verspätung</span>
+        <strong>${lateDays} Tag${lateDays === 1 ? '' : 'e'}</strong>
+    </div>
+
+    ${lateDays > 0 ? `
+        <div class="checkout-summary-row">
+            <span>Verspätungskosten</span>
+            <strong class="text-danger">${lateFee.toFixed(2)} €</strong>
+        </div>
+    ` : ''}
+
+    <hr>
+
+    <div class="checkout-summary-row">
+        <span>Kaution zurück</span>
+        <strong class="text-success">${financials.depositRefund.toFixed(2)} €</strong>
+    </div>
+
+    <div class="checkout-summary-row">
+        <span>Kaution einbehalten</span>
+        <strong class="text-danger">${financials.depositRetained.toFixed(2)} €</strong>
     </div>
 </div>
 ${renderItemPayments(order, item)}
