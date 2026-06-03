@@ -764,10 +764,83 @@ function renderOrderDetails(order) {
 
             <div class="col-12">
                 <h5>Artikel</h5>
+                ${renderInitialCashPaymentBlock(order)}
                 ${itemsHtml}
                 ${renderOrderFinancialSummary(order)}
             </div>
             ${cancelHtml}
+        </div>
+    `;
+}
+
+function renderInitialCashPaymentBlock(order) {
+    const payments = order.payments || [];
+    const orderStatus = String(order.status || '').toLowerCase();
+    const paymentMethod = String(order.payment_method || '').toLowerCase();
+    const paymentStatus = String(order.payment_status || '').toLowerCase();
+
+    if (paymentMethod !== 'cash') {
+        return '';
+    }
+
+    if (['cancelled', 'expired', 'returned'].includes(orderStatus)) {
+        return '';
+    }
+
+    const openInitialPayments = payments.filter(payment =>
+        ['rental', 'deposit'].includes(payment.paymentType) &&
+        payment.paymentMethod === 'cash' &&
+        ['pending', 'open'].includes(payment.paymentStatus) &&
+        !payment.orderItemId
+    );
+
+    const alreadyPaid = paymentStatus === 'paid' || payments.some(payment =>
+        payment.paymentType === 'initial_payment' &&
+        payment.paymentMethod === 'cash' &&
+        payment.paymentStatus === 'paid'
+    );
+
+    if (alreadyPaid) {
+        return `
+            <div class="col-12">
+                <div class="alert alert-success">
+                    Barzahlung für Miete und Kaution wurde erfasst.
+                </div>
+            </div>
+        `;
+    }
+
+    const amount = openInitialPayments.reduce(
+        (sum, payment) => sum + Number(payment.amount || 0),
+        0
+    );
+
+    if (amount <= 0) {
+        return '';
+    }
+
+    return `
+        <div class="col-12">
+            <div class="card border-warning">
+                <div class="card-body">
+                    <h5>Barzahlung bei Abholung</h5>
+                    <p class="mb-2">
+                        Offener Betrag für Miete und Kaution:
+                        <strong>${amount.toFixed(2)} €</strong>
+                    </p>
+
+                    <button type="button"
+                        class="btn btn-success"
+                        onclick="openManualPaymentModal(
+                            ${order.id},
+                            null,
+                            'initial_payment',
+                            ${amount}
+                        )">
+                        Miete und Kaution bar kassieren
+                    </button>
+                </div>
+            </div>
         </div>
     `;
 }
@@ -1418,22 +1491,6 @@ ${rentalPaid
             ? `<span class="badge bg-success">${rentalPaidLabel}</span>`
             : '<span class="badge bg-warning">Nicht bezahlt</span>'
         }
-
-${canAcceptPayments && !rentalPaid ? `
-                <button type="button"
-                    class="btn btn-outline-success btn-sm ms-2"
-                    onclick="openManualPaymentModal(
-                        ${order.id},
-                        ${item.id},
-                        'rental',
-                        ${Number(rentalCashAmount || 0)}
-                    )">
-                    Miete bar verbuchen
-                </button>
-            ` : ''}
-
-            <br>
-
             Mietzeitraum-Nachzahlung:
             ${rentalAdjustment
             ? formatPaymentStatusBadge(rentalAdjustment.paymentStatus)
@@ -2200,7 +2257,12 @@ async function saveOrderItemReturn(itemId, orderId) {
             return;
         }
 
-        await sendReturnSummaryEmailForItem(itemId);
+        try {
+            await sendReturnSummaryEmailForItem(itemId);
+        } catch (mailError) {
+            console.error('Rückgabe gespeichert, aber Abschlussmail konnte nicht versendet werden:', mailError);
+            showAlert('Rückgabe gespeichert, aber Abschlussmail konnte nicht versendet werden.', 'warning');
+        }
 
         const detailsResponse = await fetch(`/admin/orders/${orderId}`);
         const updatedOrder = await detailsResponse.json();

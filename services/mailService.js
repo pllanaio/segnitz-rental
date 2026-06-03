@@ -356,9 +356,12 @@ async function sendReturnAdditionalChargeEmail(order, item, paymentUrl, amountDu
 
 async function sendPaymentReceiptEmail(order, payment) {
     const paymentTypeLabels = {
+        initial_payment: 'Miete und Kaution / ursprünglicher Mietauftrag',
         rental: 'Miete / ursprünglicher Mietauftrag',
+        deposit: 'Kaution / ursprünglicher Mietauftrag',
         rental_adjustment: 'Nachzahlung wegen Mietzeitraumänderung',
-        return_additional_charge: 'Nachzahlung aus Rückgabe'
+        return_additional_charge: 'Nachzahlung aus Rückgabe',
+        deposit_refund: 'Kautionsrückerstattung'
     };
 
     await sendGraphMail({
@@ -385,6 +388,89 @@ async function sendPaymentReceiptEmail(order, payment) {
     });
 }
 
+async function sendReturnSummaryEmail(order, item, payments = []) {
+    const depositRefund = payments.find(payment =>
+        payment.paymentType === 'deposit_refund' ||
+        payment.payment_type === 'deposit_refund'
+    );
+
+    const returnCharge = payments.find(payment =>
+        payment.paymentType === 'return_additional_charge' ||
+        payment.payment_type === 'return_additional_charge'
+    );
+
+    const statusLabels = {
+        returned_ok: 'Ordnungsgemäß zurückgegeben',
+        returned_late: 'Verspätet zurückgegeben',
+        returned_damaged: 'Beschädigt zurückgegeben',
+        returned_late_damaged: 'Verspätet und beschädigt'
+    };
+
+    const depositDecisionLabels = {
+        full_refund: 'Kaution vollständig zurückzuzahlen',
+        partial_refund: 'Kaution teilweise zurückzuzahlen',
+        no_refund: 'Keine Kautionsrückzahlung'
+    };
+
+    await sendGraphMail({
+        to: order.customer_email,
+        subject: `Rückgabenachweis zu Mietauftrag ${order.order_no}`,
+        html: `
+            <h2>Rückgabenachweis</h2>
+
+            <p>
+                Die Rückgabe zu Mietauftrag
+                <strong>${escapeHtml(order.order_no)}</strong>
+                wurde erfasst.
+            </p>
+
+            <h3>Artikel</h3>
+            <p>
+                <strong>${escapeHtml(item.title)}</strong><br>
+                Mietzeitraum: ${escapeHtml(item.rentalStart || item.rental_start)} bis ${escapeHtml(item.rentalEnd || item.rental_end)}<br>
+                Tatsächliche Rückgabe: ${escapeHtml(item.actualReturnDate || item.actual_return_date || '-')}<br>
+                Rückgabestatus: <strong>${escapeHtml(statusLabels[item.returnStatus || item.return_status] || item.returnStatus || item.return_status || '-')}</strong>
+            </p>
+
+            <h3>Zustand</h3>
+            <p>
+                Beschädigt: ${item.isDamaged || item.is_damaged ? 'Ja' : 'Nein'}<br>
+                Verspätet: ${item.isLate || item.is_late ? 'Ja' : 'Nein'}<br>
+                ${item.returnNotes || item.return_notes ? `Hinweise: ${escapeHtml(item.returnNotes || item.return_notes)}<br>` : ''}
+            </p>
+
+            <h3>Kaution und Nachzahlungen</h3>
+            <p>
+                Kaution: ${Number(item.deposit || 0).toFixed(2)} €<br>
+                Kaution zurück: ${Number(item.depositRefundAmount || item.deposit_refund_amount || 0).toFixed(2)} €<br>
+                Kaution einbehalten: ${Number(item.depositDeductionAmount || item.deposit_deduction_amount || 0).toFixed(2)} €<br>
+                Entscheidung: ${escapeHtml(depositDecisionLabels[item.depositDecision || item.deposit_decision] || item.depositDecision || item.deposit_decision || '-')}<br>
+                Zusatzforderung: ${Number(item.additionalChargeAmount || item.additional_charge_amount || 0).toFixed(2)} €
+            </p>
+
+            ${returnCharge ? `
+                <p>
+                    Rückgabe-Nachzahlung:
+                    <strong>${Number(returnCharge.amount || 0).toFixed(2)} €</strong>
+                    (${escapeHtml(returnCharge.paymentStatus || returnCharge.payment_status || 'offen')})
+                </p>
+            ` : ''}
+
+            ${depositRefund ? `
+                <p>
+                    Kautionsrückerstattung:
+                    <strong>${Math.abs(Number(depositRefund.amount || 0)).toFixed(2)} €</strong>
+                    (${escapeHtml(depositRefund.paymentStatus || depositRefund.payment_status || 'offen')})
+                </p>
+            ` : ''}
+
+            <p>
+                Bitte bewahren Sie diese E-Mail als Nachweis Ihrer Rückgabe auf.
+            </p>
+        `
+    });
+}
+
 module.exports = {
     escapeHtml,
     sendOrderEmail,
@@ -396,5 +482,6 @@ module.exports = {
     sendItemCancelledEmail,
     sendRentalAdjustmentEmailWithPayment,
     sendReturnAdditionalChargeEmail,
-    sendPaymentReceiptEmail
+    sendPaymentReceiptEmail,
+    sendReturnSummaryEmail
 };
