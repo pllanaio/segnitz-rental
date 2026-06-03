@@ -964,24 +964,35 @@ function createRentalProductCard(product) {
     );
 
     card.innerHTML = `
-    ${firstImage ? `<img src="${firstImage}" alt="${product.title}">` : ''}
-
-    <div class="availability-badge badge bg-secondary mb-2">
-        Verfügbarkeit wird geprüft...
+    <div class="product-card-image-wrap">
+        ${firstImage ? `<img src="${firstImage}" alt="${product.title}">` : ''}
+        <div class="availability-badge badge bg-secondary">
+            Verfügbarkeit wird geprüft...
+        </div>
     </div>
 
-    <h5 class="mt-2">${product.title}</h5>
-    ${ratingHtml}
-    <p class="mb-2">${product.description || ''}</p>
+    <div class="product-card-body">
+        <h5 class="product-card-title">${product.title}</h5>
+        ${ratingHtml}
 
-    <div class="d-flex justify-content-between align-items-end mt-auto">
-        <button type="button" class="btn btn-outline-primary btn-sm product-details-btn">
-            Details anzeigen
-        </button>
+        <p class="product-card-description">
+            ${product.description || ''}
+        </p>
 
-        <span class="fw-bold text-end">
-            ${Number(product.price_per_day).toFixed(2)} € / Tag
-        </span>
+        <div class="product-card-price-row">
+            <div>
+                <div class="product-card-price">
+                    ${Number(product.price_per_day).toFixed(2)} € / Tag
+                </div>
+                <div class="product-card-deposit">
+                    Kaution: ${Number(product.deposit).toFixed(2)} €
+                </div>
+            </div>
+
+            <button type="button" class="btn btn-outline-primary btn-sm product-details-btn">
+                Details
+            </button>
+        </div>
     </div>
 `;
 
