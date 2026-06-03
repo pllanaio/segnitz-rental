@@ -940,31 +940,31 @@ button#submit-btn {
 }
 
 .payment-radio {
-    position: absolute;
-    opacity: 0;
-    width: 0;
-    height: 0;
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
 }
 
 .payment-option-card {
-    position: relative;
-    cursor: pointer;
+  position: relative;
+  cursor: pointer;
 }
 
 .payment-radio {
-    position: absolute;
-    opacity: 0;
-    width: 1px;
-    height: 1px;
-    pointer-events: none;
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  pointer-events: none;
 }
 
-.payment-radio:checked + .payment-card {
-    border: 2px solid #0d6efd;
-    box-shadow: 0 0 0 0.2rem rgba(13, 110, 253, .15);
+.payment-radio:checked+.payment-card {
+  border: 2px solid #0d6efd;
+  box-shadow: 0 0 0 0.2rem rgba(13, 110, 253, .15);
 }
 
-.payment-option-card > input[type="radio"] {
+.payment-option-card>input[type="radio"] {
   position: absolute !important;
   left: -9999px !important;
   opacity: 0 !important;
@@ -981,7 +981,7 @@ button#submit-btn {
   cursor: pointer;
 }
 
-.payment-option-card > input[type="radio"]:checked + .payment-card {
+.payment-option-card>input[type="radio"]:checked+.payment-card {
   border-color: #f0c400 !important;
   background: #fffdf2 !important;
   box-shadow: 0 0 0 0.2rem rgba(252, 220, 49, 0.28) !important;
@@ -1010,4 +1010,62 @@ input[name="paymentMethod"] {
 
 .form-control.is-invalid {
   border-color: #dc3545;
+}
+
+.btn-brand-primary {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: #fff;
+  font-weight: 700;
+}
+
+.btn-brand-primary:hover,
+.btn-brand-primary:focus {
+  background: var(--color-primary-light);
+  border-color: var(--color-primary-light);
+  color: #fff;
+}
+
+.btn-brand-accent {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: var(--color-primary);
+  font-weight: 800;
+}
+
+.btn-brand-accent:hover,
+.btn-brand-accent:focus {
+  background: #ffe96a;
+  border-color: #ffe96a;
+  color: var(--color-primary);
+}
+
+.price-value {
+  font-weight: 800;
+  color: var(--color-primary);
+  white-space: nowrap;
+}
+
+.price-muted {
+  color: #6c757d;
+  font-size: 0.92rem;
+}
+
+.checkout-summary {
+  border: 1px solid var(--color-border-soft);
+  border-radius: 14px;
+  box-shadow: var(--shadow-soft);
+}
+
+.checkout-summary-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 8px;
+}
+
+.checkout-summary-total {
+  font-size: 1.25rem;
+  font-weight: 800;
+  color: var(--color-primary);
 }
