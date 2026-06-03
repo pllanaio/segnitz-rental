@@ -3825,12 +3825,12 @@ async function refundEligibleDepositsAfterPaymentsSettled(connection, orderId) {
                     note,
                     paid_at
                  )
-                 VALUES (?, ?, 'deposit_refund', 'cash', 'paid', ?, ?, NOW())`,
+                 VALUES (?, ?, 'deposit_refund', 'cash', 'pending', ?, ?, NULL)`,
                 [
                     orderId,
                     item.id,
                     -Math.abs(refundAmount),
-                    'Kaution automatisch nach Zahlung aller Ausstände bar als erstattet markiert'
+                    'Kaution zur Barauszahlung vorgemerkt nach Zahlung aller Ausstände'
                 ]
             );
         }
@@ -3993,28 +3993,6 @@ app.post('/webhooks/mollie', async (req, res) => {
          LIMIT 1`,
                 [payment.id]
             );
-        }
-
-        if (mappedPaymentStatus === 'paid') {
-            const [additionalChargeRows] = await connection.execute(
-                `SELECT order_id
-         FROM rental_order_payments
-         WHERE mollie_payment_id = ?
-         AND payment_type = 'return_additional_charge'
-         AND payment_status = 'paid'
-         LIMIT 1`,
-                [payment.id]
-            );
-
-            if (additionalChargeRows.length > 0) {
-                await connection.execute(
-                    `UPDATE rental_orders
-             SET return_case_status = 'closed'
-             WHERE id = ?
-             AND return_case_status = 'payment_pending'`,
-                    [additionalChargeRows[0].order_id]
-                );
-            }
         }
 
         const [orders] = await connection.execute(
