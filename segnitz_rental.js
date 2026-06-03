@@ -1751,7 +1751,7 @@ app.put('/admin/orders/:id/pick-up', checkAdmin, async (req, res) => {
         await connection.beginTransaction();
 
         const [orders] = await connection.execute(
-            `SELECT id, status, order_no, customer_email
+            `SELECT id, status, order_no, customer_email, payment_method, payment_status
              FROM rental_orders
              WHERE id = ?
              LIMIT 1`,
@@ -1764,6 +1764,16 @@ app.put('/admin/orders/:id/pick-up', checkAdmin, async (req, res) => {
         }
 
         const order = orders[0];
+
+        if (
+            String(order.payment_method || '').toLowerCase() === 'cash' &&
+            String(order.payment_status || '').toLowerCase() !== 'paid'
+        ) {
+            await connection.rollback();
+            return res.status(409).json({
+                error: 'Die Bestellung kann erst abgeholt werden, wenn Miete und Kaution bar kassiert wurden.'
+            });
+        }
 
         if (!['reserved', 'confirmed', 'paid', 'active'].includes(order.status)) {
             await connection.rollback();
@@ -2774,18 +2784,18 @@ END
 
         const initialPaymentMethod = item.payment_method || null;
 
-        const [openRentalAdjustments] = await connection.execute(
-            `SELECT COALESCE(SUM(amount), 0) AS amount
+        const [openBlockingPayments] = await connection.execute(
+            `SELECT id
      FROM rental_order_payments
      WHERE order_id = ?
      AND order_item_id = ?
-     AND payment_type = 'rental_adjustment'
-     AND payment_status IN ('pending', 'open')`,
+     AND payment_type IN ('rental_adjustment', 'return_additional_charge')
+     AND payment_status IN ('pending', 'open', 'authorized')
+     LIMIT 1`,
             [item.order_id, req.params.itemId]
         );
 
-        const openRentalAdjustmentAmount = Number(openRentalAdjustments[0]?.amount || 0);
-        const canRefundDepositNow = openRentalAdjustmentAmount <= 0;
+        const canRefundDepositNow = openBlockingPayments.length === 0;
 
         if (
             canRefundDepositNow &&
