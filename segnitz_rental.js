@@ -2739,7 +2739,22 @@ END
             }
         }
 
-        if (customerAdditionalDue > 0 && initialPaymentMethod === 'cash') {
+        const [existingOpenReturnCharges] = await connection.execute(
+            `SELECT id
+     FROM rental_order_payments
+     WHERE order_id = ?
+     AND order_item_id = ?
+     AND payment_type = 'return_additional_charge'
+     AND payment_status IN ('pending', 'open')
+     LIMIT 1`,
+            [item.order_id, req.params.itemId]
+        );
+
+        if (
+            customerAdditionalDue > 0 &&
+            existingOpenReturnCharges.length === 0 &&
+            initialPaymentMethod === 'cash'
+        ) {
             await connection.execute(
                 `INSERT INTO rental_order_payments
          (
@@ -2759,7 +2774,10 @@ END
                     'Rückgabe-Nachzahlung vor Ort zu zahlen'
                 ]
             );
-        } else if (customerAdditionalDue > 0) {
+        } else if (
+            customerAdditionalDue > 0 &&
+            existingOpenReturnCharges.length === 0
+        ) {
             try {
                 const payment = await createMolliePaymentForOrder({
                     id: item.order_id,
@@ -3499,6 +3517,13 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
             ['rental_adjustment', 'return_additional_charge'].includes(paymentType) &&
             orderItemId
         ) {
+            await refundEligibleDepositsAfterPaymentsSettled(connection, orderId);
+        }
+
+        if (
+            ['rental_adjustment', 'return_additional_charge'].includes(paymentType) &&
+            orderItemId
+        ) {
             const [pendingOnlinePayments] = await connection.execute(
                 `SELECT id, mollie_payment_id
          FROM rental_order_payments
@@ -3676,6 +3701,142 @@ app.post('/admin/order-payments/manual-refund', checkAdmin, async (req, res) => 
     }
 });
 
+
+async function refundEligibleDepositsAfterPaymentsSettled(connection, orderId) {
+    const [items] = await connection.execute(
+        `SELECT
+            roi.id,
+            roi.order_id,
+            roi.deposit_refund_amount,
+            p.title,
+            ro.order_no,
+            ro.customer_email,
+            ro.payment_method
+         FROM rental_order_items roi
+         JOIN rental_orders ro ON ro.id = roi.order_id
+         JOIN rental_products p ON p.id = roi.product_id
+         WHERE roi.order_id = ?
+         AND roi.item_status LIKE 'returned_%'
+         AND COALESCE(roi.deposit_refund_amount, 0) > 0`,
+        [orderId]
+    );
+
+    for (const item of items) {
+        const [openPayments] = await connection.execute(
+            `SELECT id
+             FROM rental_order_payments
+             WHERE order_id = ?
+             AND order_item_id = ?
+             AND payment_type IN ('rental_adjustment', 'return_additional_charge')
+             AND payment_status IN ('pending', 'open', 'authorized')
+             LIMIT 1`,
+            [orderId, item.id]
+        );
+
+        if (openPayments.length > 0) {
+            continue;
+        }
+
+        const [existingRefunds] = await connection.execute(
+            `SELECT id
+             FROM rental_order_payments
+             WHERE order_id = ?
+             AND order_item_id = ?
+             AND payment_type = 'deposit_refund'
+             AND payment_status = 'paid'
+             LIMIT 1`,
+            [orderId, item.id]
+        );
+
+        if (existingRefunds.length > 0) {
+            continue;
+        }
+
+        const refundAmount = Number(item.deposit_refund_amount || 0);
+
+        if (refundAmount <= 0) {
+            continue;
+        }
+
+        if (item.payment_method === 'online') {
+            const [payments] = await connection.execute(
+                `SELECT mollie_payment_id
+                 FROM rental_order_payments
+                 WHERE order_id = ?
+                 AND payment_type IN ('initial_payment', 'rental', 'deposit')
+                 AND payment_status = 'paid'
+                 AND mollie_payment_id IS NOT NULL
+                 ORDER BY id ASC
+                 LIMIT 1`,
+                [orderId]
+            );
+
+            if (payments.length === 0) {
+                continue;
+            }
+
+            const originalPaymentId = payments[0].mollie_payment_id;
+
+            const refund = await createMollieRefundForPayment({
+                paymentId: originalPaymentId,
+                amount: refundAmount,
+                description: `Kautionsrückerstattung ${item.order_no} - ${item.title} (#${item.id})`,
+                metadata: {
+                    orderId: String(orderId),
+                    itemId: String(item.id),
+                    type: 'deposit_refund'
+                }
+            });
+
+            await connection.execute(
+                `INSERT INTO rental_order_payments
+                 (
+                    order_id,
+                    order_item_id,
+                    payment_type,
+                    payment_method,
+                    payment_status,
+                    amount,
+                    mollie_payment_id,
+                    mollie_refund_id,
+                    note,
+                    paid_at
+                 )
+                 VALUES (?, ?, 'deposit_refund', 'online', 'paid', ?, ?, ?, ?, NOW())`,
+                [
+                    orderId,
+                    item.id,
+                    -Math.abs(refundAmount),
+                    originalPaymentId,
+                    refund.id,
+                    'Kaution automatisch nach Zahlung aller Ausstände erstattet'
+                ]
+            );
+        } else if (item.payment_method === 'cash') {
+            await connection.execute(
+                `INSERT INTO rental_order_payments
+                 (
+                    order_id,
+                    order_item_id,
+                    payment_type,
+                    payment_method,
+                    payment_status,
+                    amount,
+                    note,
+                    paid_at
+                 )
+                 VALUES (?, ?, 'deposit_refund', 'cash', 'paid', ?, ?, NOW())`,
+                [
+                    orderId,
+                    item.id,
+                    -Math.abs(refundAmount),
+                    'Kaution automatisch nach Zahlung aller Ausstände bar als erstattet markiert'
+                ]
+            );
+        }
+    }
+}
+
 app.post('/webhooks/mollie', async (req, res) => {
     let connection;
 
@@ -3762,6 +3923,38 @@ app.post('/webhooks/mollie', async (req, res) => {
                 payment.id
             ]
         );
+
+        const [paymentContextRows] = await connection.execute(
+            `SELECT order_id, order_item_id, payment_type
+     FROM rental_order_payments
+     WHERE mollie_payment_id = ?
+     ORDER BY id DESC
+     LIMIT 1`,
+            [payment.id]
+        );
+
+        const paymentContext = paymentContextRows[0] || null;
+
+        if (
+            paymentContext &&
+            mappedPaymentStatus === 'paid' &&
+            paymentContext.payment_type === 'return_additional_charge'
+        ) {
+            await connection.execute(
+                `UPDATE rental_orders
+         SET return_case_status = 'closed'
+         WHERE id = ?
+         AND return_case_status = 'payment_pending'`,
+                [paymentContext.order_id]
+            );
+        }
+
+        if (paymentContext && mappedPaymentStatus === 'paid') {
+            await refundEligibleDepositsAfterPaymentsSettled(
+                connection,
+                paymentContext.order_id
+            );
+        }
 
         if (mappedPaymentStatus === 'charged_back') {
             await connection.execute(
