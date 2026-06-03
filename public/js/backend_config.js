@@ -1467,17 +1467,20 @@ function renderItemPayments(order, item) {
         payment.paymentStatus === 'paid'
     );
 
-    const rentalPaid = itemPayments.some(payment =>
-        payment.paymentType === 'rental' &&
-        payment.paymentStatus === 'paid'
-    ) || (
-            String(order.payment_status || '').toLowerCase() === 'paid' &&
-            String(order.payment_method || '').toLowerCase() === 'online'
+    const rentalPaid =
+        String(order.payment_status || '').toLowerCase() === 'paid' ||
+        payments.some(payment =>
+            payment.paymentType === 'initial_payment' &&
+            payment.paymentStatus === 'paid'
+        ) ||
+        itemPayments.some(payment =>
+            payment.paymentType === 'rental' &&
+            payment.paymentStatus === 'paid'
         );
 
     const rentalPaidLabel = String(order.payment_method || '').toLowerCase() === 'online'
         ? 'Online bezahlt'
-        : 'Bezahlt';
+        : 'Bar bezahlt';
 
     const itemFinancials = calculateOrderItemFinancials(item);
     const rentalCashAmount = itemFinancials.originalRentalTotal;
