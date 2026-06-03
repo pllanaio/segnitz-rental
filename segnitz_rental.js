@@ -37,7 +37,8 @@ const {
     sendItemCancelledEmail,
     sendRentalAdjustmentEmailWithPayment,
     sendReturnAdditionalChargeEmail,
-    sendPaymentReceiptEmail
+    sendPaymentReceiptEmail,
+    sendReturnSummaryEmail
 } = require('./services/mailService');
 
 const {
@@ -2210,9 +2211,29 @@ app.post('/admin/order-items/:itemId/send-return-summary', checkAdmin, async (re
         connection = await mysql.createConnection(dbConfig);
 
         const [items] = await connection.execute(
-            `SELECT id, order_id
-             FROM rental_order_items
-             WHERE id = ?
+            `SELECT
+                roi.id,
+                roi.order_id AS orderId,
+                roi.product_id AS productId,
+                p.title,
+                DATE_FORMAT(roi.rental_start, '%Y-%m-%d') AS rentalStart,
+                DATE_FORMAT(roi.rental_end, '%Y-%m-%d') AS rentalEnd,
+                DATE_FORMAT(roi.actual_return_date, '%Y-%m-%d') AS actualReturnDate,
+                roi.return_status AS returnStatus,
+                roi.is_damaged AS isDamaged,
+                roi.is_late AS isLate,
+                roi.deposit,
+                roi.deposit_decision AS depositDecision,
+                roi.deposit_refund_amount AS depositRefundAmount,
+                roi.deposit_deduction_amount AS depositDeductionAmount,
+                roi.additional_charge_amount AS additionalChargeAmount,
+                roi.return_notes AS returnNotes,
+                ro.order_no AS order_no,
+                ro.customer_email AS customer_email
+             FROM rental_order_items roi
+             JOIN rental_orders ro ON ro.id = roi.order_id
+             JOIN rental_products p ON p.id = roi.product_id
+             WHERE roi.id = ?
              LIMIT 1`,
             [req.params.itemId]
         );
@@ -2223,8 +2244,43 @@ app.post('/admin/order-items/:itemId/send-return-summary', checkAdmin, async (re
             });
         }
 
+        const item = items[0];
+
+        if (!String(item.returnStatus || '').startsWith('returned_')) {
+            return res.status(409).json({
+                error: 'Eine Rückgabe-Abschlussmail kann erst nach festgeschriebener Rückgabe versendet werden.'
+            });
+        }
+
+        const [payments] = await connection.execute(
+            `SELECT
+                payment_type AS paymentType,
+                payment_method AS paymentMethod,
+                payment_status AS paymentStatus,
+                amount,
+                note
+             FROM rental_order_payments
+             WHERE order_id = ?
+             AND order_item_id = ?
+             AND payment_type IN ('deposit_refund', 'return_additional_charge')
+             ORDER BY id DESC`,
+            [
+                item.orderId,
+                req.params.itemId
+            ]
+        );
+
+        await sendReturnSummaryEmail(
+            {
+                order_no: item.order_no,
+                customer_email: item.customer_email
+            },
+            item,
+            payments
+        );
+
         res.json({
-            message: 'Abschlussmail wurde versendet.'
+            message: 'Rückgabe-Abschlussmail wurde versendet.'
         });
 
     } catch (error) {
@@ -3531,12 +3587,114 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
 
         const initialPaymentMethod = order.payment_method;
 
+        if (paymentType === 'initial_payment' && initialPaymentMethod !== 'cash') {
+            return res.status(409).json({
+                error: 'Die Initialzahlung darf nur bei Barzahlungs-Bestellungen manuell erfasst werden.'
+            });
+        }
+
         if (
             ['rental_adjustment', 'return_additional_charge'].includes(paymentType) &&
             initialPaymentMethod !== 'cash'
         ) {
             return res.status(409).json({
                 error: 'Barzahlung ist für diese Bestellung nicht erlaubt, da die Bestellung nicht bar bezahlt wurde.'
+            });
+        }
+
+        if (paymentType === 'initial_payment') {
+            if (orderItemId) {
+                return res.status(400).json({
+                    error: 'Die Initialzahlung wird auf Bestellungsebene erfasst, nicht auf Artikelebene.'
+                });
+            }
+
+            const [openInitialPayments] = await connection.execute(
+                `SELECT id, payment_type, amount
+         FROM rental_order_payments
+         WHERE order_id = ?
+         AND order_item_id IS NULL
+         AND payment_type IN ('rental', 'deposit')
+         AND payment_method = 'cash'
+         AND payment_status IN ('pending', 'open')`,
+                [orderId]
+            );
+
+            if (openInitialPayments.length === 0) {
+                return res.status(409).json({
+                    error: 'Für diese Bestellung ist keine offene Bar-Initialzahlung vorhanden.'
+                });
+            }
+
+            const expectedAmount = openInitialPayments.reduce(
+                (sum, payment) => sum + Number(payment.amount || 0),
+                0
+            );
+
+            if (Number(amount).toFixed(2) !== Number(expectedAmount).toFixed(2)) {
+                return res.status(400).json({
+                    error: `Der Barzahlungsbetrag muss exakt ${expectedAmount.toFixed(2)} € betragen.`
+                });
+            }
+
+            await connection.execute(
+                `UPDATE rental_order_payments
+         SET payment_status = 'paid',
+             paid_at = NOW(),
+             recorded_by_user_id = ?,
+             note = COALESCE(?, note)
+         WHERE order_id = ?
+         AND order_item_id IS NULL
+         AND payment_type IN ('rental', 'deposit')
+         AND payment_method = 'cash'
+         AND payment_status IN ('pending', 'open')`,
+                [
+                    recordedByUserId,
+                    note || 'Miete und Kaution bar bei Abholung kassiert',
+                    orderId
+                ]
+            );
+
+            await connection.execute(
+                `INSERT INTO rental_order_payments
+         (
+            order_id,
+            order_item_id,
+            payment_type,
+            payment_method,
+            payment_status,
+            amount,
+            paid_at,
+            recorded_by_user_id,
+            note
+         )
+         VALUES (?, NULL, 'initial_payment', 'cash', 'paid', ?, NOW(), ?, ?)`,
+                [
+                    orderId,
+                    Number(amount),
+                    recordedByUserId,
+                    note || 'Gesamtzahlung aus Miete und Kaution bar kassiert'
+                ]
+            );
+
+            await connection.execute(
+                `UPDATE rental_orders
+         SET payment_method = 'cash',
+             payment_status = 'paid',
+             paid_at = NOW()
+         WHERE id = ?`,
+                [orderId]
+            );
+
+            await sendPaymentReceiptEmail(order, {
+                amount: Number(amount),
+                payment_type: 'initial_payment',
+                payment_method: 'cash',
+                note: note || 'Miete und Kaution bar bei Abholung kassiert'
+            });
+
+            return res.json({
+                message: 'Barzahlung für Miete und Kaution wurde erfasst und Quittung versendet.'
             });
         }
 
