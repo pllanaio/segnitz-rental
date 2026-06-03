@@ -2544,44 +2544,89 @@ function renderOrderFinancialSummary(order) {
                 : 'Bestellung vollständig ausgeglichen';
 
     return `
-        <div class="card mt-4">
-            <div class="card-header">
-                <strong>Gesamtpreisberechnung</strong>
+    <div class="card mt-4 checkout-summary">
+        <div class="card-body">
+
+            <h5 class="mb-3">Gesamtpreisberechnung</h5>
+
+            <div class="summary-section-label">Mietkosten</div>
+
+            <div class="checkout-summary-row">
+                <span>Ursprüngliche Miete inkl. MwSt.</span>
+                <strong>${totals.originalRentalTotal.toFixed(2)} €</strong>
             </div>
 
-            <div class="card-body">
-                ${itemRows || '<div class="text-muted">Keine Positionen vorhanden.</div>'}
-
-                <hr>
-
-                <strong>Gesamtsummen</strong><br>
-                Ursprüngliche Miete: ${totals.originalRentalTotal.toFixed(2)} € inkl. MwSt.<br>
-                Mietpreis-Korrektur:
-                <span class="${totals.rentalAdjustment > 0 ? 'text-danger' : totals.rentalAdjustment < 0 ? 'text-muted' : ''}">
-                ${totals.rentalAdjustment.toFixed(2)} €
-                </span>
-                ${totals.rentalAdjustment < 0 ? '<br><small class="text-muted">Nicht als Mietrückerstattung berücksichtigt.</small>' : ''}
-                <br>
-                Miete gesamt: ${totals.rentalTotal.toFixed(2)} € inkl. MwSt.<br>
-                Kaution gesamt: ${totals.deposit.toFixed(2)} €<br>
-                Kaution zurück: <span class="text-success">${totals.depositRefund.toFixed(2)} €</span><br>
-                Kaution einbehalten: <span class="text-danger">${totals.depositRetained.toFixed(2)} €</span><br>
-                Zusatzforderungen: <span class="text-danger">${totals.additionalCharges.toFixed(2)} €</span><br>
-                Bezahlte Mietzeitraum-Nachzahlungen:
-                <span class="text-success">${paidRentalAdjustments.toFixed(2)} €</span><br>
-                Bezahlte Rückgabe-Nachzahlungen:
-                <span class="text-success">${paidReturnAdditionalCharges.toFixed(2)} €</span>
-                <hr>
-
-                <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
-                    <strong>${finalBalanceLabel}</strong>
-                    <div class="fs-4 fw-bold ${finalBalanceClass}">
-                        ${Math.abs(finalBalance).toFixed(2)} €
-                    </div>
-                </div>
+            <div class="checkout-summary-row">
+                <span>Mietpreis-Korrektur</span>
+                <strong class="${totals.rentalAdjustment > 0 ? 'text-danger' : totals.rentalAdjustment < 0 ? 'text-muted' : ''}">
+                    ${totals.rentalAdjustment.toFixed(2)} €
+                </strong>
             </div>
+
+            <div class="checkout-summary-row">
+                <span>Miete gesamt inkl. MwSt.</span>
+                <strong>${totals.rentalTotal.toFixed(2)} €</strong>
+            </div>
+
+            <hr>
+
+            <div class="summary-section-label">Kaution</div>
+
+            <div class="checkout-summary-row">
+                <span>Kaution gesamt</span>
+                <strong>${totals.deposit.toFixed(2)} €</strong>
+            </div>
+
+            <div class="checkout-summary-row">
+                <span>Kaution zurück</span>
+                <strong class="text-success">
+                    ${totals.depositRefund.toFixed(2)} €
+                </strong>
+            </div>
+
+            <div class="checkout-summary-row">
+                <span>Kaution einbehalten</span>
+                <strong class="text-danger">
+                    ${totals.depositRetained.toFixed(2)} €
+                </strong>
+            </div>
+
+            <hr>
+
+            <div class="summary-section-label">Nachzahlungen</div>
+
+            <div class="checkout-summary-row">
+                <span>Zusatzforderungen</span>
+                <strong class="text-danger">
+                    ${totals.additionalCharges.toFixed(2)} €
+                </strong>
+            </div>
+
+            <div class="checkout-summary-row">
+                <span>Bezahlte Mietzeitraum-Nachzahlungen</span>
+                <strong class="text-success">
+                    ${paidRentalAdjustments.toFixed(2)} €
+                </strong>
+            </div>
+
+            <div class="checkout-summary-row">
+                <span>Bezahlte Rückgabe-Nachzahlungen</span>
+                <strong class="text-success">
+                    ${paidReturnAdditionalCharges.toFixed(2)} €
+                </strong>
+            </div>
+
+            <div class="checkout-summary-total-row mt-3">
+                <span>${finalBalanceLabel}</span>
+
+                <strong class="${finalBalanceClass}">
+                    ${Math.abs(finalBalance).toFixed(2)} €
+                </strong>
+            </div>
+
         </div>
-    `;
+    </div>
+`;
 }
 
 async function sendReturnSummaryEmailForItem(itemId) {
