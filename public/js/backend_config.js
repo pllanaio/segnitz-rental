@@ -948,41 +948,33 @@ function renderOrderItemCard(order, item) {
                     </div>
                 ` : ''}
 
-<div class="mt-3 p-2 border rounded bg-light">
-    <strong>Preisübersicht</strong><br>
+<div class="admin-price-panel mt-3">
+    <div class="summary-section-label">Preisübersicht</div>
 
-    Miettage: ${financials.effectiveDays}<br>
-    Tagespreis: ${financials.pricePerDay.toFixed(2)} € inkl. MwSt.<br>
-    Miete gesamt: <strong>${financials.rentalTotal.toFixed(2)} € inkl. MwSt.</strong><br>
-    Mietzeitraumverlängerung:
-    ${financials.extendedDays > 0
-            ? `${financials.extendedDays} zusätzliche Tag${financials.extendedDays === 1 ? '' : 'e'}`
-            : 'Keine'}<br>
-    Kaution:
-    ${financials.deposit.toFixed(2)} €<br>
-    Gesamtpreis inkl. MwSt. und Kaution:
-    <strong>${financials.grossTotalWithDeposit.toFixed(2)} €</strong><br>
-    ${financials.additionalCharge > 0 ? `
-        Zusatzforderung:
-        <span class="text-danger">${financials.additionalCharge.toFixed(2)} €</span><br>
-        ${financials.additionalChargeReason ? `<small>${formatTextValue(financials.additionalChargeReason)}</small><br>` : ''}
-    ` : ''}
+    <div class="checkout-summary-row">
+        <span>Miettage</span>
+        <strong>${financials.effectiveDays}</strong>
+    </div>
 
-    <hr>
-    <strong>Rückgabe Soll/Ist</strong><br>
-    Geplante Rückgabe: ${plannedReturnDate || '-'}<br>
-    Tatsächliche Rückgabe: ${actualReturnDate || '-'}<br>
-    Verspätung: ${lateDays} Tag${lateDays === 1 ? '' : 'e'}<br>
-    ${lateDays > 0 ? `
-    Verspätungskosten:
-    <span class="text-danger">${lateFee.toFixed(2)} €</span><br>
-    ` : ''}
+    <div class="checkout-summary-row">
+        <span>Tagespreis inkl. MwSt.</span>
+        <strong>${financials.pricePerDay.toFixed(2)} €</strong>
+    </div>
 
-    Kaution zurück:
-    <span class="text-success">${financials.depositRefund.toFixed(2)} €</span>
-    <br>
-Kaution einbehalten:
-<span class="text-danger">${financials.depositRetained.toFixed(2)} €</span>
+    <div class="checkout-summary-row">
+        <span>Miete gesamt inkl. MwSt.</span>
+        <strong>${financials.rentalTotal.toFixed(2)} €</strong>
+    </div>
+
+    <div class="checkout-summary-row">
+        <span>Kaution</span>
+        <strong>${financials.deposit.toFixed(2)} €</strong>
+    </div>
+
+    <div class="checkout-summary-total-row">
+        <span>Gesamt inkl. Kaution</span>
+        <strong>${financials.grossTotalWithDeposit.toFixed(2)} €</strong>
+    </div>
 </div>
 ${renderItemPayments(order, item)}
             </div>
@@ -1494,11 +1486,13 @@ ${rentalPaid
             ? `<span class="badge bg-success">${rentalPaidLabel}</span>`
             : '<span class="badge bg-warning">Nicht bezahlt</span>'
         }
+        <br>
             Mietzeitraum-Nachzahlung:
             ${rentalAdjustment
             ? formatPaymentStatusBadge(rentalAdjustment.paymentStatus)
             : '<span class="badge bg-secondary">Keine</span>'
         }
+        <br>
 
             ${canAcceptPayments && openRentalAdjustment ? `
                 <button type="button"
