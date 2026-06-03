@@ -2457,22 +2457,6 @@ function renderOrderFinancialSummary(order) {
         )
         .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
 
-    const itemRows = items.map(item => {
-        const f = calculateOrderItemFinancials(item);
-
-        return `
-            <div class="border-bottom py-2">
-                <strong>${item.title}</strong><br>
-                Miettage: ${f.effectiveDays}<br>
-                Tagespreis: ${f.pricePerDay.toFixed(2)} € inkl. MwSt.<br>
-                Miete gesamt: ${f.rentalTotal.toFixed(2)} € inkl. MwSt.<br>
-                Kaution: ${f.deposit.toFixed(2)} €<br>
-                ${f.additionalCharge > 0 ? `Zusatzforderung: ${f.additionalCharge.toFixed(2)} €<br>` : ''}
-                ${f.depositRefund > 0 ? `Kaution zurück: ${f.depositRefund.toFixed(2)} €<br>` : ''}
-            </div>
-        `;
-    }).join('');
-
     const totals = items.reduce((sum, item) => {
         const f = calculateOrderItemFinancials(item);
 
