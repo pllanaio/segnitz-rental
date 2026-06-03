@@ -154,35 +154,44 @@
                                     </div>
                                 </div>
 
-                                <div id="cartReviewSummary" class="card mt-4">
+                                <div id="cartReviewSummary" class="card mt-4 checkout-summary">
                                     <div class="card-body">
-                                        <h5>Zusammenfassung</h5>
+                                        <h5 class="mb-3">Ihre Kostenübersicht</h5>
 
-                                        <div class="d-flex justify-content-between">
-                                            <strong>Miete netto:</strong>
-                                            <span id="cartReviewRentalNetTotal">0,00 €</span>
+                                        <div class="summary-section-label">Mietkosten</div>
+
+                                        <div class="checkout-summary-row">
+                                            <span>Mietpreis netto</span>
+                                            <strong id="cartReviewRentalNetTotal">0,00 €</strong>
                                         </div>
 
-                                        <div class="d-flex justify-content-between">
-                                            <strong>MwSt. 19%:</strong>
-                                            <span id="cartReviewRentalVatTotal">0,00 €</span>
+                                        <div class="checkout-summary-row">
+                                            <span>Mehrwertsteuer 19%</span>
+                                            <strong id="cartReviewRentalVatTotal">0,00 €</strong>
                                         </div>
 
-                                        <div class="d-flex justify-content-between">
-                                            <strong>Zwischensumme Miete:</strong>
-                                            <span id="cartReviewRentalTotal">0,00 €</span>
+                                        <div class="checkout-summary-row">
+                                            <span>Mietpreis brutto</span>
+                                            <strong id="cartReviewRentalTotal">0,00 €</strong>
                                         </div>
 
-                                        <div class="d-flex justify-content-between">
-                                            <strong>Zu entrichtende Kaution:</strong>
-                                            <span id="cartReviewDepositTotal">0,00 €</span>
+                                        <hr>
+
+                                        <div class="summary-section-label">Kaution</div>
+
+                                        <div class="checkout-summary-row">
+                                            <span>Zu hinterlegen</span>
+                                            <strong id="cartReviewDepositTotal">0,00 €</strong>
                                         </div>
 
-                                        <hr class="my-2">
+                                        <div class="small text-muted mb-3">
+                                            Die Kaution wird nach Rückgabe geprüft und je nach Zustand vollständig oder
+                                            teilweise erstattet.
+                                        </div>
 
-                                        <div class="d-flex justify-content-between fs-5">
-                                            <strong>Gesamtbetrag inkl. Kaution und MwSt.:</strong>
-                                            <span id="cartReviewGrandTotal">0,00 €</span>
+                                        <div class="checkout-summary-total-row">
+                                            <span>Heute zu zahlen</span>
+                                            <strong id="cartReviewGrandTotal">0,00 €</strong>
                                         </div>
                                     </div>
                                 </div>
@@ -534,35 +543,41 @@
                             Ihr Warenkorb ist leer.
                         </div>
                     </div>
-                    <div id="cartSummary" class="mt-3 d-none">
+                    <div id="cartSummary" class="checkout-summary p-3 mt-3 d-none">
+                        <div class="summary-section-label">Mietkosten</div>
+
+                        <div class="checkout-summary-row">
+                            <span>Mietpreis netto</span>
+                            <strong id="cartRentalNetTotal">0,00 €</strong>
+                        </div>
+
+                        <div class="checkout-summary-row">
+                            <span>Mehrwertsteuer 19%</span>
+                            <strong id="cartRentalVatTotal">0,00 €</strong>
+                        </div>
+
+                        <div class="checkout-summary-row">
+                            <span>Mietpreis brutto</span>
+                            <strong id="cartRentalTotal">0,00 €</strong>
+                        </div>
+
                         <hr>
 
-                        <div class="d-flex justify-content-between">
-                            <strong>Miete netto:</strong>
-                            <span id="cartRentalNetTotal">0,00 €</span>
+                        <div class="summary-section-label">Kaution</div>
+
+                        <div class="checkout-summary-row">
+                            <span>Zu hinterlegen</span>
+                            <strong id="cartDepositTotal">0,00 €</strong>
                         </div>
 
-                        <div class="d-flex justify-content-between">
-                            <strong>MwSt. 19%:</strong>
-                            <span id="cartRentalVatTotal">0,00 €</span>
+                        <div class="small text-muted mb-3">
+                            Die Kaution wird nach Rückgabe geprüft und je nach Zustand vollständig oder teilweise
+                            erstattet.
                         </div>
 
-                        <div class="d-flex justify-content-between">
-                            <strong>Zwischensumme Miete:</strong>
-                            <span id="cartRentalTotal">0,00 €</span>
-                        </div>
-
-
-                        <div class="d-flex justify-content-between">
-                            <strong>Zu entrichtende Kaution:</strong>
-                            <span id="cartDepositTotal">0,00 €</span>
-                        </div>
-
-                        <hr class="my-2">
-
-                        <div class="d-flex justify-content-between fs-5">
-                            <strong>Gesamtbetrag inkl. Kaution und MwSt.:</strong>
-                            <span id="cartGrandTotal">0,00 €</span>
+                        <div class="checkout-summary-total-row">
+                            <span>Heute zu zahlen</span>
+                            <strong id="cartGrandTotal">0,00 €</strong>
                         </div>
 
                         <div class="text-end mt-3">

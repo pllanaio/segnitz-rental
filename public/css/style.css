@@ -1069,3 +1069,52 @@ input[name="paymentMethod"] {
   font-weight: 800;
   color: var(--color-primary);
 }
+
+.checkout-summary {
+  background: #ffffff;
+  border: 1px solid var(--color-border-soft);
+  border-radius: 14px;
+  box-shadow: 0 10px 30px rgba(4, 28, 64, 0.08);
+}
+
+.summary-section-label {
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: var(--color-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 8px;
+}
+
+.checkout-summary-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 8px;
+}
+
+.checkout-summary-row span {
+  color: #5f6f89;
+}
+
+.checkout-summary-row strong {
+  color: var(--color-primary);
+  white-space: nowrap;
+}
+
+.checkout-summary-total-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  padding-top: 12px;
+  border-top: 2px solid var(--color-primary);
+  font-size: 1.2rem;
+}
+
+.checkout-summary-total-row span,
+.checkout-summary-total-row strong {
+  font-weight: 800;
+  color: var(--color-primary);
+}
