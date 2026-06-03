@@ -3799,6 +3799,17 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
                     paymentType
                 ]
             );
+
+            if (paymentType === 'return_additional_charge') {
+                await connection.execute(
+                    `UPDATE rental_orders
+         SET return_case_status = 'closed'
+         WHERE id = ?
+         AND return_case_status = 'payment_pending'`,
+                    [orderId]
+                );
+            }
+
         } else {
             await connection.execute(
                 `INSERT INTO rental_order_payments
