@@ -2672,9 +2672,25 @@ LIMIT 1`,
                         ? 'returned_late'
                         : 'returned_ok';
 
-        const calculatedDepositRefundAmount = isDamaged
-            ? Math.max(deposit - normalizedAdditionalChargeAmount, 0)
-            : deposit;
+        const [openRentalAdjustmentRows] = await connection.execute(
+            `SELECT COALESCE(SUM(amount), 0) AS amount
+     FROM rental_order_payments
+     WHERE order_id = ?
+     AND order_item_id = ?
+     AND payment_type = 'rental_adjustment'
+     AND payment_status IN ('pending', 'open', 'authorized')`,
+            [item.order_id, req.params.itemId]
+        );
+
+        const openRentalAdjustmentAmount = Number(openRentalAdjustmentRows[0]?.amount || 0);
+        const totalOffsetAgainstDeposit =
+            normalizedAdditionalChargeAmount +
+            openRentalAdjustmentAmount;
+
+        const calculatedDepositRefundAmount = Math.max(
+            deposit - totalOffsetAgainstDeposit,
+            0
+        );
 
         const depositDeductionAmount = Math.max(deposit - calculatedDepositRefundAmount, 0);
 
@@ -2689,11 +2705,8 @@ LIMIT 1`,
                     ? 'partial_refund'
                     : 'no_refund';
 
-        const damageAdditionalDue = isDamaged
-            ? Math.max(normalizedAdditionalChargeAmount - deposit, 0)
-            : normalizedAdditionalChargeAmount;
-
-        const customerAdditionalDue = damageAdditionalDue + lateFee;
+        const customerAdditionalDue =
+            Math.max(totalOffsetAgainstDeposit - deposit, 0) + lateFee;
 
         await connection.execute(
             `UPDATE rental_order_items
@@ -4025,6 +4038,13 @@ app.post('/admin/order-payments/manual-refund', checkAdmin, async (req, res) => 
                 ]
             );
 
+            await sendPaymentReceiptEmail(orders[0], {
+                amount: -Math.abs(Number(amount)),
+                payment_type: paymentType,
+                payment_method: 'cash',
+                note: note || 'Kaution bar an Kunden ausgezahlt'
+            });
+
             return res.json({ message: 'Bar-Rückerstattung wurde erfasst.' });
         }
 
@@ -4051,6 +4071,13 @@ app.post('/admin/order-payments/manual-refund', checkAdmin, async (req, res) => 
                 note || null
             ]
         );
+
+        await sendPaymentReceiptEmail(orders[0], {
+            amount: -Math.abs(Number(amount)),
+            payment_type: paymentType,
+            payment_method: 'cash',
+            note: note || 'Kaution bar an Kunden ausgezahlt'
+        });
 
         res.json({ message: 'Bar-Rückerstattung wurde erfasst.' });
 
