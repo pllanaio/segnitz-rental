@@ -1323,7 +1323,7 @@ async function refundFullOnlineOrderPaymentOnCancellation(connection, orderId, o
         `SELECT id
          FROM rental_order_payments
          WHERE order_id = ?
-         AND payment_type = 'deposit_refund'
+         AND payment_type = 'order_cancellation_refund'
          AND note LIKE '%Stornierung%'
          AND payment_status = 'paid'
          LIMIT 1`,
@@ -1393,7 +1393,7 @@ async function refundFullOnlineOrderPaymentOnCancellation(connection, orderId, o
             note,
             paid_at
          )
-         VALUES (?, NULL, 'deposit_refund', 'online', 'paid', 0, ?, ?, NOW())`,
+         VALUES (?, NULL, 'order_cancellation_refund', 'online', 'paid', 0, ?, ?, NOW())`,
             [
                 orderId,
                 paymentId,
@@ -1428,7 +1428,7 @@ async function refundFullOnlineOrderPaymentOnCancellation(connection, orderId, o
             note,
             paid_at
          )
-         VALUES (?, NULL,'deposit_refund', 'online', 'paid', ?, ?, ?, ?, NOW())`,
+         VALUES (?, NULL,'order_cancellation_refund', 'online', 'paid', ?, ?, ?, ?, NOW())`,
         [
             orderId,
             -Math.abs(refundableAmount),
