@@ -2621,7 +2621,14 @@ function renderOrderFinancialSummary(order) {
         customerAdditionalDue: 0,
         customerCredit: 0
     });
-    const chargeableRentalAdjustment = Math.max(totals.rentalAdjustment, 0);
+    const openRentalAdjustments = payments
+        .filter(payment =>
+            payment.paymentType === 'rental_adjustment' &&
+            ['pending', 'open', 'authorized'].includes(payment.paymentStatus)
+        )
+        .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+
+    const chargeableRentalAdjustment = Math.max(openRentalAdjustments, 0);
 
     const paidDepositRefunds = payments
         .filter(payment =>
@@ -3075,6 +3082,32 @@ async function markOrderItemPickedUp(orderId, itemId) {
         console.error('Fehler beim Markieren des Artikels als abgeholt:', error);
         showAlert('Artikel konnte nicht als abgeholt markiert werden.', 'danger');
     }
+}
+
+function renderSelectedReturnImagePreview() {
+    const input = document.getElementById('returnImageUpload');
+    const preview = document.getElementById('returnSelectedImagePreview');
+
+    if (!input || !preview) return;
+
+    const files = Array.from(input.files || []);
+
+    if (files.length === 0) {
+        preview.innerHTML = '';
+        return;
+    }
+
+    preview.innerHTML = `
+        <div class="row g-2 mt-2">
+            ${files.map(file => `
+                <div class="col-6 col-md-3">
+                    <img src="${URL.createObjectURL(file)}"
+                        class="img-fluid rounded border"
+                        style="height: 120px; object-fit: cover; width: 100%;">
+                </div>
+            `).join('')}
+        </div>
+    `;
 }
 
 function logout() {

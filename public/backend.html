@@ -449,7 +449,8 @@
 
                         <div class="col-12">
                             <label class="form-label">Rückgabefotos</label>
-                            <input type="file" class="form-control" id="returnImageUpload" accept="image/*" multiple>
+                            <input type="file" class="form-control" id="returnImageUpload" accept="image/*" multiple onchange="renderSelectedReturnImagePreview()">
+                            <div id="returnSelectedImagePreview"></div>
                             <div id="returnExistingImages" class="row g-2 mt-2"></div>
                         </div>
 
