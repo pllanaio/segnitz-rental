@@ -1624,7 +1624,7 @@ ${rentalPaid
         }
         <br>
 
-            ${canAcceptPayments && openRentalAdjustment ? `
+            ${canAcceptPayments && isCashOrder && openRentalAdjustment ? `
                 <button type="button"
                     class="btn btn-outline-success btn-sm ms-2"
                     onclick="openManualPaymentModal(
@@ -1669,7 +1669,7 @@ ${rentalPaid
 
 
 
-            ${canAcceptPayments && returnCharge && !hasPaidPayment('return_additional_charge') ? `
+            ${canAcceptPayments && isCashOrder && returnCharge && !hasPaidPayment('return_additional_charge') ? `
                 <button type="button"
                     class="btn btn-outline-success btn-sm ms-2"
                     onclick="openManualPaymentModal(
@@ -1821,7 +1821,9 @@ async function submitManualRefund() {
 
 function formatPaymentType(type) {
     const labels = {
+        initial_payment: 'Initialzahlung',
         rental: 'Miete',
+        deposit: 'Kaution',
         rental_adjustment: 'Nachzahlung Mietzeitraum',
         return_additional_charge: 'Nachzahlung Rückgabe',
         deposit_refund: 'Kautionsrückerstattung',
