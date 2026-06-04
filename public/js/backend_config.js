@@ -2295,12 +2295,12 @@ function applyOrderItemReturnModalRules(triggerSource = 'auto') {
 
         <div class="checkout-summary-row">
             <span>Kaution zurück</span>
-            <strong class="text-success">${depositRefundAmount.toFixed(2)} €</strong>
+            <strong class="text-success">${refundAmount.toFixed(2)} €</strong>
         </div>
 
         <div class="checkout-summary-row">
             <span>Kaution einbehalten</span>
-            <strong class="text-danger">${depositDeductionAmount.toFixed(2)} €</strong>
+            <strong class="text-danger">${retainedAmount.toFixed(2)} €</strong>
         </div>
 
         <hr>
