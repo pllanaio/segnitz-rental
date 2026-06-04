@@ -1033,7 +1033,10 @@ function renderOrderItemCard(order, item) {
                     <div class="row g-2 mt-3">
                         ${(item.returnImages || []).map(image => `
                             <div class="col-6 col-md-3">
-                                <img src="${image.imagePath}" class="img-fluid rounded border">
+                                <a href="/${image.imagePath}" target="_blank">
+    <img src="/${image.imagePath}" class="img-fluid rounded border"
+        style="height: 120px; object-fit: cover; width: 100%;">
+</a>
                             </div>
                         `).join('')}
                     </div>
@@ -2171,10 +2174,13 @@ function openOrderItemReturnModal(orderId, itemId) {
     document.getElementById('returnNotes').value = item.returnNotes || '';
     document.getElementById('returnImageUpload').value = '';
     document.getElementById('returnExistingImages').innerHTML = (item.returnImages || []).map(image => `
-        <div class="col-6 col-md-3">
-            <img src="${image.imagePath}" class="img-fluid rounded border">
-        </div>
-    `).join('');
+    <div class="col-6 col-md-3">
+        <a href="/${image.imagePath}" target="_blank">
+            <img src="/${image.imagePath}" class="img-fluid rounded border"
+                style="height: 120px; object-fit: cover; width: 100%;">
+        </a>
+    </div>
+`).join('');
 
     [
         'returnActualDate',
@@ -2420,6 +2426,13 @@ async function saveOrderItemReturn(itemId, orderId) {
         if (!response.ok) {
             showAlert(result.error || 'Rückgabe konnte nicht gespeichert werden.', 'danger');
             return;
+        }
+
+        try {
+            await uploadReturnImagesForCurrentReturn(itemId);
+        } catch (uploadError) {
+            console.error('Rückgabe gespeichert, aber Fotos konnten nicht hochgeladen werden:', uploadError);
+            showAlert('Rückgabe gespeichert, aber Rückgabefotos konnten nicht hochgeladen werden.', 'warning');
         }
 
         try {
