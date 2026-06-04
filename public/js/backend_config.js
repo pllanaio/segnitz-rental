@@ -2269,7 +2269,7 @@ function applyOrderItemReturnModalRules(triggerSource = 'auto') {
     document.getElementById('returnPricePerDay').value =
         Number(item.adjustedPricePerDay || item.pricePerDay || 0).toFixed(2);
 
-    document.getElementById('returnPreview').innerHTML = `
+    document.getElementById('returnPricePreview').innerHTML = `
     <div class="admin-price-panel mt-3">
         <div class="summary-section-label">Rückgabevorschau</div>
 

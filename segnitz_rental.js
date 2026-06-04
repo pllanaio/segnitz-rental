@@ -2687,6 +2687,23 @@ LIMIT 1`,
             normalizedAdditionalChargeAmount +
             openRentalAdjustmentAmount;
 
+        if (openRentalAdjustmentAmount > 0) {
+            await connection.execute(
+                `UPDATE rental_order_payments
+         SET payment_status = 'cancelled',
+             note = CONCAT(
+                 COALESCE(note, ''),
+                 CASE WHEN note IS NULL OR note = '' THEN '' ELSE ' | ' END,
+                 'Offene Mietzeitraum-Nachzahlung wurde bei Rückgabe mit Kaution verrechnet'
+             )
+         WHERE order_id = ?
+         AND order_item_id = ?
+         AND payment_type = 'rental_adjustment'
+         AND payment_status IN ('pending', 'open', 'authorized')`,
+                [item.order_id, req.params.itemId]
+            );
+        }
+
         const calculatedDepositRefundAmount = Math.max(
             deposit - totalOffsetAgainstDeposit,
             0
