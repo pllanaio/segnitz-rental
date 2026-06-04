@@ -1537,6 +1537,7 @@ function renderItemPayments(order, item) {
 
     const orderStatus = String(order.status || '').toLowerCase();
     const canAcceptPayments = !['cancelled', 'expired'].includes(orderStatus);
+    const isCashOrder = String(order.payment_method || '').toLowerCase() === 'cash';
 
     const payments = order.payments || [];
 
