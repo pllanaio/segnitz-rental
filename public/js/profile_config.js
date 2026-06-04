@@ -691,14 +691,39 @@ function renderMyOrderFinancialSummary(order) {
         additionalCharges: 0
     });
 
-    const chargeableRentalAdjustment = Math.max(totals.rentalAdjustment, 0);
+    const openRentalAdjustments = payments
+        .filter(payment =>
+            payment.paymentType === 'rental_adjustment' &&
+            ['pending', 'open', 'authorized'].includes(payment.paymentStatus)
+        )
+        .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+
+    const chargeableRentalAdjustment = Math.max(openRentalAdjustments, 0);
+
+    const paidDepositRefunds = payments
+        .filter(payment =>
+            payment.paymentType === 'deposit_refund' &&
+            payment.paymentStatus === 'paid'
+        )
+        .reduce((sum, payment) => sum + Math.abs(Number(payment.amount || 0)), 0);
+
+    const refundableDeposit = Math.max(
+        totals.customerCredit - paidDepositRefunds,
+        0
+    );
+
+    const totalAdditionalDue =
+        chargeableRentalAdjustment +
+        totals.customerAdditionalDue;
+
+    const remainingAdditionalDue = Math.max(
+        totalAdditionalDue - paidReturnAdditionalCharges,
+        0
+    );
 
     const finalBalance =
-        chargeableRentalAdjustment -
-        paidRentalAdjustments +
-        totals.customerAdditionalDue -
-        paidReturnAdditionalCharges -
-        totals.customerCredit;
+        remainingAdditionalDue -
+        refundableDeposit;
 
     const finalBalanceClass =
         finalBalance > 0
