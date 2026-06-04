@@ -2646,9 +2646,7 @@ function renderOrderFinancialSummary(order) {
         chargeableRentalAdjustment +
         totals.customerAdditionalDue;
 
-    const totalPaidAdditionalCharges =
-        paidRentalAdjustments +
-        paidReturnAdditionalCharges;
+    const totalPaidAdditionalCharges = paidReturnAdditionalCharges;
 
     const remainingAdditionalDue = Math.max(
         totalAdditionalDue - totalPaidAdditionalCharges,
