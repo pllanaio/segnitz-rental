@@ -1193,3 +1193,45 @@ input[name="paymentMethod"] {
   border-radius: 12px;
   padding: 14px;
 }
+
+.cash-action-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--color-border-soft);
+}
+
+.cash-action-row:last-child {
+  border-bottom: 0;
+}
+
+.cash-action-title {
+  font-weight: 800;
+  color: var(--color-primary);
+}
+
+.cash-action-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  white-space: nowrap;
+}
+
+.cash-action-controls strong {
+  color: var(--color-primary);
+  font-size: 1.05rem;
+}
+
+@media (max-width: 768px) {
+  .cash-action-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .cash-action-controls {
+    width: 100%;
+    justify-content: space-between;
+  }
+}

@@ -764,7 +764,7 @@ function renderOrderDetails(order) {
 
             <div class="col-12">
                 <h5>Artikel</h5>
-                ${renderInitialCashPaymentBlock(order)}
+                ${renderOrderCashActionPanel(order)}
                 ${itemsHtml}
                 ${renderOrderFinancialSummary(order)}
             </div>
@@ -773,7 +773,7 @@ function renderOrderDetails(order) {
     `;
 }
 
-function renderInitialCashPaymentBlock(order) {
+function renderOrderCashActionPanel(order) {
     const payments = order.payments || [];
     const orderStatus = String(order.status || '').toLowerCase();
     const paymentMethod = String(order.payment_method || '').toLowerCase();
@@ -783,9 +783,11 @@ function renderInitialCashPaymentBlock(order) {
         return '';
     }
 
-    if (['cancelled', 'expired', 'returned'].includes(orderStatus)) {
+    if (['cancelled', 'expired'].includes(orderStatus)) {
         return '';
     }
+
+    const actions = [];
 
     const openInitialPayments = payments.filter(payment =>
         ['rental', 'deposit'].includes(payment.paymentType) &&
@@ -794,60 +796,144 @@ function renderInitialCashPaymentBlock(order) {
         !payment.orderItemId
     );
 
-    const alreadyPaid = paymentStatus === 'paid' || payments.some(payment =>
+    const initialAmount = openInitialPayments.reduce(
+        (sum, payment) => sum + Number(payment.amount || 0),
+        0
+    );
+
+    const initialPaid = paymentStatus === 'paid' || payments.some(payment =>
         payment.paymentType === 'initial_payment' &&
         payment.paymentMethod === 'cash' &&
         payment.paymentStatus === 'paid'
     );
 
-    if (alreadyPaid) {
-        return `
-            <div class="col-12">
-                <div class="alert alert-success">
-                    Barzahlung für Miete und Kaution wurde erfasst.
+    if (initialAmount > 0 && !initialPaid) {
+        actions.push(`
+            <div class="cash-action-row">
+                <div>
+                    <div class="cash-action-title">Barzahlung bei Abholung</div>
+                    <div class="small text-muted">Miete und Kaution müssen vor Abholung vollständig kassiert werden.</div>
+                </div>
+
+                <div class="cash-action-controls">
+                    <strong>${initialAmount.toFixed(2)} €</strong>
+                    <button type="button"
+                        class="btn btn-success btn-sm"
+                        onclick="openManualPaymentModal(${order.id}, null, 'initial_payment', ${initialAmount})">
+                        Miete und Kaution bar kassieren
+                    </button>
                 </div>
             </div>
-        `;
+        `);
     }
 
-    const amount = openInitialPayments.reduce(
-        (sum, payment) => sum + Number(payment.amount || 0),
-        0
+    const openRentalAdjustments = payments.filter(payment =>
+        payment.paymentType === 'rental_adjustment' &&
+        payment.paymentMethod === 'cash' &&
+        ['pending', 'open'].includes(payment.paymentStatus)
     );
 
-    if (amount <= 0) {
+    openRentalAdjustments.forEach(payment => {
+        actions.push(`
+            <div class="cash-action-row">
+                <div>
+                    <div class="cash-action-title">Mietzeitraum-Verlängerung</div>
+                    <div class="small text-muted">Offene Nachzahlung aus einer Verlängerung.</div>
+                </div>
+
+                <div class="cash-action-controls">
+                    <strong>${Number(payment.amount || 0).toFixed(2)} €</strong>
+                    <button type="button"
+                        class="btn btn-success btn-sm"
+                        onclick="openManualPaymentModal(
+                            ${payment.orderId},
+                            ${payment.orderItemId || 'null'},
+                            'rental_adjustment',
+                            ${Number(payment.amount || 0)}
+                        )">
+                        Verlängerung bar kassieren
+                    </button>
+                </div>
+            </div>
+        `);
+    });
+
+    const openReturnCharges = payments.filter(payment =>
+        payment.paymentType === 'return_additional_charge' &&
+        payment.paymentMethod === 'cash' &&
+        ['pending', 'open'].includes(payment.paymentStatus)
+    );
+
+    openReturnCharges.forEach(payment => {
+        actions.push(`
+            <div class="cash-action-row">
+                <div>
+                    <div class="cash-action-title">Rückgabe-Nachzahlung</div>
+                    <div class="small text-muted">Offene Nachzahlung aus verspäteter oder beschädigter Rückgabe.</div>
+                </div>
+
+                <div class="cash-action-controls">
+                    <strong>${Number(payment.amount || 0).toFixed(2)} €</strong>
+                    <button type="button"
+                        class="btn btn-success btn-sm"
+                        onclick="openManualPaymentModal(
+                            ${payment.orderId},
+                            ${payment.orderItemId || 'null'},
+                            'return_additional_charge',
+                            ${Number(payment.amount || 0)}
+                        )">
+                        Nachzahlung bar kassieren
+                    </button>
+                </div>
+            </div>
+        `);
+    });
+
+    const openDepositRefunds = payments.filter(payment =>
+        payment.paymentType === 'deposit_refund' &&
+        payment.paymentMethod === 'cash' &&
+        ['pending', 'open'].includes(payment.paymentStatus)
+    );
+
+    openDepositRefunds.forEach(payment => {
+        actions.push(`
+            <div class="cash-action-row">
+                <div>
+                    <div class="cash-action-title">Kautionsrückerstattung</div>
+                    <div class="small text-muted">Kaution wurde zur Barauszahlung vorgemerkt.</div>
+                </div>
+
+                <div class="cash-action-controls">
+                    <strong>${Math.abs(Number(payment.amount || 0)).toFixed(2)} €</strong>
+                    <button type="button"
+                        class="btn btn-outline-danger btn-sm"
+                        onclick="openManualRefundModal(
+                            ${payment.orderId},
+                            ${payment.orderItemId || 'null'},
+                            'deposit_refund',
+                            ${Math.abs(Number(payment.amount || 0))}
+                        )">
+                        Kaution bar erstatten
+                    </button>
+                </div>
+            </div>
+        `);
+    });
+
+    if (actions.length === 0) {
         return '';
     }
 
     return `
-    <div class="col-12">
-        <div class="card checkout-summary mb-3">
-            <div class="card-body">
-                <div class="summary-section-label">Barzahlung bei Abholung</div>
-
-                <div class="checkout-summary-row">
-                    <span>Offener Betrag für Miete und Kaution</span>
-                    <strong>${amount.toFixed(2)} €</strong>
+        <div class="col-12">
+            <div class="card checkout-summary mb-3">
+                <div class="card-body">
+                    <h5 class="mb-3">Offene Barvorgänge</h5>
+                    ${actions.join('')}
                 </div>
-
-                <div class="small text-muted mb-3">
-                    Die Bestellung kann erst abgeholt werden, wenn dieser Betrag vollständig kassiert wurde.
-                </div>
-
-                <button type="button"
-                    class="btn btn-success"
-                    onclick="openManualPaymentModal(
-                        ${order.id},
-                        null,
-                        'initial_payment',
-                        ${amount}
-                    )">
-                    Miete und Kaution bar kassieren
-                </button>
             </div>
         </div>
-    </div>
-`;
+    `;
 }
 
 function renderOrderItemCard(order, item) {
@@ -1018,7 +1104,6 @@ function renderOrderItemCard(order, item) {
         <strong class="text-danger">${financials.depositRetained.toFixed(2)} €</strong>
     </div>
 </div>
-${renderItemPayments(order, item)}
             </div>
         </div>
     `;
@@ -2178,17 +2263,58 @@ function applyOrderItemReturnModalRules(triggerSource = 'auto') {
     document.getElementById('returnPricePerDay').value =
         Number(item.adjustedPricePerDay || item.pricePerDay || 0).toFixed(2);
 
-    document.getElementById('returnPricePreview').innerHTML = `
-        <strong>Rückgabe-Abrechnung</strong><br>
-        Status: ${formatReturnStatusLabel(returnStatus)}<br>
-        Kaution: ${deposit.toFixed(2)} €<br>
-        Reparaturkosten: ${repairCosts.toFixed(2)} €<br>
-        Kaution zurück: <span class="text-success">${refundAmount.toFixed(2)} €</span><br>
-        Mit Kaution verrechnet: <span class="text-danger">${retainedAmount.toFixed(2)} €</span><br>
-        Verspätung: ${lateDays} Tag${lateDays === 1 ? '' : 'e'}<br>
-        Verspätungskosten: ${lateFee.toFixed(2)} €<br>
-        Kunde muss zusätzlich zahlen: <strong>${customerAdditionalDue.toFixed(2)} €</strong>
-    `;
+    document.getElementById('returnPreview').innerHTML = `
+    <div class="admin-price-panel mt-3">
+        <div class="summary-section-label">Rückgabevorschau</div>
+
+        <div class="checkout-summary-row">
+            <span>Rückgabestatus</span>
+            <strong>${formatReturnStatusLabel(returnStatus)}</strong>
+        </div>
+
+        <div class="checkout-summary-row">
+            <span>Verspätung</span>
+            <strong>${lateDays} Tag${lateDays === 1 ? '' : 'e'}</strong>
+        </div>
+
+        ${lateFee > 0 ? `
+            <div class="checkout-summary-row">
+                <span>Verspätungskosten</span>
+                <strong class="text-danger">${lateFee.toFixed(2)} €</strong>
+            </div>
+        ` : ''}
+
+        <hr>
+
+        <div class="summary-section-label">Kaution</div>
+
+        <div class="checkout-summary-row">
+            <span>Ursprüngliche Kaution</span>
+            <strong>${deposit.toFixed(2)} €</strong>
+        </div>
+
+        <div class="checkout-summary-row">
+            <span>Kaution zurück</span>
+            <strong class="text-success">${depositRefundAmount.toFixed(2)} €</strong>
+        </div>
+
+        <div class="checkout-summary-row">
+            <span>Kaution einbehalten</span>
+            <strong class="text-danger">${depositDeductionAmount.toFixed(2)} €</strong>
+        </div>
+
+        <hr>
+
+        <div class="summary-section-label">Nachzahlung</div>
+
+        <div class="checkout-summary-total-row">
+            <span>Kunde muss zusätzlich zahlen</span>
+            <strong class="${customerAdditionalDue > 0 ? 'text-danger' : 'text-muted'}">
+                ${customerAdditionalDue.toFixed(2)} €
+            </strong>
+        </div>
+    </div>
+`;
 }
 
 function formatReturnStatusLabel(status) {
