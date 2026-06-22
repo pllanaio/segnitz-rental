@@ -594,44 +594,16 @@ function renderOrders() {
 
     container.innerHTML = '';
 
-    const visibleOrders = orders
-        .filter(order => {
-            if (yearFilter && getOrderYear(order) !== yearFilter) return false;
-            if (monthFilter && getOrderMonth(order) !== monthFilter) return false;
-            if (statusFilter && String(order.status || '') !== statusFilter) return false;
-            if (returnStatusFilter && String(order.return_status || '') !== returnStatusFilter) return false;
-            if (paymentStatusFilter && String(order.payment_status || '') !== paymentStatusFilter) return false;
-
-            return [
-                order.order_no,
-                order.customer_email,
-                order.customer_company,
-                order.customer_first_name,
-                order.customer_last_name,
-                order.customer_phone,
-                order.customer_city,
-                order.status,
-                order.payment_status,
-                order.payment_method,
-                order.return_status,
-                deriveOrderDisplayState(order)
-            ]
-                .join(' ')
-                .toLowerCase()
-                .includes(query);
-        })
-        .sort((a, b) => String(getOrderDate(b)).localeCompare(String(getOrderDate(a))));
+    const visibleOrders = orders;
 
     if (visibleOrders.length === 0) {
         container.innerHTML = '<div class="alert alert-info">Keine Bestellungen gefunden.</div>';
         return;
     }
 
-    const totalPages = Math.max(Math.ceil(visibleOrders.length / ordersPerPage), 1);
-    currentOrderPage = Math.min(currentOrderPage, totalPages);
-
-    const startIndex = (currentOrderPage - 1) * ordersPerPage;
-    const paginatedOrders = visibleOrders.slice(startIndex, startIndex + ordersPerPage);
+    const totalPages = orderPagination.totalPages || 1;
+    currentOrderPage = orderPagination.page || currentOrderPage;
+    const paginatedOrders = visibleOrders;
 
     paginatedOrders.forEach(order => {
         const card = document.createElement('div');
@@ -665,7 +637,7 @@ function renderOrders() {
 
     pagination.innerHTML = `
     <div class="text-muted small">
-        ${visibleOrders.length} Bestellung${visibleOrders.length === 1 ? '' : 'en'} gefunden,
+        ${orderPagination.total} Bestellung${orderPagination.total === 1 ? '' : 'en'} gefunden,
         Seite ${currentOrderPage} von ${totalPages}
     </div>
 
@@ -688,8 +660,14 @@ function renderOrders() {
 }
 
 function changeOrderPage(direction) {
-    currentOrderPage += direction;
-    renderOrders();
+    const nextPage = currentOrderPage + direction;
+
+    if (nextPage < 1 || nextPage > orderPagination.totalPages) {
+        return;
+    }
+
+    currentOrderPage = nextPage;
+    loadOrders();
 }
 
 async function openOrderDetails(orderId) {
