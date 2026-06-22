@@ -283,14 +283,14 @@ async function sendPickedUpEmail(order) {
     });
 }
 
-async function sendOrderCancelledEmail(order, reason) {
+async function sendOrderCancelledEmail(order, reason = null) {
     await sendGraphMail({
         to: order.customer_email,
         subject: `Mietauftrag ${order.order_no} wurde storniert`,
         html: `
             <h2>Ihr Mietauftrag wurde storniert</h2>
             <p>Ihr Mietauftrag <strong>${escapeHtml(order.order_no)}</strong> wurde storniert.</p>
-            <p><strong>Grund:</strong> ${escapeHtml(reason)}</p>
+            ${reason ? `<p><strong>Grund:</strong> ${escapeHtml(reason)}</p>` : ''}
         `
     });
 }
