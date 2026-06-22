@@ -5,6 +5,14 @@ let currentOrderItems = [];
 let availableCategories = [];
 let currentOrderPage = 1;
 const ordersPerPage = 10;
+let orderPagination = {
+    page: 1,
+    limit: ordersPerPage,
+    total: 0,
+    totalPages: 1
+};
+
+let orderFilterOptions = null;
 
 document.addEventListener('DOMContentLoaded', () => {
     const form = document.getElementById('productForm');
@@ -22,7 +30,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (element) {
             element.addEventListener('change', () => {
                 currentOrderPage = 1;
-                renderOrders();
+                loadOrders();
             });
         }
     });
@@ -62,7 +70,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (orderSearchInput) {
         orderSearchInput.addEventListener('input', () => {
             currentOrderPage = 1;
-            renderOrders();
+            loadOrders();
         });
     }
 });
@@ -432,7 +440,26 @@ function resetForm() {
 
 async function loadOrders() {
     try {
-        const response = await fetch('/admin/orders');
+        const params = new URLSearchParams({
+            page: String(currentOrderPage),
+            limit: String(ordersPerPage)
+        });
+
+        const query = document.getElementById('orderSearchInput')?.value.trim() || '';
+        const year = getOrderFilterValue('orderYearFilter');
+        const month = getOrderFilterValue('orderMonthFilter');
+        const status = getOrderFilterValue('orderStatusFilter');
+        const returnStatus = getOrderFilterValue('orderReturnStatusFilter');
+        const paymentStatus = getOrderFilterValue('orderPaymentStatusFilter');
+
+        if (query) params.set('query', query);
+        if (year) params.set('year', year);
+        if (month) params.set('month', month);
+        if (status) params.set('status', status);
+        if (returnStatus) params.set('returnStatus', returnStatus);
+        if (paymentStatus) params.set('paymentStatus', paymentStatus);
+
+        const response = await fetch(`/admin/orders?${params.toString()}`);
         const result = await response.json();
 
         if (!response.ok) {
@@ -440,7 +467,10 @@ async function loadOrders() {
             return;
         }
 
-        orders = result;
+        orders = result.items || [];
+        orderPagination = result.pagination || orderPagination;
+        orderFilterOptions = result.filterOptions || orderFilterOptions;
+
         populateOrderFilters();
         renderOrders();
 
@@ -517,14 +547,16 @@ const paymentStatusLabelMap = {
 };
 
 function populateOrderFilters() {
+    if (!orderFilterOptions) return;
+
     setSelectOptions(
         'orderYearFilter',
-        [...new Set(orders.map(getOrderYear))].sort().reverse()
+        orderFilterOptions.years || []
     );
 
     setSelectOptions(
         'orderMonthFilter',
-        [...new Set(orders.map(getOrderMonth))],
+        orderFilterOptions.months || [],
         {
             '01': 'Januar',
             '02': 'Februar',
@@ -541,23 +573,9 @@ function populateOrderFilters() {
         }
     );
 
-    setSelectOptions(
-        'orderStatusFilter',
-        [...new Set(orders.map(order => order.status || ''))],
-        orderStatusLabelMap
-    );
-
-    setSelectOptions(
-        'orderReturnStatusFilter',
-        [...new Set(orders.map(order => order.return_status || ''))],
-        returnStatusLabelMap
-    );
-
-    setSelectOptions(
-        'orderPaymentStatusFilter',
-        [...new Set(orders.map(order => order.payment_status || ''))],
-        paymentStatusLabelMap
-    );
+    setSelectOptions('orderStatusFilter', orderFilterOptions.statuses || [], orderStatusLabelMap);
+    setSelectOptions('orderReturnStatusFilter', orderFilterOptions.returnStatuses || [], returnStatusLabelMap);
+    setSelectOptions('orderPaymentStatusFilter', orderFilterOptions.paymentStatuses || [], paymentStatusLabelMap);
 }
 
 function getOrderFilterValue(id) {
@@ -741,8 +759,10 @@ function renderOrderDetails(order) {
                     ${status === 'cancelled' ? `
                         <strong>Storniert am:</strong> ${order.cancelled_at || '-'}<br>
                         <strong>Storniert von:</strong> ${order.cancelled_by_username || '-'}<br>
-                        <strong>Stornogrund:</strong><br>
-                        <span class="text-danger">${formatTextValue(order.cancel_reason)}</span><br>
+                        ${order.cancel_reason ? `
+                                <strong>Stornogrund:</strong><br>
+                                <span class="text-danger">${formatTextValue(order.cancel_reason)}</span><br>
+                        ` : ''}
                     ` : ''}
 
                     <strong>Zahlungsstatus:</strong> ${order.payment_status || '-'}<br>

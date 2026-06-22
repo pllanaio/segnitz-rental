@@ -1059,6 +1059,63 @@ app.put('/my-profile/password', async (req, res) => {
     }
 });
 
+function parsePositiveInt(value, fallback, max = 100) {
+    const number = Number.parseInt(value, 10);
+    if (!Number.isFinite(number) || number < 1) return fallback;
+    return Math.min(number, max);
+}
+
+function addOrderListFilters({ where, params, query, year, month, status, returnStatus, paymentStatus, customerEmail }) {
+    if (customerEmail) {
+        where.push('ro.customer_email = ?');
+        params.push(customerEmail);
+    }
+
+    if (year) {
+        where.push('YEAR(ro.created_at) = ?');
+        params.push(year);
+    }
+
+    if (month) {
+        where.push('MONTH(ro.created_at) = ?');
+        params.push(Number(month));
+    }
+
+    if (status) {
+        where.push('ro.status = ?');
+        params.push(status);
+    }
+
+    if (returnStatus) {
+        where.push('ro.return_status = ?');
+        params.push(returnStatus);
+    }
+
+    if (paymentStatus) {
+        where.push('ro.payment_status = ?');
+        params.push(paymentStatus);
+    }
+
+    if (query) {
+        where.push(`(
+            ro.order_no LIKE ?
+            OR ro.customer_email LIKE ?
+            OR ro.customer_company LIKE ?
+            OR ro.customer_first_name LIKE ?
+            OR ro.customer_last_name LIKE ?
+            OR ro.customer_phone LIKE ?
+            OR ro.customer_city LIKE ?
+            OR ro.status LIKE ?
+            OR ro.payment_status LIKE ?
+            OR ro.payment_method LIKE ?
+            OR ro.return_status LIKE ?
+        )`);
+
+        const like = `%${query}%`;
+        params.push(like, like, like, like, like, like, like, like, like, like, like);
+    }
+}
+
 app.get('/my-orders', async (req, res) => {
     let connection;
 
@@ -1069,77 +1126,130 @@ app.get('/my-orders', async (req, res) => {
     try {
         connection = await mysql.createConnection(dbConfig);
 
+        const page = parsePositiveInt(req.query.page, 1, 100000);
+        const limit = parsePositiveInt(req.query.limit, 10, 100);
+        const offset = (page - 1) * limit;
+
+        const where = [];
+        const params = [];
+
+        addOrderListFilters({
+            where,
+            params,
+            customerEmail: req.session.user,
+            year: String(req.query.year || '').trim(),
+            month: String(req.query.month || '').trim(),
+            status: String(req.query.status || '').trim(),
+            returnStatus: String(req.query.returnStatus || '').trim(),
+            paymentStatus: String(req.query.paymentStatus || '').trim()
+        });
+
+        const whereSql = `WHERE ${where.join(' AND ')}`;
+
+        const [countRows] = await connection.execute(
+            `SELECT COUNT(*) AS total
+             FROM rental_orders ro
+             ${whereSql}`,
+            params
+        );
+
+        const total = Number(countRows[0]?.total || 0);
+
         const [orders] = await connection.execute(
             `SELECT
-                id,
-                order_no,
-                customer_email,
-                customer_first_name,
-                customer_last_name,
-                status,
-                payment_method,
-                payment_status,
-                DATE_FORMAT(reserved_until, '%Y-%m-%d %H:%i:%s') AS reserved_until,
-                DATE_FORMAT(returned_at, '%Y-%m-%d %H:%i:%s') AS returned_at,
-                cancel_reason AS cancelReason,
-                cancelled_by_name AS cancelledByName,
-                DATE_FORMAT(cancelled_at, '%Y-%m-%d %H:%i:%s') AS cancelledAt
-             FROM rental_orders
-             WHERE customer_email = ?
-             ORDER BY id DESC`,
-            [req.session.user]
+                ro.id,
+                ro.order_no,
+                ro.customer_email,
+                ro.customer_first_name,
+                ro.customer_last_name,
+                ro.status,
+                ro.payment_method,
+                ro.payment_status,
+                ro.return_status,
+                DATE_FORMAT(ro.created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
+                DATE_FORMAT(ro.reserved_until, '%Y-%m-%d %H:%i:%s') AS reserved_until,
+                DATE_FORMAT(ro.returned_at, '%Y-%m-%d %H:%i:%s') AS returned_at,
+                ro.cancel_reason AS cancelReason,
+                ro.cancelled_by_name AS cancelledByName,
+                DATE_FORMAT(ro.cancelled_at, '%Y-%m-%d %H:%i:%s') AS cancelledAt
+             FROM rental_orders ro
+             ${whereSql}
+             ORDER BY ro.id DESC
+             LIMIT ? OFFSET ?`,
+            [...params, limit, offset]
         );
 
         const orderIds = orders.map(order => order.id);
+        let itemsByOrderId = {};
 
-        if (orderIds.length === 0) {
-            return res.json([]);
+        if (orderIds.length > 0) {
+            const placeholders = orderIds.map(() => '?').join(',');
+
+            const [items] = await connection.execute(
+                `SELECT
+                    roi.id,
+                    roi.order_id AS orderId,
+                    roi.item_status AS itemStatus,
+                    roi.return_status AS returnStatus,
+                    roi.is_damaged AS isDamaged,
+                    roi.is_late AS isLate,
+                    roi.deposit_decision AS depositDecision,
+                    roi.deposit_refund_amount AS depositRefundAmount,
+                    roi.deposit_deduction_amount AS depositDeductionAmount,
+                    roi.deposit_deduction_reason AS depositDeductionReason,
+                    roi.additional_charge_reason AS additionalChargeReason,
+                    roi.additional_charge_amount AS additionalChargeAmount,
+                    DATE_FORMAT(roi.returned_at, '%Y-%m-%d %H:%i:%s') AS returnedAt,
+                    DATE_FORMAT(roi.return_case_processed_at, '%Y-%m-%d %H:%i:%s') AS returnCaseProcessedAt,
+                    DATE_FORMAT(roi.cancelled_at, '%Y-%m-%d %H:%i:%s') AS cancelledAt,
+                    roi.cancel_reason AS cancelReason,
+                    roi.cancelled_by_name AS cancelledByName
+                 FROM rental_order_items roi
+                 WHERE roi.order_id IN (${placeholders})
+                 ORDER BY roi.id ASC`,
+                orderIds
+            );
+
+            itemsByOrderId = items.reduce((map, item) => {
+                const orderId = Number(item.orderId);
+                if (!map[orderId]) map[orderId] = [];
+                map[orderId].push(item);
+                return map;
+            }, {});
         }
 
-        const placeholders = orderIds.map(() => '?').join(',');
-
-        const [items] = await connection.execute(
+        const [filterRows] = await connection.execute(
             `SELECT
-                roi.id,
-                roi.order_id AS orderId,
-                roi.item_status AS itemStatus,
-                roi.return_status AS returnStatus,
-                roi.is_damaged AS isDamaged,
-                roi.is_late AS isLate,
-                roi.deposit_decision AS depositDecision,
-                roi.deposit_refund_amount AS depositRefundAmount,
-                roi.deposit_deduction_amount AS depositDeductionAmount,
-                roi.deposit_deduction_reason AS depositDeductionReason,
-                roi.additional_charge_reason AS additionalChargeReason,
-                roi.additional_charge_amount AS additionalChargeAmount,
-                DATE_FORMAT(roi.returned_at, '%Y-%m-%d %H:%i:%s') AS returnedAt,
-                DATE_FORMAT(roi.return_case_processed_at, '%Y-%m-%d %H:%i:%s') AS returnCaseProcessedAt,
-                DATE_FORMAT(roi.cancelled_at, '%Y-%m-%d %H:%i:%s') AS cancelledAt,
-                roi.cancel_reason AS cancelReason,
-                roi.cancelled_by_name AS cancelledByName
-             FROM rental_order_items roi
-             WHERE roi.order_id IN (${placeholders})
-             ORDER BY roi.id ASC`,
-            orderIds
+                YEAR(created_at) AS year,
+                LPAD(MONTH(created_at), 2, '0') AS month,
+                status,
+                return_status AS returnStatus,
+                payment_status AS paymentStatus
+             FROM rental_orders
+             WHERE customer_email = ?
+             ORDER BY created_at DESC`,
+            [req.session.user]
         );
 
-        const itemsByOrderId = items.reduce((map, item) => {
-            const orderId = Number(item.orderId);
-
-            if (!map[orderId]) {
-                map[orderId] = [];
+        res.json({
+            items: orders.map(order => ({
+                ...order,
+                items: itemsByOrderId[Number(order.id)] || []
+            })),
+            pagination: {
+                page,
+                limit,
+                total,
+                totalPages: Math.max(Math.ceil(total / limit), 1)
+            },
+            filterOptions: {
+                years: [...new Set(filterRows.map(row => String(row.year)).filter(Boolean))],
+                months: [...new Set(filterRows.map(row => row.month).filter(Boolean))],
+                statuses: [...new Set(filterRows.map(row => row.status).filter(Boolean))],
+                returnStatuses: [...new Set(filterRows.map(row => row.returnStatus).filter(Boolean))],
+                paymentStatuses: [...new Set(filterRows.map(row => row.paymentStatus).filter(Boolean))]
             }
-
-            map[orderId].push(item);
-            return map;
-        }, {});
-
-        const ordersWithItems = orders.map(order => ({
-            ...order,
-            items: itemsByOrderId[Number(order.id)] || []
-        }));
-
-        res.json(ordersWithItems);
+        });
     } catch (error) {
         console.error('Fehler beim Laden der Kundenbestellungen:', error);
         res.status(500).json({ error: 'Bestellungen konnten nicht geladen werden.' });
@@ -1460,73 +1570,130 @@ app.get('/admin/orders', checkAdmin, async (req, res) => {
     try {
         connection = await mysql.createConnection(dbConfig);
 
+        const page = parsePositiveInt(req.query.page, 1, 100000);
+        const limit = parsePositiveInt(req.query.limit, 10, 100);
+        const offset = (page - 1) * limit;
+
+        const where = [];
+        const params = [];
+
+        addOrderListFilters({
+            where,
+            params,
+            query: String(req.query.query || '').trim(),
+            year: String(req.query.year || '').trim(),
+            month: String(req.query.month || '').trim(),
+            status: String(req.query.status || '').trim(),
+            returnStatus: String(req.query.returnStatus || '').trim(),
+            paymentStatus: String(req.query.paymentStatus || '').trim()
+        });
+
+        const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+
+        const [countRows] = await connection.execute(
+            `SELECT COUNT(*) AS total
+             FROM rental_orders ro
+             ${whereSql}`,
+            params
+        );
+
+        const total = Number(countRows[0]?.total || 0);
+
         const [orders] = await connection.execute(
             `SELECT
-        id,
-        order_no,
-        customer_email,
-        customer_first_name,
-        customer_last_name,
-        customer_company,
-        customer_phone,
-        customer_address,
-        customer_zip,
-        customer_city,
-        status,
-        payment_method,
-        payment_status,
-        return_status,
-        DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
-        deposit_decision,
-        DATE_FORMAT(reserved_until, '%Y-%m-%d %H:%i:%s') AS reserved_until,
-        DATE_FORMAT(returned_at, '%Y-%m-%d %H:%i:%s') AS returned_at,
-        cancel_reason AS cancelReason,
-        cancelled_by_name AS cancelledByName,
-        DATE_FORMAT(cancelled_at, '%Y-%m-%d %H:%i:%s') AS cancelledAt
-     FROM rental_orders
-     ORDER BY id DESC`
+                ro.id,
+                ro.order_no,
+                ro.customer_email,
+                ro.customer_first_name,
+                ro.customer_last_name,
+                ro.customer_company,
+                ro.customer_phone,
+                ro.customer_address,
+                ro.customer_zip,
+                ro.customer_city,
+                ro.status,
+                ro.payment_method,
+                ro.payment_status,
+                ro.return_status,
+                DATE_FORMAT(ro.created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
+                ro.deposit_decision,
+                DATE_FORMAT(ro.reserved_until, '%Y-%m-%d %H:%i:%s') AS reserved_until,
+                DATE_FORMAT(ro.returned_at, '%Y-%m-%d %H:%i:%s') AS returned_at,
+                ro.cancel_reason AS cancelReason,
+                ro.cancelled_by_name AS cancelledByName,
+                DATE_FORMAT(ro.cancelled_at, '%Y-%m-%d %H:%i:%s') AS cancelledAt
+             FROM rental_orders ro
+             ${whereSql}
+             ORDER BY ro.id DESC
+             LIMIT ? OFFSET ?`,
+            [...params, limit, offset]
         );
 
-        const [items] = await connection.execute(
+        const orderIds = orders.map(order => order.id);
+        let itemsByOrderId = {};
+
+        if (orderIds.length > 0) {
+            const placeholders = orderIds.map(() => '?').join(',');
+
+            const [items] = await connection.execute(
+                `SELECT
+                    roi.id,
+                    roi.order_id AS orderId,
+                    roi.item_status AS itemStatus,
+                    roi.return_status AS returnStatus,
+                    DATE_FORMAT(roi.returned_at, '%Y-%m-%d %H:%i:%s') AS returnedAt,
+                    DATE_FORMAT(roi.cancelled_at, '%Y-%m-%d %H:%i:%s') AS cancelledAt,
+                    roi.cancel_reason AS cancelReason,
+                    roi.cancelled_by_name AS cancelledByName
+                 FROM rental_order_items roi
+                 WHERE roi.order_id IN (${placeholders})
+                 ORDER BY roi.id ASC`,
+                orderIds
+            );
+
+            itemsByOrderId = items.reduce((map, item) => {
+                const orderId = Number(item.orderId);
+                if (!map[orderId]) map[orderId] = [];
+                map[orderId].push(item);
+                return map;
+            }, {});
+        }
+
+        const [filterRows] = await connection.execute(
             `SELECT
-        roi.id,
-        roi.order_id AS orderId,
-        roi.item_status AS itemStatus,
-        roi.return_status AS returnStatus,
-        DATE_FORMAT(roi.returned_at, '%Y-%m-%d %H:%i:%s') AS returnedAt,
-        DATE_FORMAT(roi.cancelled_at, '%Y-%m-%d %H:%i:%s') AS cancelledAt,
-        roi.cancel_reason AS cancelReason,
-        roi.cancelled_by_name AS cancelledByName
-     FROM rental_order_items roi
-     ORDER BY roi.id ASC`
+                YEAR(created_at) AS year,
+                LPAD(MONTH(created_at), 2, '0') AS month,
+                status,
+                return_status AS returnStatus,
+                payment_status AS paymentStatus
+             FROM rental_orders
+             ORDER BY created_at DESC`
         );
 
-        const itemsByOrderId = items.reduce((map, item) => {
-            const orderId = Number(item.orderId);
-
-            if (!map[orderId]) {
-                map[orderId] = [];
+        res.json({
+            items: orders.map(order => ({
+                ...order,
+                items: itemsByOrderId[Number(order.id)] || []
+            })),
+            pagination: {
+                page,
+                limit,
+                total,
+                totalPages: Math.max(Math.ceil(total / limit), 1)
+            },
+            filterOptions: {
+                years: [...new Set(filterRows.map(row => String(row.year)).filter(Boolean))],
+                months: [...new Set(filterRows.map(row => row.month).filter(Boolean))],
+                statuses: [...new Set(filterRows.map(row => row.status).filter(Boolean))],
+                returnStatuses: [...new Set(filterRows.map(row => row.returnStatus).filter(Boolean))],
+                paymentStatuses: [...new Set(filterRows.map(row => row.paymentStatus).filter(Boolean))]
             }
-
-            map[orderId].push(item);
-            return map;
-        }, {});
-
-        const ordersWithItems = orders.map(order => ({
-            ...order,
-            items: itemsByOrderId[Number(order.id)] || []
-        }));
-
-        res.json(ordersWithItems);
+        });
     } catch (error) {
         console.error('Fehler beim Laden der Bestellungen:', error);
-        res.status(500).json({
-            error: 'Bestellungen konnten nicht geladen werden.'
-        });
+        res.status(500).json({ error: 'Bestellungen konnten nicht geladen werden.' });
     } finally {
-        if (connection) {
-            await connection.end();
-        }
+        if (connection) await connection.end();
     }
 });
 
@@ -1844,7 +2011,7 @@ app.put('/admin/orders/:id/cancel', checkAdmin, async (req, res) => {
     let connection;
 
     try {
-        const cancelReason = 'Bestellung durch Administrator storniert';
+        const cancelReason = null;
         connection = await mysql.createConnection(dbConfig);
         await connection.beginTransaction();
 
@@ -1937,7 +2104,7 @@ app.put('/admin/orders/:id/cancel', checkAdmin, async (req, res) => {
         await connection.commit();
 
         try {
-            await sendOrderCancelledEmail(order, cancelReason);
+            await sendOrderCancelledEmail(order);
         } catch (mailError) {
             console.error('Storno gespeichert, aber Mailversand fehlgeschlagen:', mailError);
         }
