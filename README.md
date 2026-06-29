@@ -2,7 +2,7 @@
 Modular rental tool for several types of products including tools, cars and construction machinery with database integration, pdf signing option and payment gateway integration
 
 ## Authors and acknowledgment
-Leon Pllana @ Segnitz Leasing
+Leon Pllana @ Segnitz Rental
 
 ## Resources
 Node-Modules: <br>
