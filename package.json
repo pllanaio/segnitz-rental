@@ -4,15 +4,20 @@
   "version": "1.0.0",
   "main": "segnitz_rental.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node segnitz_rental.js"
+    "start": "node segnitz_rental.js",
+    "test": "node --test",
+    "check:syntax": "node scripts/check-syntax.js",
+    "ci": "npm run check:syntax && npm test"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/segnitz-rental/segnitz-rental.git"
+    "url": "https://github.com/pllanaio/segnitz-rental.git"
   },
   "author": "Leon Pllana",
   "license": "ISC",
+  "engines": {
+    "node": ">=20"
+  },
   "dependencies": {
     "@mollie/api-client": "^4.5.0",
     "bcrypt": "^5.1.1",
