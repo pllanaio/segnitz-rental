@@ -5,9 +5,14 @@ const bcrypt = require('bcrypt');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 require('dotenv').config();
-app.use(helmet({
-    contentSecurityPolicy: false
-}));
+const {
+    assertSecurityEnvironment,
+    createHelmetOptions,
+    createSessionCookieOptions
+} = require('./config/security');
+
+assertSecurityEnvironment();
+app.use(helmet(createHelmetOptions()));
 app.use(express.json({
     limit: '1mb'
 }));
@@ -207,12 +212,7 @@ app.use(session({
     resave: false,
     saveUninitialized: false,
     rolling: true,
-    cookie: {
-        secure: false,
-        httpOnly: true,
-        sameSite: 'lax',
-        maxAge: 30 * 60 * 1000
-    }
+    cookie: createSessionCookieOptions()
 }));
 
 app.use('/', productRoutes);
