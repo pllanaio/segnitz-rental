@@ -1,0 +1,60 @@
+'use strict';
+
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const {
+  assertSecurityEnvironment,
+  createHelmetOptions,
+  createSessionCookieOptions,
+  isProduction
+} = require('../config/security');
+
+test('detects production environments', () => {
+  assert.equal(isProduction({ NODE_ENV: 'production' }), true);
+  assert.equal(isProduction({ NODE_ENV: 'development' }), false);
+});
+
+test('uses secure session cookies in production only', () => {
+  assert.deepEqual(createSessionCookieOptions({ NODE_ENV: 'production' }), {
+    secure: true,
+    httpOnly: true,
+    sameSite: 'lax',
+    maxAge: 30 * 60 * 1000
+  });
+
+  assert.equal(createSessionCookieOptions({ NODE_ENV: 'test' }).secure, false);
+});
+
+test('requires a strong production session secret', () => {
+  assert.throws(
+    () => assertSecurityEnvironment({ NODE_ENV: 'production', SESSION_SECRET: 'short' }),
+    /mindestens 32 Zeichen/
+  );
+
+  assert.doesNotThrow(() =>
+    assertSecurityEnvironment({
+      NODE_ENV: 'production',
+      SESSION_SECRET: 'a'.repeat(32)
+    })
+  );
+});
+
+test('does not require production secrets for local tests', () => {
+  assert.doesNotThrow(() => assertSecurityEnvironment({ NODE_ENV: 'test' }));
+});
+
+test('enables a restrictive baseline CSP', () => {
+  const developmentOptions = createHelmetOptions({ NODE_ENV: 'development' });
+  const productionOptions = createHelmetOptions({ NODE_ENV: 'production' });
+
+  assert.deepEqual(developmentOptions.contentSecurityPolicy.directives.objectSrc, ["'none'"]);
+  assert.deepEqual(developmentOptions.contentSecurityPolicy.directives.frameAncestors, ["'none'"]);
+  assert.equal(
+    Object.hasOwn(developmentOptions.contentSecurityPolicy.directives, 'upgradeInsecureRequests'),
+    false
+  );
+  assert.deepEqual(
+    productionOptions.contentSecurityPolicy.directives.upgradeInsecureRequests,
+    []
+  );
+});
