@@ -23,7 +23,7 @@
     "@mollie/api-client": "^4.5.0",
     "bcrypt": "^6.0.0",
     "bootstrap-icons": "^1.11.3",
-    "cors": "^2.8.5",
+    "cors": "^2.8.6",
     "dotenv": "^16.4.4",
     "express": "^4.22.2",
     "express-mysql-session": "^3.0.3",
