@@ -22,6 +22,12 @@ Do not open a public issue containing credentials, customer data, payment data o
 - After rotation, remove the secret from Git history with an approved history-rewrite procedure and invalidate old deployments or caches.
 - Generated dependencies such as `node_modules/` must not be tracked in Git; only lockfiles belong in the repository.
 
+## Production runtime requirements
+
+- Set `NODE_ENV=production` and terminate TLS at the application proxy so session cookies are sent with the `Secure` flag.
+- Use a randomly generated `SESSION_SECRET` with at least 32 characters.
+- The current CSP keeps inline scripts and styles as a compatibility bridge. Remove `unsafe-inline` after the frontend has been migrated to external assets or CSP nonces.
+
 ## Minimum release checks
 
 A production release requires successful CI tests, Docker build, dependency audit and CodeQL analysis. High-risk changes to authentication, payments, uploads or order status transitions require an additional review.
