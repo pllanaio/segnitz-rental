@@ -20,6 +20,7 @@ Do not open a public issue containing credentials, customer data, payment data o
 - Never commit `.env` files, passwords, API keys, SMTP credentials or database dumps.
 - Any credential that has appeared in Git history must be treated as compromised and rotated immediately.
 - After rotation, remove the secret from Git history with an approved history-rewrite procedure and invalidate old deployments or caches.
+- Generated dependencies such as `node_modules/` must not be tracked in Git; only lockfiles belong in the repository.
 
 ## Minimum release checks
 
