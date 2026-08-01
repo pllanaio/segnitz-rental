@@ -1,29 +1,48 @@
-function checkAdmin(req, res, next) {
-    const isLoggedIn = req.session && req.session.user;
-    const isAdmin = req.session && req.session.role === 'global_admin';
+'use strict';
 
-    const isApiCall = req.originalUrl.startsWith('/admin');
+function isApiRequest(req) {
+    const originalUrl = String(req.originalUrl || req.url || '');
+    const method = String(req.method || 'GET').toUpperCase();
+    const acceptHeader = String(req.headers?.accept || '').toLowerCase();
+
+    return (
+        originalUrl.startsWith('/admin') ||
+        originalUrl.startsWith('/api/') ||
+        !['GET', 'HEAD'].includes(method) ||
+        acceptHeader.includes('application/json') ||
+        req.xhr === true
+    );
+}
+
+function checkAdmin(req, res, next) {
+    const isLoggedIn = Boolean(req.session && req.session.user);
+    const isAdmin = Boolean(req.session && req.session.role === 'global_admin');
+    const apiRequest = isApiRequest(req);
 
     if (!isLoggedIn) {
-        if (isApiCall) {
+        if (apiRequest) {
             return res.status(401).json({ error: 'Nicht angemeldet.' });
         }
 
-        req.session.redirectAfterLogin = req.originalUrl;
+        if (req.session) {
+            req.session.redirectAfterLogin = req.originalUrl;
+        }
+
         return res.redirect('/login.html?reason=session_expired');
     }
 
     if (!isAdmin) {
-        if (isApiCall) {
+        if (apiRequest) {
             return res.status(403).json({ error: 'Keine Berechtigung.' });
         }
 
         return res.redirect('/index.html');
     }
 
-    next();
+    return next();
 }
 
 module.exports = {
-    checkAdmin
+    checkAdmin,
+    isApiRequest
 };
