@@ -28,6 +28,7 @@ const mysql = require('mysql2/promise');
 const dbConfig = require('./config/db');
 const crypto = require('crypto');
 const multer = require('multer');
+const { getSafeImageExtension, imageFileFilter } = require('./utils/uploads');
 const { checkAdmin } = require('./middleware/auth');
 const { syncProductCategories } = require('./utils/categories');
 const productRoutes = require('./routes/productRoutes');
@@ -147,23 +148,21 @@ async function deleteOldActiveCarts(connection) {
     }
 }
 
-const productImageStorage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        cb(null, path.join(__dirname, 'public', 'img', 'products'));
-    },
-    filename: (req, file, cb) => {
-        const ext = path.extname(file.originalname).toLowerCase();
-        cb(null, `product_${Date.now()}_${Math.round(Math.random() * 1E9)}${ext}`);
-    }
-});
-
 const returnImageStorage = multer.diskStorage({
     destination: (req, file, cb) => {
         cb(null, path.join(__dirname, 'public', 'img', 'returns'));
     },
     filename: (req, file, cb) => {
-        const ext = path.extname(file.originalname).toLowerCase();
-        cb(null, `return_item_${req.params.itemId}_${Date.now()}_${Math.round(Math.random() * 1E9)}${ext}`);
+        const extension = getSafeImageExtension(file.mimetype);
+
+        if (!extension) {
+            return cb(new Error('Ungültiger Bildtyp.'));
+        }
+
+        return cb(
+            null,
+            `return_item_${req.params.itemId}_${Date.now()}_${crypto.randomUUID()}${extension}`
+        );
     }
 });
 
@@ -171,15 +170,11 @@ const uploadReturnImages = multer({
     storage: returnImageStorage,
     limits: {
         fileSize: 5 * 1024 * 1024,
-        files: 10
+        files: 10,
+        fields: 20,
+        parts: 30
     },
-    fileFilter: (req, file, cb) => {
-        if (!file.mimetype.startsWith('image/')) {
-            return cb(new Error('Nur Bilddateien erlaubt.'));
-        }
-
-        cb(null, true);
-    }
+    fileFilter: imageFileFilter
 });
 
 const sessionStore = new MySQLStore({
