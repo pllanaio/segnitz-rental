@@ -9,6 +9,7 @@ const { resetTestDatabase, TEST_PRODUCT, TEST_USER } = require('../support/test-
 
 const PORT = Number(process.env.TEST_PORT || 3101);
 const BASE_URL = `http://127.0.0.1:${PORT}`;
+const TEST_MOLLIE_API_KEY = 'test_abcdefghijklmnopqrstuvwxyz1234';
 let serverProcess;
 let serverOutput = '';
 
@@ -74,7 +75,8 @@ before(async () => {
             ...process.env,
             PORT: String(PORT),
             NODE_ENV: 'test',
-            DISABLE_PERIODIC_CLEANUP: '1'
+            DISABLE_PERIODIC_CLEANUP: '1',
+            MOLLIE_API_KEY: process.env.MOLLIE_API_KEY || TEST_MOLLIE_API_KEY
         },
         stdio: ['ignore', 'pipe', 'pipe']
     });
