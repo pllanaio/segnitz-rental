@@ -4,6 +4,7 @@ const { defineConfig, devices } = require('@playwright/test');
 
 const port = Number(process.env.E2E_PORT || 3102);
 const baseURL = `http://127.0.0.1:${port}`;
+const testMollieApiKey = 'test_abcdefghijklmnopqrstuvwxyz1234';
 
 module.exports = defineConfig({
     testDir: './test/e2e',
@@ -34,7 +35,8 @@ module.exports = defineConfig({
             ...process.env,
             PORT: String(port),
             NODE_ENV: 'test',
-            DISABLE_PERIODIC_CLEANUP: '1'
+            DISABLE_PERIODIC_CLEANUP: '1',
+            MOLLIE_API_KEY: process.env.MOLLIE_API_KEY || testMollieApiKey
         }
     }
 });
