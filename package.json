@@ -5,10 +5,13 @@
   "main": "segnitz_rental.js",
   "scripts": {
     "start": "node segnitz_rental.js",
-    "test": "node --test",
+    "test": "npm run test:unit",
+    "test:unit": "node --test test/*.test.js",
+    "test:integration": "node --test --test-concurrency=1 test/integration/*.test.js",
+    "test:e2e": "playwright test",
     "check:syntax": "node scripts/check-syntax.js",
     "audit:prod": "npm audit --omit=dev --audit-level=critical",
-    "ci": "npm run check:syntax && npm test"
+    "ci": "npm run check:syntax && npm run test:unit"
   },
   "repository": {
     "type": "git",
@@ -34,5 +37,8 @@
     "mysql2": "^3.9.7",
     "node-fetch": "^2.7.0",
     "nodemailer": "^9.0.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.54.2"
   }
 }
