@@ -4710,22 +4710,26 @@ app.post('/webhooks/mollie', async (req, res) => {
 
 cleanupOnStartup();
 
-setInterval(async () => {
-    let connection;
+if (process.env.DISABLE_PERIODIC_CLEANUP !== '1') {
+    setInterval(async () => {
+        let connection;
 
-    try {
-        connection = await mysql.createConnection(dbConfig);
-        await runDatabaseCleanup(connection);
-    } catch (error) {
-        console.error(`${new Date().toISOString()} - Fehler beim periodischen Datenbank-Cleanup:`, error);
-    } finally {
-        if (connection) {
-            await connection.end();
+        try {
+            connection = await mysql.createConnection(dbConfig);
+            await runDatabaseCleanup(connection);
+        } catch (error) {
+            console.error(`${new Date().toISOString()} - Fehler beim periodischen Datenbank-Cleanup:`, error);
+        } finally {
+            if (connection) {
+                await connection.end();
+            }
         }
-    }
-}, 60 * 1000);
+    }, Number(process.env.CLEANUP_INTERVAL_MS || 60 * 1000));
+}
 
-app.listen(3000, () => {
+const port = Number(process.env.PORT || 3000);
+
+app.listen(port, () => {
     console.log("*********** Segnitz Rental System ***********");
-    console.log("Server läuft auf Port 3000");
+    console.log(`Server läuft auf Port ${port}`);
 });
