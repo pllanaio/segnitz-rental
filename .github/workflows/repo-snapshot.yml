@@ -1,8 +1,8 @@
 name: Repository snapshot
 
 on:
-  push:
-    branches: [agent/integration-e2e-tests]
+  pull_request:
+    branches: [main]
 
 permissions:
   contents: read
