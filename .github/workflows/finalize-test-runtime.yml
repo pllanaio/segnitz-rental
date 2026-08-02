@@ -1,0 +1,100 @@
+name: Finalize test runtime
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Make server runtime configurable
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('segnitz_rental.js')
+          text = path.read_text()
+
+          old = '''cleanupOnStartup();
+
+          setInterval(async () => {
+              let connection;
+
+              try {
+                  connection = await mysql.createConnection(dbConfig);
+                  await runDatabaseCleanup(connection);
+              } catch (error) {
+                  console.error(`${new Date().toISOString()} - Fehler beim periodischen Datenbank-Cleanup:`, error);
+              } finally {
+                  if (connection) {
+                      await connection.end();
+                  }
+              }
+          }, 60 * 1000);
+
+          app.listen(3000, () => {
+              console.log("*********** Segnitz Rental System ***********");
+              console.log("Server läuft auf Port 3000");
+          });'''
+
+          new = '''cleanupOnStartup();
+
+          if (process.env.DISABLE_PERIODIC_CLEANUP !== '1') {
+              setInterval(async () => {
+                  let connection;
+
+                  try {
+                      connection = await mysql.createConnection(dbConfig);
+                      await runDatabaseCleanup(connection);
+                  } catch (error) {
+                      console.error(`${new Date().toISOString()} - Fehler beim periodischen Datenbank-Cleanup:`, error);
+                  } finally {
+                      if (connection) {
+                          await connection.end();
+                      }
+                  }
+              }, Number(process.env.CLEANUP_INTERVAL_MS || 60 * 1000));
+          }
+
+          const port = Number(process.env.PORT || 3000);
+
+          app.listen(port, () => {
+              console.log("*********** Segnitz Rental System ***********");
+              console.log(`Server läuft auf Port ${port}`);
+          });'''
+
+          if old in text:
+              path.write_text(text.replace(old, new))
+          elif new not in text:
+              raise SystemExit('Erwarteter Server-Footer wurde nicht gefunden.')
+          PY
+
+      - name: Update npm lockfile
+        run: npm install --package-lock-only --ignore-scripts
+
+      - name: Remove temporary workflows
+        run: |
+          rm -f .github/workflows/repo-snapshot.yml
+          rm -f .github/workflows/finalize-test-runtime.yml
+
+      - name: Commit generated changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package-lock.json segnitz_rental.js .github/workflows
+          git diff --cached --quiet && exit 0
+          git commit -m "test: finalize integration and browser test runtime"
+          git push origin HEAD:${{ github.head_ref }}
