@@ -22,12 +22,12 @@ jobs:
             --exclude=node_modules \
             --exclude='public/img/products/*' \
             --exclude='public/img/returns/*' \
-            -czf segnitz-rental-source.tar.gz .
+            -czf /tmp/segnitz-rental-source.tar.gz .
 
       - name: Upload source snapshot
         uses: actions/upload-artifact@v4
         with:
           name: segnitz-rental-source
-          path: segnitz-rental-source.tar.gz
+          path: /tmp/segnitz-rental-source.tar.gz
           if-no-files-found: error
           retention-days: 1
