@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Checkout
+      - name: Checkout current branch
         uses: actions/checkout@v4
 
       - name: Create source snapshot
