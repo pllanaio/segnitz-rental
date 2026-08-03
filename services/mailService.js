@@ -89,6 +89,10 @@ function normalizeRecipients(value) {
 }
 
 async function sendGraphMail({ to, cc, bcc, subject, html, text }) {
+    if (process.env.DISABLE_EMAILS === '1') {
+        return { disabled: true };
+    }
+
     const token = await getGraphAccessToken();
     const graphMailUser = getGraphMailUser();
 
