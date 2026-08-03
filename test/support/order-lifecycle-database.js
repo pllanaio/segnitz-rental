@@ -13,7 +13,7 @@ const TEST_CUSTOMER = Object.freeze({
 const TEST_ADMIN = Object.freeze({
     email: 'lifecycle.admin@example.com',
     password: 'AdminPassword123!',
-    role: 'admin'
+    role: 'global_admin'
 });
 
 const TEST_PRODUCT = Object.freeze({
