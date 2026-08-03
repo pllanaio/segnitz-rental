@@ -3,6 +3,8 @@ name: Repository snapshot
 on:
   push:
     branches: [agent/order-payment-return-tests]
+  pull_request:
+    branches: [main]
 
 permissions:
   contents: read
