@@ -4563,7 +4563,7 @@ app.post('/webhooks/mollie', async (req, res) => {
         }
 
         const [orders] = await connection.execute(
-            `SELECT id, status, order_confirmation_sent_at
+            `SELECT id, status, cart_id, order_confirmation_sent_at
              FROM rental_orders
              WHERE mollie_payment_id = ?
              LIMIT 1
@@ -4612,6 +4612,14 @@ app.post('/webhooks/mollie', async (req, res) => {
                 order.id
             ]
         );
+
+        if (mappedPaymentStatus === 'paid' && order.cart_id) {
+            await connection.execute(
+                `DELETE FROM rental_carts
+                 WHERE id = ?`,
+                [order.cart_id]
+            );
+        }
 
         let shouldSendConfirmation = false;
 
