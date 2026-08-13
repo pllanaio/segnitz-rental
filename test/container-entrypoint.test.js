@@ -19,6 +19,10 @@ test('the container repairs only the two upload mount points before dropping pri
   assert.match(dockerfile, /USER root[\s\S]*ENTRYPOINT \["docker-entrypoint\.sh"\]/u);
   assert.match(
     dockerfile,
+    /rm -rf \/usr\/local\/lib\/node_modules\/npm[\s\\]*\n\s*&& rm -f \/usr\/local\/bin\/npm \/usr\/local\/bin\/npx/u
+  );
+  assert.match(
+    dockerfile,
     /HEALTHCHECK[\s\S]*CMD \["su-exec", "node:node", "node"/u
   );
 

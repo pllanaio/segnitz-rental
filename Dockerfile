@@ -23,6 +23,11 @@ COPY --chown=node:node . .
 
 USER root
 
+# npm is required only while installing dependencies. Removing the bundled CLI
+# keeps its unrelated transitive packages out of the production attack surface.
+RUN rm -rf /usr/local/lib/node_modules/npm \
+    && rm -f /usr/local/bin/npm /usr/local/bin/npx
+
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \

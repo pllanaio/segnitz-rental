@@ -1,11 +1,11 @@
 CREATE TABLE IF NOT EXISTS customer_number_sequences (
     sequence_year SMALLINT UNSIGNED NOT NULL,
-    last_value INT UNSIGNED NOT NULL DEFAULT 0,
+    sequence_value INT UNSIGNED NOT NULL DEFAULT 0,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (sequence_year)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
-INSERT INTO customer_number_sequences (sequence_year, last_value)
+INSERT INTO customer_number_sequences (sequence_year, sequence_value)
 SELECT
     CAST(SUBSTRING(customer_no, 2, 4) AS UNSIGNED),
     MAX(CAST(SUBSTRING(customer_no, 6) AS UNSIGNED))
@@ -13,7 +13,7 @@ FROM users
 WHERE customer_no REGEXP '^K[0-9]{9}$'
 GROUP BY CAST(SUBSTRING(customer_no, 2, 4) AS UNSIGNED)
 ON DUPLICATE KEY UPDATE
-    last_value = GREATEST(last_value, VALUES(last_value));
+    sequence_value = GREATEST(sequence_value, VALUES(sequence_value));
 
 INSERT INTO rental_cart_items
     (cart_id, product_id, rental_start, rental_end, quantity)

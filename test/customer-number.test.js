@@ -27,5 +27,5 @@ test('formatiert den atomar von MySQL reservierten Sequenzwert', async () => {
 
     assert.equal(await allocateCustomerNumber(connection, 2026), 'K202600042');
     assert.match(statements[0].sql, /customer_number_sequences/);
-    assert.match(statements[1].sql, /LAST_INSERT_ID\(last_value \+ 1\)/);
+    assert.match(statements[1].sql, /LAST_INSERT_ID\(sequence_value \+ 1\)/);
 });

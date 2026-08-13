@@ -14,7 +14,7 @@ async function allocateCustomerNumber(connection, yearValue) {
     const year = normalizeSequenceYear(yearValue);
 
     await connection.execute(
-        `INSERT INTO customer_number_sequences (sequence_year, last_value)
+        `INSERT INTO customer_number_sequences (sequence_year, sequence_value)
          VALUES (?, 0)
          ON DUPLICATE KEY UPDATE sequence_year = VALUES(sequence_year)`,
         [year]
@@ -22,7 +22,7 @@ async function allocateCustomerNumber(connection, yearValue) {
 
     await connection.execute(
         `UPDATE customer_number_sequences
-         SET last_value = LAST_INSERT_ID(last_value + 1)
+         SET sequence_value = LAST_INSERT_ID(sequence_value + 1)
          WHERE sequence_year = ?`,
         [year]
     );

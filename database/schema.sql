@@ -64,7 +64,7 @@ CREATE TABLE guest_verifications (
 
 CREATE TABLE customer_number_sequences (
     sequence_year SMALLINT UNSIGNED NOT NULL,
-    last_value INT UNSIGNED NOT NULL DEFAULT 0,
+    sequence_value INT UNSIGNED NOT NULL DEFAULT 0,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (sequence_year)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
