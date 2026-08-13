@@ -104,11 +104,26 @@ document.addEventListener('DOMContentLoaded', async () => {
         cancelled: 'Die Zahlung wurde abgebrochen.',
         canceled: 'Die Zahlung wurde abgebrochen.',
         authorized: 'Die Zahlung wurde autorisiert, aber noch nicht endgültig eingezogen.',
+        refund_pending: 'Die Bestellung ist geschlossen; die Rückerstattung wird noch verarbeitet.',
+        refunded: 'Die Zahlung wurde zurückerstattet. Die Bestellung bleibt geschlossen.',
+        refund_failed: 'Die Rückerstattung konnte nicht abgeschlossen werden. Bitte kontaktieren Sie uns.',
+        charged_back: 'Die Zahlung wurde zurückbelastet. Bitte kontaktieren Sie uns.',
         pending: 'Die Zahlung wurde noch nicht bestätigt.'
     };
 
     const setPaymentErrorView = (status) => {
         const message = statusMessages[status] || statusMessages.pending;
+        const canRetryInitialPayment =
+            paymentContext === 'return' &&
+            ['failed', 'expired', 'cancelled', 'canceled', 'pending'].includes(status);
+        const isRefundStatus = ['refund_pending', 'refunded', 'refund_failed'].includes(status);
+        const followUpText = isRefundStatus
+            ? 'Für diese Bestellung ist keine weitere Zahlung erforderlich.'
+            : paymentContext === 'return'
+                ? 'Sie können die Online-Zahlung erneut starten, sofern die Mietartikel noch verfügbar sind.'
+            : ['extension', 'return_charge'].includes(paymentContext)
+                ? 'Alternativ kann die Nachzahlung bei der Übergabe vor Ort bar erfasst werden.'
+                : '';
 
         if (resultIcon) {
             resultIcon.innerHTML = '<i class="bi bi-x-lg"></i>';
@@ -127,14 +142,51 @@ document.addEventListener('DOMContentLoaded', async () => {
             finalDiv.innerHTML = `
                 <div class="alert alert-warning">
                     ${message}<br>
-                    Falls Sie vor Ort bezahlen möchten, kommen Sie während unserer Öffnungszeiten vorbei.
+                    ${followUpText}
                 </div>
+                ${canRetryInitialPayment ? `
+                    <button type="button" class="btn btn-primary"
+                        onclick="retryMolliePayment(${Number(orderId)})">
+                        Online-Zahlung erneut starten
+                    </button>
+                ` : ''}
             `;
         }
     };
 
     const setPaymentSuccessView = (order) => {
         const message = successMessages[paymentContext] || successMessages.return;
+        let title = message.title;
+        let text = message.text;
+        let body = message.body;
+
+        if (order.settled_by_offset) {
+            title = 'Nachzahlung bereits mit Kaution verrechnet';
+
+            if (order.duplicate_refund_status === 'paid') {
+                text = 'Die zusätzliche Onlinezahlung wurde automatisch zurückerstattet.';
+                body = 'Die Nachzahlung war bereits mit der Kaution verrechnet; die doppelte Onlinezahlung wurde erstattet.';
+            } else if (order.duplicate_refund_status) {
+                text = 'Die zusätzliche Onlinezahlung wird automatisch zurückerstattet.';
+                body = 'Die Nachzahlung war bereits mit der Kaution verrechnet; die Rückerstattung der doppelten Onlinezahlung läuft.';
+            } else {
+                text = 'Die Nachzahlung wurde bereits bei der Rückgabe ausgeglichen.';
+                body = 'Für diese Nachzahlung ist keine weitere Zahlung erforderlich.';
+            }
+        } else if (order.settled_by_cash) {
+            title = 'Nachzahlung bereits bar beglichen';
+
+            if (order.duplicate_refund_status === 'paid') {
+                text = 'Die zusätzliche Onlinezahlung wurde automatisch zurückerstattet.';
+                body = 'Die Nachzahlung war bereits bar beglichen; die doppelte Onlinezahlung wurde erstattet.';
+            } else if (order.duplicate_refund_status) {
+                text = 'Die zusätzliche Onlinezahlung wird automatisch zurückerstattet.';
+                body = 'Die Nachzahlung war bereits bar beglichen; die Rückerstattung der doppelten Onlinezahlung läuft.';
+            } else {
+                text = 'Die Nachzahlung wurde vor Ort erfasst; der Online-Link ist geschlossen.';
+                body = 'Für diese Nachzahlung ist keine weitere Zahlung erforderlich.';
+            }
+        }
 
         if (resultIcon) {
             resultIcon.innerHTML = '<i class="bi bi-check-lg"></i>';
@@ -142,17 +194,17 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
 
         if (resultTitle) {
-            resultTitle.textContent = message.title;
+            resultTitle.textContent = title;
         }
 
         if (resultText) {
-            resultText.textContent = message.text;
+            resultText.textContent = text;
         }
 
         if (finalDiv) {
             finalDiv.innerHTML = `
                 <div class="alert alert-success">
-                    ${message.body}<br>
+                    ${body}<br>
                     Bestellnummer: <strong>${order.orderNo || order.order_no || orderId}</strong>
                 </div>
             `;
@@ -217,6 +269,12 @@ async function retryMolliePayment(orderId) {
 
         if (!response.ok) {
             showAlert(result.error || 'Zahlung konnte nicht erneut gestartet werden.', 'danger');
+            return;
+        }
+
+        if (result.alreadyPaid) {
+            showAlert(result.message || 'Die Zahlung ist bereits eingegangen.', 'success');
+            window.location.reload();
             return;
         }
 
@@ -500,6 +558,27 @@ submitBtn.addEventListener('click', async (event) => {
 
         succcessDiv.classList.remove('d-none');
         succcessDiv.classList.add('d-block');
+
+        const resultTitle = document.getElementById('paymentResultTitle');
+        const resultText = document.getElementById('paymentResultText');
+        const finalDiv = document.getElementById('final');
+
+        if (resultTitle) {
+            resultTitle.textContent = 'Barzahlungs-Miete bestätigt';
+        }
+
+        if (resultText) {
+            resultText.textContent = 'Ihre Mietprodukte sind verbindlich eingeplant. Miete und Kaution zahlen Sie vollständig bei der Abholung.';
+        }
+
+        if (finalDiv) {
+            finalDiv.innerHTML = `
+                <div class="alert alert-success">
+                    Bestellnummer: <strong>${result.orderNo}</strong><br>
+                    Bei Abholung zu zahlen: <strong>${Number(result.amountDue || 0).toFixed(2)} €</strong>
+                </div>
+            `;
+        }
 
         if (result.pdfUrl) {
             window.open(result.pdfUrl, '_blank');

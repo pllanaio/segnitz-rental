@@ -4,17 +4,23 @@ async function expireOldReservations(connection) {
          JOIN rental_orders ro ON ro.id = roi.order_id
          SET roi.item_status = 'expired',
              roi.return_status = 'not_required'
-         WHERE ro.status = 'reserved'
+         WHERE ro.status IN ('reserved', 'pending_payment', 'payment_failed')
          AND ro.reserved_until IS NOT NULL
          AND ro.reserved_until < NOW()`
     );
 
     const [updatedOrders] = await connection.execute(
         `UPDATE rental_orders
-         SET status = 'expired',
-             return_status = 'not_required',
-             return_case_status = 'closed'
-         WHERE status = 'reserved'
+     SET status = 'expired',
+         return_status = 'not_required',
+         return_case_status = 'closed',
+         payment_status = CASE
+            WHEN payment_status IS NULL
+              OR payment_status IN ('pending', 'open', 'authorized')
+            THEN 'expired'
+            ELSE payment_status
+         END
+         WHERE status IN ('reserved', 'pending_payment', 'payment_failed')
          AND reserved_until IS NOT NULL
          AND reserved_until < NOW()`
     );
@@ -29,7 +35,7 @@ async function expireOldReservations(connection) {
 async function deleteOldActiveCarts(connection) {
     const [result] = await connection.execute(
         `DELETE FROM rental_carts
-         WHERE status = 'active'
+         WHERE status IN ('active', 'converted')
          AND updated_at < NOW() - INTERVAL 24 HOUR`
     );
 
