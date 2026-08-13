@@ -1206,7 +1206,10 @@ app.get('/my-orders', async (req, res) => {
 
         const total = Number(countRows[0]?.total || 0);
 
-        const [orders] = await connection.execute(
+        // mysql2 bindet JavaScript-Zahlen im Prepared-Statement-Protokoll als DOUBLE.
+        // MySQL 8.4 akzeptiert diesen Typ nicht für LIMIT/OFFSET; query() escaped
+        // weiterhin alle Werte, setzt die validierten Ganzzahlen aber als SQL-Zahlen ein.
+        const [orders] = await connection.query(
             `SELECT
                 ro.id,
                 ro.order_no,
@@ -1992,7 +1995,9 @@ app.get('/admin/orders', checkAdmin, async (req, res) => {
 
         const total = Number(countRows[0]?.total || 0);
 
-        const [orders] = await connection.execute(
+        // Siehe Kundenlistenabfrage: query() formatiert die bereits validierten
+        // Pagination-Zahlen kompatibel zu MySQL 8.4 und escaped die Filterwerte.
+        const [orders] = await connection.query(
             `SELECT
                 ro.id,
                 ro.order_no,
