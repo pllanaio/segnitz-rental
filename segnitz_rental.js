@@ -220,7 +220,6 @@ const adminReturnMutationLimiter = rateLimit({
     limit: 60,
     standardHeaders: true,
     legacyHeaders: false,
-    keyGenerator: req => String(req.session?.user || 'unknown-admin'),
     message: {
         error: 'Zu viele Rückgabeaktionen. Bitte versuche es in einigen Minuten erneut.'
     }
