@@ -9,12 +9,9 @@ let step = document.getElementsByClassName('step');
 let prevBtn = document.getElementById('prev-btn');
 let nextBtn = document.getElementById('next-btn');
 let submitBtn = document.getElementById('submit-btn');
-let form = document.getElementsByTagName('form')[0];
 let preloader = document.getElementById('preloader-wrapper');
 let bodyElement = document.querySelector('body');
 let succcessDiv = document.getElementById('success');
-let guestVerificationRequested = false;
-let guestEmailVerified = false;
 let rentalProducts = [];
 let currentProductPage = 1;
 const productsPerPage = 12;
@@ -44,6 +41,42 @@ function syncMainNextButtonVisibility() {
     nextBtn.classList.toggle('d-none', !shouldShow);
     nextBtn.classList.toggle('d-inline-block', shouldShow);
 }
+
+function handleFrontendActionClick(event) {
+    const button = event.target.closest('[data-frontend-action]');
+
+    if (!button || button.disabled) return;
+
+    const action = button.dataset.frontendAction;
+    const itemId = Number(button.dataset.itemId);
+    const orderId = Number(button.dataset.orderId);
+
+    const actions = {
+        'retry-payment': () => retryMolliePayment(orderId),
+        'edit-cart-item': () => openCartItemEditModal(itemId),
+        'delete-cart-item': () => deleteCartItem(itemId),
+        'show-all-reviews': () => renderModalProductReviews(true)
+    };
+
+    actions[action]?.();
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    document.addEventListener('click', handleFrontendActionClick);
+
+    document.getElementById('logoutActionButton')?.addEventListener('click', event => {
+        event.preventDefault();
+        logout();
+    });
+    document.getElementById('productSearchForm')?.addEventListener('submit', event => {
+        event.preventDefault();
+    });
+    document.getElementById('clearCartButton')?.addEventListener('click', clearCart);
+    document.getElementById('cartModalNextBtn')
+        ?.addEventListener('click', goToNextStepFromCart);
+    document.getElementById('saveCartItemRentalPeriodButton')
+        ?.addEventListener('click', saveCartItemRentalPeriod);
+});
 
 document.addEventListener('DOMContentLoaded', async () => {
     const params = new URLSearchParams(window.location.search);
@@ -146,7 +179,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                 </div>
                 ${canRetryInitialPayment ? `
                     <button type="button" class="btn btn-primary"
-                        onclick="retryMolliePayment(${Number(orderId)})">
+                        data-frontend-action="retry-payment"
+                        data-order-id="${Number(orderId)}">
                         Online-Zahlung erneut starten
                     </button>
                 ` : ''}
@@ -367,12 +401,6 @@ nextBtn.addEventListener('click', async () => {
             nextBtn
                 .classList
                 .add('d-none');
-        }
-    } else {
-        if (current_step > stepCount) {
-            form.onsubmit = () => {
-                return true
-            }
         }
     }
 
@@ -1439,7 +1467,8 @@ function renderCart() {
         <button
             type="button"
             class="btn btn-sm btn-outline-primary"
-            onclick="openCartItemEditModal(${item.id})">
+            data-frontend-action="edit-cart-item"
+            data-item-id="${item.id}">
 
             <i class="bi bi-calendar-range"></i>
             Zeitraum ändern
@@ -1447,7 +1476,8 @@ function renderCart() {
         <button
             type="button"
             class="btn btn-sm btn-outline-danger"
-            onclick="deleteCartItem(${item.id})">
+            data-frontend-action="delete-cart-item"
+            data-item-id="${item.id}">
 
             <i class="bi bi-trash"></i>
             Entfernen
@@ -2058,7 +2088,7 @@ function renderModalProductReviews(showAll = false) {
         ? `
             <button type="button"
                 class="btn btn-outline-primary btn-sm mt-2"
-                onclick="renderModalProductReviews(true)">
+                data-frontend-action="show-all-reviews">
                 Alle Bewertungen anzeigen
             </button>
         `

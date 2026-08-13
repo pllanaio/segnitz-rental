@@ -213,3 +213,33 @@ test('übernimmt den Gast-Warenkorb nach erfolgreichem Kundenlogin', async () =>
     assert.equal(cart.items.length, 1);
     assert.equal(cart.items[0].title, TEST_PRODUCT.title);
 });
+
+test('blockiert Bestell- und Artikelstornos für Kunden auch direkt an der API', async () => {
+    const client = new SessionClient();
+    const loginResponse = await client.request('/login', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+            username: TEST_USER.email,
+            password: TEST_USER.password
+        })
+    });
+
+    assert.equal(loginResponse.status, 200);
+
+    for (const pathname of ['/my-orders/1/cancel', '/my-orders/1/items/1/cancel']) {
+        const response = await client.request(pathname, { method: 'POST' });
+        assert.equal(response.status, 403);
+        assert.deepEqual(await response.json(), {
+            error: 'Stornierungen können nur durch einen Administrator durchgeführt werden.'
+        });
+    }
+});
+
+test('behandelt unbekannte Verifikationstoken ohne Schemafehler', async () => {
+    const client = new SessionClient();
+    const response = await client.request('/verify-email?token=ungueltiger-test-token');
+
+    assert.equal(response.status, 400);
+    assert.match(await response.text(), /ungültig oder abgelaufen/i);
+});

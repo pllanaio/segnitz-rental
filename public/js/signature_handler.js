@@ -70,5 +70,9 @@ signaturePad.maxWidth = 5; //maximale Breite des Stiftes
 signaturePad.penColor = "#000000"; //Stiftfarbe
 signaturePad.backgroundColor = "#FFFFFF"; //Hintergrundfarbe
 
-window.onclick = resizeCanvas;
+window.addEventListener('resize', resizeCanvas);
+document.getElementById('next-btn')?.addEventListener('click', () => {
+    window.setTimeout(resizeCanvas, 0);
+});
+document.getElementById('clear-signature')?.addEventListener('click', clearCanvas);
 resizeCanvas();

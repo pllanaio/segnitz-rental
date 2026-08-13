@@ -19,6 +19,57 @@ document.addEventListener('DOMContentLoaded', () => {
     const form = document.getElementById('productForm');
     const cancelEditBtn = document.getElementById('cancelEditBtn');
     const orderSearchInput = document.getElementById('orderSearchInput');
+
+    document.addEventListener('click', handleBackendActionClick);
+
+    document.querySelectorAll('[data-backend-view]').forEach(button => {
+        button.addEventListener('click', () => switchBackendView(button.dataset.backendView));
+    });
+
+    document.getElementById('backendLogoutButton')?.addEventListener('click', logout);
+    document.getElementById('saveOpeningHoursButton')?.addEventListener('click', saveOpeningHours);
+    document.getElementById('submitOrderItemRentalPeriodButton')
+        ?.addEventListener('click', submitOrderItemRentalPeriod);
+    document.getElementById('submitCancelOrderItemButton')
+        ?.addEventListener('click', submitCancelOrderItem);
+    document.getElementById('submitOrderItemReturnButton')
+        ?.addEventListener('click', submitOrderItemReturn);
+    document.getElementById('uploadReturnImagesButton')?.addEventListener('click', () => {
+        const itemId = document.getElementById('returnItemId').value;
+        uploadReturnImagesForCurrentReturn(itemId);
+    });
+    document.getElementById('returnImageUpload')
+        ?.addEventListener('change', renderSelectedReturnImagePreview);
+
+    const manualPaymentSubmitButton = document.getElementById('manualPaymentSubmitButton');
+    manualPaymentSubmitButton?.addEventListener('click', () => {
+        if (manualPaymentSubmitButton.dataset.operation === 'refund') {
+            submitManualRefund();
+            return;
+        }
+
+        submitManualPayment();
+    });
+
+    document.getElementById('rentalPeriodEnd')?.addEventListener('input', updateRentalPeriodPreview);
+    document.getElementById('rentalPeriodEnd')?.addEventListener('change', updateRentalPeriodPreview);
+
+    [
+        'returnActualDate',
+        'returnAdjustedStart',
+        'returnAdjustedEnd',
+        'returnPricePerDay',
+        'returnStatus',
+        'returnDepositDecision',
+        'returnIsDamaged',
+        'returnIsLate',
+        'returnDepositDeductionPercent',
+        'returnAdditionalChargeAmount'
+    ].forEach(id => {
+        const element = document.getElementById(id);
+        element?.addEventListener('input', applyOrderItemReturnModalRules);
+        element?.addEventListener('change', applyOrderItemReturnModalRules);
+    });
     [
         'orderYearFilter',
         'orderMonthFilter',
@@ -75,6 +126,55 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 });
+
+function getOptionalNumber(value) {
+    if (value === undefined || value === null || value === '') {
+        return null;
+    }
+
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+}
+
+function handleBackendActionClick(event) {
+    const button = event.target.closest('[data-backend-action]');
+
+    if (!button || button.disabled) return;
+
+    const action = button.dataset.backendAction;
+    const orderId = getOptionalNumber(button.dataset.orderId);
+    const itemId = getOptionalNumber(button.dataset.itemId);
+    const paymentId = getOptionalNumber(button.dataset.paymentId);
+    const productId = getOptionalNumber(button.dataset.productId);
+    const amount = getOptionalNumber(button.dataset.amount) || 0;
+
+    const actions = {
+        'edit-product': () => editProduct(productId),
+        'delete-product': () => deleteProduct(productId),
+        'open-order-details': () => openOrderDetails(orderId),
+        'change-order-page': () => changeOrderPage(Number(button.dataset.direction)),
+        'cancel-order': () => cancelOrder(orderId),
+        'open-manual-payment': () => openManualPaymentModal(
+            orderId,
+            itemId,
+            button.dataset.paymentType,
+            amount
+        ),
+        'open-manual-refund': () => openManualRefundModal(
+            orderId,
+            itemId,
+            button.dataset.paymentType,
+            amount
+        ),
+        'retry-online-refund': () => retryOnlineRefund(paymentId, orderId),
+        'mark-item-picked-up': () => markOrderItemPickedUp(orderId, itemId),
+        'open-rental-period': () => openRentalPeriodModal(orderId, itemId),
+        'open-cancel-item': () => openCancelOrderItemModal(orderId, itemId),
+        'open-return-item': () => openOrderItemReturnModal(orderId, itemId)
+    };
+
+    actions[action]?.();
+}
 
 async function loadProducts() {
     const productList = document.getElementById('productList');
@@ -134,10 +234,12 @@ function createProductCard(product) {
                 </div>
 
                 <div class="col-12 col-md-2 text-md-end">
-                    <button type="button" class="btn btn-primary btn-sm mb-2 w-100" onclick="editProduct(${product.id})">
+                    <button type="button" class="btn btn-primary btn-sm mb-2 w-100"
+                        data-backend-action="edit-product" data-product-id="${product.id}">
                         Bearbeiten
                     </button>
-                    <button type="button" class="btn btn-danger btn-sm w-100" onclick="deleteProduct(${product.id})">
+                    <button type="button" class="btn btn-danger btn-sm w-100"
+                        data-backend-action="delete-product" data-product-id="${product.id}">
                         Löschen
                     </button>
                 </div>
@@ -624,7 +726,7 @@ function renderOrders() {
                     </div>
 
                     <button class="btn btn-primary btn-sm"
-                        onclick="openOrderDetails(${order.id})">
+                        data-backend-action="open-order-details" data-order-id="${order.id}">
                         Details
                     </button>
                 </div>
@@ -645,13 +747,13 @@ function renderOrders() {
     <div class="btn-group">
         <button type="button" class="btn btn-outline-primary btn-sm"
             ${currentOrderPage <= 1 ? 'disabled' : ''}
-            onclick="changeOrderPage(-1)">
+            data-backend-action="change-order-page" data-direction="-1">
             Zurück
         </button>
 
         <button type="button" class="btn btn-outline-primary btn-sm"
             ${currentOrderPage >= totalPages ? 'disabled' : ''}
-            onclick="changeOrderPage(1)">
+            data-backend-action="change-order-page" data-direction="1">
             Weiter
         </button>
     </div>
@@ -714,7 +816,7 @@ function renderOrderDetails(order) {
             </p>
 
             <button type="button" class="btn btn-danger"
-                onclick="cancelOrder(${order.id})">
+                data-backend-action="cancel-order" data-order-id="${order.id}">
                 Bestellung stornieren
             </button>
         </div>
@@ -811,7 +913,11 @@ function renderOrderPaymentActionPanel(order) {
                     <strong>${initialAmount.toFixed(2)} €</strong>
                     <button type="button"
                         class="btn btn-success btn-sm"
-                        onclick="openManualPaymentModal(${order.id}, null, 'initial_payment', ${initialAmount})">
+                        data-backend-action="open-manual-payment"
+                        data-order-id="${order.id}"
+                        data-item-id=""
+                        data-payment-type="initial_payment"
+                        data-amount="${initialAmount}">
                         Miete und Kaution bar kassieren
                     </button>
                 </div>
@@ -838,12 +944,11 @@ function renderOrderPaymentActionPanel(order) {
                     <strong>${Number(payment.amount || 0).toFixed(2)} €</strong>
                     <button type="button"
                         class="btn btn-success btn-sm"
-                        onclick="openManualPaymentModal(
-                            ${payment.orderId},
-                            ${payment.orderItemId || 'null'},
-                            'rental_adjustment',
-                            ${Number(payment.amount || 0)}
-                        )">
+                        data-backend-action="open-manual-payment"
+                        data-order-id="${payment.orderId}"
+                        data-item-id="${payment.orderItemId || ''}"
+                        data-payment-type="rental_adjustment"
+                        data-amount="${Number(payment.amount || 0)}">
                         Verlängerung bar kassieren
                     </button>
                 </div>
@@ -870,12 +975,11 @@ function renderOrderPaymentActionPanel(order) {
                     <strong>${Number(payment.amount || 0).toFixed(2)} €</strong>
                     <button type="button"
                         class="btn btn-success btn-sm"
-                        onclick="openManualPaymentModal(
-                            ${payment.orderId},
-                            ${payment.orderItemId || 'null'},
-                            'return_additional_charge',
-                            ${Number(payment.amount || 0)}
-                        )">
+                        data-backend-action="open-manual-payment"
+                        data-order-id="${payment.orderId}"
+                        data-item-id="${payment.orderItemId || ''}"
+                        data-payment-type="return_additional_charge"
+                        data-amount="${Number(payment.amount || 0)}">
                         Nachzahlung bar kassieren
                     </button>
                 </div>
@@ -901,12 +1005,11 @@ function renderOrderPaymentActionPanel(order) {
                     <strong>${Math.abs(Number(payment.amount || 0)).toFixed(2)} €</strong>
                     <button type="button"
                         class="btn btn-outline-danger btn-sm"
-                        onclick="openManualRefundModal(
-                            ${payment.orderId},
-                            ${payment.orderItemId || 'null'},
-                            'deposit_refund',
-                            ${Math.abs(Number(payment.amount || 0))}
-                        )">
+                        data-backend-action="open-manual-refund"
+                        data-order-id="${payment.orderId}"
+                        data-item-id="${payment.orderItemId || ''}"
+                        data-payment-type="deposit_refund"
+                        data-amount="${Math.abs(Number(payment.amount || 0))}">
                         Kaution bar erstatten
                     </button>
                 </div>
@@ -932,12 +1035,11 @@ function renderOrderPaymentActionPanel(order) {
                     <strong>${Math.abs(Number(payment.amount || 0)).toFixed(2)} €</strong>
                     <button type="button"
                         class="btn btn-outline-danger btn-sm"
-                        onclick="openManualRefundModal(
-                            ${payment.orderId},
-                            ${payment.orderItemId || 'null'},
-                            'order_cancellation_refund',
-                            ${Math.abs(Number(payment.amount || 0))}
-                        )">
+                        data-backend-action="open-manual-refund"
+                        data-order-id="${payment.orderId}"
+                        data-item-id="${payment.orderItemId || ''}"
+                        data-payment-type="order_cancellation_refund"
+                        data-amount="${Math.abs(Number(payment.amount || 0))}">
                         Storno bar erstatten
                     </button>
                 </div>
@@ -981,7 +1083,9 @@ function renderOrderPaymentActionPanel(order) {
                         <strong>${Math.abs(Number(payment.amount || 0)).toFixed(2)} €</strong>
                         <button type="button"
                             class="btn btn-outline-warning btn-sm"
-                            onclick="retryOnlineRefund(${payment.id}, ${order.id})">
+                            data-backend-action="retry-online-refund"
+                            data-payment-id="${payment.id}"
+                            data-order-id="${order.id}">
                             Erstattung erneut versuchen
                         </button>
                     </div>
@@ -1076,27 +1180,31 @@ function renderOrderItemCard(order, item) {
                         <button type="button"
                             class="btn btn-outline-success btn-sm"
                             ${canPickUp ? '' : 'disabled'}
-                            onclick="markOrderItemPickedUp(${order.id}, ${item.id})">
+                            data-backend-action="mark-item-picked-up"
+                            data-order-id="${order.id}" data-item-id="${item.id}">
                             Als abgeholt markieren
                         </button>
                         <button type="button"
                             class="btn btn-outline-primary btn-sm"
                             ${canEdit ? '' : 'disabled'}
-                            onclick="openRentalPeriodModal(${order.id}, ${item.id})">
+                            data-backend-action="open-rental-period"
+                            data-order-id="${order.id}" data-item-id="${item.id}">
                             Mietzeitraum verlängern
                         </button>
 
                         <button type="button"
                             class="btn btn-outline-danger btn-sm"
                             ${canCancelItem ? '' : 'disabled'}
-                            onclick="openCancelOrderItemModal(${order.id}, ${item.id})">
+                            data-backend-action="open-cancel-item"
+                            data-order-id="${order.id}" data-item-id="${item.id}">
                             Artikel stornieren
                         </button>
 
                         <button type="button"
                             class="btn btn-success btn-sm"
                             ${canReturn ? '' : 'disabled'}
-                            onclick="openOrderItemReturnModal(${order.id}, ${item.id})">
+                            data-backend-action="open-return-item"
+                            data-order-id="${order.id}" data-item-id="${item.id}">
                             Rückgabe
                         </button>
                     </div>
@@ -1720,12 +1828,11 @@ ${rentalPaid
             ${canAcceptPayments && openRentalAdjustment ? `
                 <button type="button"
                     class="btn btn-outline-success btn-sm ms-2"
-                    onclick="openManualPaymentModal(
-                    ${openRentalAdjustment.orderId},
-                    ${openRentalAdjustment.orderItemId || 'null'},
-                    '${openRentalAdjustment.paymentType}',
-                    ${Number(openRentalAdjustment.amount || 0)}
-                )">
+                    data-backend-action="open-manual-payment"
+                    data-order-id="${openRentalAdjustment.orderId}"
+                    data-item-id="${openRentalAdjustment.orderItemId || ''}"
+                    data-payment-type="${openRentalAdjustment.paymentType}"
+                    data-amount="${Number(openRentalAdjustment.amount || 0)}">
                     Barzahlung erfassen
                 </button>
             ` : ''}
@@ -1750,12 +1857,11 @@ ${rentalPaid
             ${openCashDepositRefund && !hasCashDepositRefund ? `
                 <button type="button"
                     class="btn btn-outline-danger btn-sm ms-2"
-                    onclick="openManualRefundModal(
-                        ${order.id},
-                        ${item.id},
-                        'deposit_refund',
-                        ${Math.abs(Number(openCashDepositRefund.amount || 0))}
-                    )">
+                    data-backend-action="open-manual-refund"
+                    data-order-id="${order.id}"
+                    data-item-id="${item.id}"
+                    data-payment-type="deposit_refund"
+                    data-amount="${Math.abs(Number(openCashDepositRefund.amount || 0))}">
                     Kaution bar erstatten
                 </button>
             ` : ''}
@@ -1765,12 +1871,11 @@ ${rentalPaid
             ${canAcceptPayments && returnCharge && !hasPaidPayment('return_additional_charge') ? `
                 <button type="button"
                     class="btn btn-outline-success btn-sm ms-2"
-                    onclick="openManualPaymentModal(
-                        ${returnCharge.orderId},
-                        ${returnCharge.orderItemId || 'null'},
-                        '${returnCharge.paymentType}',
-                        ${Number(returnCharge.amount || 0)}
-                    )">
+                    data-backend-action="open-manual-payment"
+                    data-order-id="${returnCharge.orderId}"
+                    data-item-id="${returnCharge.orderItemId || ''}"
+                    data-payment-type="${returnCharge.paymentType}"
+                    data-amount="${Number(returnCharge.amount || 0)}">
                     Barzahlung erfassen
                 </button>
             ` : ''}
@@ -1780,8 +1885,9 @@ ${rentalPaid
 
 function openManualPaymentModal(orderId, orderItemId, paymentType, amount) {
     document.querySelector('#manualPaymentModal .modal-title').textContent = 'Barzahlung erfassen';
-    document.querySelector('#manualPaymentModal .btn-success').textContent = 'Zahlung erfassen';
-    document.querySelector('#manualPaymentModal .btn-success').onclick = submitManualPayment;
+    const submitButton = document.getElementById('manualPaymentSubmitButton');
+    submitButton.textContent = 'Zahlung erfassen';
+    submitButton.dataset.operation = 'payment';
     document.getElementById('manualPaymentOrderId').value = orderId;
     document.getElementById('manualPaymentOrderItemId').value = orderItemId || '';
     document.getElementById('manualPaymentType').value = paymentType;
@@ -1800,8 +1906,9 @@ function openManualRefundModal(orderId, orderItemId, paymentType, amount) {
     document.getElementById('manualPaymentNote').value = 'Bar-Rückerstattung an Kunden ausgezahlt';
 
     document.querySelector('#manualPaymentModal .modal-title').textContent = 'Bar-Rückerstattung erfassen';
-    document.querySelector('#manualPaymentModal .btn-success').textContent = 'Rückerstattung erfassen';
-    document.querySelector('#manualPaymentModal .btn-success').onclick = submitManualRefund;
+    const submitButton = document.getElementById('manualPaymentSubmitButton');
+    submitButton.textContent = 'Rückerstattung erfassen';
+    submitButton.dataset.operation = 'refund';
 
     new bootstrap.Modal(document.getElementById('manualPaymentModal')).show();
 }
@@ -2173,12 +2280,6 @@ function openRentalPeriodModal(orderId, itemId) {
 
     updateRentalPeriodPreview();
 
-    ['rentalPeriodEnd'].forEach(id => {
-        const element = document.getElementById(id);
-        element.oninput = updateRentalPeriodPreview;
-        element.onchange = updateRentalPeriodPreview;
-    });
-
     new bootstrap.Modal(document.getElementById('orderItemRentalPeriodModal')).show();
 }
 
@@ -2321,23 +2422,6 @@ function openOrderItemReturnModal(orderId, itemId) {
         </a>
     </div>
 `).join('');
-
-    [
-        'returnActualDate',
-        'returnAdjustedStart',
-        'returnAdjustedEnd',
-        'returnPricePerDay',
-        'returnStatus',
-        'returnDepositDecision',
-        'returnIsDamaged',
-        'returnIsLate',
-        'returnDepositDeductionPercent',
-        'returnAdditionalChargeAmount'
-    ].forEach(id => {
-        const element = document.getElementById(id);
-        element.oninput = applyOrderItemReturnModalRules;
-        element.onchange = applyOrderItemReturnModalRules;
-    });
 
     applyOrderItemReturnModalRules();
 

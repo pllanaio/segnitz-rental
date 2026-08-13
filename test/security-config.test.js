@@ -51,11 +51,19 @@ test('enables a restrictive baseline CSP', () => {
   assert.deepEqual(developmentOptions.contentSecurityPolicy.directives.frameAncestors, ["'none'"]);
   assert.deepEqual(
     developmentOptions.contentSecurityPolicy.directives.scriptSrcAttr,
-    ["'unsafe-inline'"]
+    ["'none'"]
+  );
+  assert.deepEqual(
+    developmentOptions.contentSecurityPolicy.directives.scriptSrc,
+    ["'self'", 'https://cdn.jsdelivr.net']
   );
   assert.equal(
-    Object.hasOwn(developmentOptions.contentSecurityPolicy.directives, 'upgradeInsecureRequests'),
+    developmentOptions.contentSecurityPolicy.directives.scriptSrc.includes("'unsafe-inline'"),
     false
+  );
+  assert.equal(
+    developmentOptions.contentSecurityPolicy.directives.upgradeInsecureRequests,
+    null
   );
   assert.deepEqual(
     productionOptions.contentSecurityPolicy.directives.upgradeInsecureRequests,

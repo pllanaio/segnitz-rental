@@ -27,11 +27,21 @@ Danach:
 npm run test:integration
 ```
 
-Die Testdatenbank wird automatisch neu aufgebaut und mit definierten Kunden-, Admin-, Produkt- und Zahlungsdaten befüllt.
+Die Testdatenbank wird automatisch aus dem kanonischen
+[`database/schema.sql`](../database/schema.sql) neu aufgebaut und ausschließlich mit
+synthetischen Kunden-, Admin-, Produkt- und Zahlungsdaten befüllt. Beide
+Integrationstest-Suiten verwenden damit dieselbe Struktur wie die Anwendung.
+
+Der produktive Dump wird nicht als Testfixture eingecheckt, weil er Personen-,
+Zahlungs- und Signaturdaten enthält. Für eine bestehende Datenbank aus dem Dump vom
+13.08.2026 liegt die einmalige Strukturmigration unter
+[`database/migrations/20260813_align_dump_with_application.sql`](../database/migrations/20260813_align_dump_with_application.sql).
 
 Die Integrationstests prüfen unter anderem:
 
 - Produktkatalog, Login und Gast-Warenkorb
+- Jahres- und Monatsfilter für Kunden- und Adminbestellungen
+- serverseitige Sperre von Kundenstornos
 - Bestellung mit Barzahlung
 - Bestellung mit Onlinezahlung
 - Mollie-Webhook und wiederholte Webhook-Zustellung
@@ -50,6 +60,8 @@ node test/support/test-database.js
 npm run test:e2e
 ```
 
-Die Browser-Suite prüft den Produktkatalog, das Hinzufügen zum Warenkorb, Fehlermeldungen beim Login und einen erfolgreichen Kundenlogin.
+Die Browser-Suite prüft den Produktkatalog, dynamische Warenkorb- und
+Bestellaktionen, Fehlermeldungen beim Login, Kunden- und Adminlogin sowie die
+ausgelieferte CSP ohne Inline-Skriptfreigabe.
 
 Alle drei Teststufen laufen automatisch in GitHub Actions.
