@@ -71,25 +71,6 @@ function validateAdminInput(input) {
     };
 }
 
-async function readInstallationState() {
-    const connection = await mysql.createConnection(dbConfig);
-
-    try {
-        const [rows] = await connection.execute(
-            'SELECT status FROM app_installation WHERE id = 1 LIMIT 1'
-        );
-
-        if (rows.length === 0) {
-            throw new Error('Der Installationsstatus fehlt.');
-        }
-
-        setInstallationState(rows[0].status);
-        return rows[0].status;
-    } finally {
-        await connection.end();
-    }
-}
-
 async function getSetupStatus() {
     const connection = await mysql.createConnection(dbConfig);
 
@@ -218,7 +199,6 @@ module.exports = {
     createInitialAdmin,
     getSetupStatus,
     hashSetupToken,
-    readInstallationState,
     setupTokenMatches,
     validateAdminInput
 };
