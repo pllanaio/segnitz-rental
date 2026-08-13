@@ -262,6 +262,82 @@ test('normalisiert echte MySQL-8.4-Metadaten gespeicherter generierter Spalten',
     assert.equal(schemaPartsEqual(guestColumn, { ...guestColumn, defaultValue: 'active' }), false);
 });
 
+test('normalisiert die exakten MySQL-8.4-Istwerte aus dem CI-Schema-Gate', () => {
+    const contract = parseCanonicalSchema();
+    const installationStatusActual =
+        "status in(_utf8mb4\\\\'setup_required\\\\',_utf8mb4\\\\'ready\\\\')";
+    const productsValuesActual =
+        'price_per_day>=0 and deposit>=0 and(is_active in(0,1))';
+    const activeGuestActual =
+        "case when status=_utf8mb4\\\\'active\\\\' and user_email is null " +
+        'then session_id else null end';
+    const orderLifecycleActual =
+        "(status in(_utf8mb4\\\\'reserved\\\\',_utf8mb4\\\\'pending_payment\\\\'," +
+        "_utf8mb4\\\\'payment_failed\\\\',_utf8mb4\\\\'paid\\\\',_utf8mb4\\\\'confirmed\\\\'," +
+        "_utf8mb4\\\\'active\\\\',_utf8mb4\\\\'picked_up\\\\',_utf8mb4\\\\'returned\\\\'," +
+        "_utf8mb4\\\\'partially_returned\\\\',_utf8mb4\\\\'cancelled\\\\'," +
+        "_utf8mb4\\\\'partially_cancelled\\\\',_utf8mb4\\\\'expired\\\\'," +
+        "_utf8mb4\\\\'payment_dispute\\\\'))and(payment_status is null or" +
+        "(payment_status in(_utf8mb4\\\\'pending\\\\',_utf8mb4\\\\'open\\\\'," +
+        "_utf8mb4\\\\'authorized\\\\',_utf8mb4\\\\'paid\\\\',_utf8mb4\\\\'failed\\\\'," +
+        "_utf8mb4\\\\'cancelled\\\\',_utf8mb4\\\\'expired\\\\',_utf8mb4\\\\'charged_back\\\\'," +
+        "_utf8mb4\\\\'refunded\\\\',_utf8mb4\\\\'refund_pending\\\\'," +
+        "_utf8mb4\\\\'refund_failed\\\\')))and(return_status is null or" +
+        "(return_status in(_utf8mb4\\\\'pending\\\\',_utf8mb4\\\\'not_required\\\\'," +
+        "_utf8mb4\\\\'returned_ok\\\\',_utf8mb4\\\\'returned_damaged\\\\'," +
+        "_utf8mb4\\\\'returned_late\\\\',_utf8mb4\\\\'returned_late_damaged\\\\')))and" +
+        "(return_case_status is null or(return_case_status in(_utf8mb4\\\\'open\\\\'," +
+        "_utf8mb4\\\\'partial\\\\',_utf8mb4\\\\'closed\\\\',_utf8mb4\\\\'payment_failed\\\\'," +
+        "_utf8mb4\\\\'payment_pending\\\\',_utf8mb4\\\\'refund_failed\\\\'," +
+        "_utf8mb4\\\\'refund_pending\\\\',_utf8mb4\\\\'payment_dispute\\\\')))";
+    const orderItemValuesActual =
+        'rental_end>=rental_start and price_per_day>=0 and deposit>=0 and' +
+        '(is_damaged in(0,1))and(is_late in(0,1))and adjusted_rental_start is null=' +
+        'adjusted_rental_end is null and(adjusted_rental_end is null or ' +
+        'adjusted_rental_end>=adjusted_rental_start)and(adjusted_price_per_day is null or ' +
+        'adjusted_price_per_day>=0)and(adjusted_rental_total is null or ' +
+        'adjusted_rental_total>=0)and(deposit_deduction_percent is null or' +
+        '(deposit_deduction_percent between 0 and 100))and' +
+        '(deposit_deduction_amount is null or deposit_deduction_amount>=0)and' +
+        '(deposit_refund_amount is null or deposit_refund_amount>=0)and' +
+        '(additional_charge_amount is null or additional_charge_amount>=0)';
+
+    // JSON.stringify emits four backslashes for the two actual characters
+    // delivered by mysql2. Keep that exact representation under test.
+    assert.equal((installationStatusActual.match(/\\/gu) || []).length, 8);
+    assert.match(JSON.stringify(installationStatusActual), /_utf8mb4\\\\\\\\'setup_required/u);
+
+    assert.equal(
+        normalizeCheckClause(installationStatusActual),
+        contract.get('app_installation').constraints.get('chk_app_installation_status').clause
+    );
+    assert.equal(
+        normalizeCheckClause(productsValuesActual),
+        contract.get('rental_products').constraints.get('chk_rental_products_values').clause
+    );
+    assert.equal(
+        normalizeGenerationExpression(activeGuestActual),
+        contract.get('rental_carts').columns.get('active_guest_session_id').generationExpression
+    );
+    assert.equal(
+        normalizeCheckClause(orderLifecycleActual),
+        contract.get('rental_orders').constraints.get('chk_rental_orders_lifecycle').clause
+    );
+    assert.equal(
+        normalizeCheckClause(orderItemValuesActual),
+        contract.get('rental_order_items').constraints.get('chk_rental_order_items_values').clause
+    );
+
+    assert.notEqual(
+        normalizeCheckClause(orderLifecycleActual.replace('payment_dispute', 'disabled')),
+        contract.get('rental_orders').constraints.get('chk_rental_orders_lifecycle').clause
+    );
+    assert.notEqual(
+        normalizeCheckClause(orderItemValuesActual.replace('between 0 and 100', 'between 0 and 101')),
+        contract.get('rental_order_items').constraints.get('chk_rental_order_items_values').clause
+    );
+});
+
 test('normalisiert echte MySQL-Klammerung ohne AND/OR-Präzedenz zu verlieren', () => {
     assert.equal(
         normalizeCheckClause(
@@ -281,6 +357,14 @@ test('normalisiert echte MySQL-Klammerung ohne AND/OR-Präzedenz zu verlieren', 
     assert.notEqual(
         normalizeCheckClause("(is_open = 0 AND open_time IS NULL) OR is_open = 1"),
         normalizeCheckClause("is_open = 0 AND (open_time IS NULL OR is_open = 1)")
+    );
+    assert.notEqual(
+        normalizeCheckClause(
+            "(status IN ('active') OR payment_status IN ('paid')) AND is_open = 1"
+        ),
+        normalizeCheckClause(
+            "status IN ('active') OR (payment_status IN ('paid') AND is_open = 1)"
+        )
     );
 });
 

@@ -88,6 +88,14 @@ function normalizeReferentialRule(rule) {
 function normalizeCheckClause(clause) {
     let normalized = String(clause || '')
         .replace(/`/gu, '')
+        // mysql2 exposes MySQL 8.4's information_schema representation with
+        // literal backslashes around introduced string literals. Match only a
+        // complete, delimiter-bounded literal so a backslash inside a value or
+        // an unrelated identifier can never be erased as formatting noise.
+        .replace(
+            /(^|[^A-Za-z0-9_$])_(?:utf8mb4|utf8mb3|utf8|latin1|binary)(\\{1,2})'([^\\'\r\n]*)\2'(?:\s+collate\s+utf8mb4_0900_ai_ci)?(?=\s*(?:and\b|or\b|then\b|else\b|[,)=<>]|$))/giu,
+            "$1'$3'"
+        )
         // MySQL 8.4 can serialize an introduced string literal together with
         // the table's default collation. Remove only that literal annotation;
         // explicit column/expression collations remain part of the contract.
@@ -109,12 +117,93 @@ function normalizeCheckClause(clause) {
     return normalized;
 }
 
+const scalarPredicateValue = "(?:'(?:''|[^'])*'|-?\\d+(?:\\.\\d+)?|null)";
+const identifierPredicateValue = '[a-z_][a-z0-9_]*';
+const atomicInPredicate = new RegExp(
+    `^${identifierPredicateValue} in\\(${scalarPredicateValue}(?:,${scalarPredicateValue})*\\)$`,
+    'iu'
+);
+const atomicBetweenPredicate = new RegExp(
+    `^${identifierPredicateValue} between (?:${scalarPredicateValue}|${identifierPredicateValue}) ` +
+    `and (?:${scalarPredicateValue}|${identifierPredicateValue})$`,
+    'iu'
+);
+
+function isAtomicPredicate(expression) {
+    return atomicInPredicate.test(expression) || atomicBetweenPredicate.test(expression);
+}
+
+function hasBooleanBoundaryBefore(expression, index) {
+    const prefix = expression.slice(0, index);
+    return prefix.length === 0 || prefix.endsWith('(') || /\b(?:and|or|when)\s*$/iu.test(prefix);
+}
+
+function hasBooleanBoundaryAfter(expression, index) {
+    const suffix = expression.slice(index);
+    return suffix.length === 0 || suffix.startsWith(')') || /^\s*(?:and|or|then|else)\b/iu.test(suffix);
+}
+
+function findParenthesisPairs(expression) {
+    const pairs = [];
+    const stack = [];
+    let quoted = false;
+
+    for (let index = 0; index < expression.length; index += 1) {
+        const character = expression[index];
+        if (quoted) {
+            if (character !== "'") continue;
+            if (expression[index + 1] === "'") {
+                index += 1;
+                continue;
+            }
+            quoted = false;
+            continue;
+        }
+        if (character === "'") {
+            quoted = true;
+        } else if (character === '(') {
+            stack.push(index);
+        } else if (character === ')' && stack.length > 0) {
+            pairs.push({ end: index, start: stack.pop() });
+        }
+    }
+
+    return pairs;
+}
+
+function removeRedundantAtomicPredicateParentheses(expression) {
+    let normalized = String(expression || '');
+
+    while (true) {
+        const pair = findParenthesisPairs(normalized)
+            .sort((left, right) => right.start - left.start)
+            .find(({ start, end }) => {
+                const content = normalized.slice(start + 1, end);
+                return isAtomicPredicate(content) &&
+                    hasBooleanBoundaryBefore(normalized, start) &&
+                    hasBooleanBoundaryAfter(normalized, end + 1);
+            });
+
+        if (!pair) return normalized;
+        const content = normalized.slice(pair.start + 1, pair.end);
+        const before = normalized[pair.start - 1] || '';
+        const after = normalized[pair.end + 1] || '';
+        const leadingSpace = /[A-Za-z0-9_']/u.test(before) && /[A-Za-z0-9_']/u.test(content[0] || '');
+        const trailingSpace = /[A-Za-z0-9_']/u.test(after) && /[A-Za-z0-9_']/u.test(content.at(-1) || '');
+        normalized = normalized.slice(0, pair.start) +
+            `${leadingSpace ? ' ' : ''}${content}${trailingSpace ? ' ' : ''}` +
+            normalized.slice(pair.end + 1);
+    }
+}
+
 function removeRedundantExpressionParentheses(expression) {
     let normalized = String(expression || '');
     let previous;
 
     do {
         previous = normalized;
+
+        normalized = removeRedundantAtomicPredicateParentheses(normalized);
 
         // MySQL wraps individual predicates in CHECK_CLAUSE and
         // GENERATION_EXPRESSION. Only unwrap an innermost expression when it is
