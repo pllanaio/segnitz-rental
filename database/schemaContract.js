@@ -8,11 +8,27 @@ const schemaPath = path.join(__dirname, 'schema.sql');
 const definitionKeywords = new Set(['CHECK', 'CONSTRAINT', 'FOREIGN', 'KEY', 'PRIMARY', 'UNIQUE']);
 
 class SchemaVerificationError extends Error {
-    constructor(issues) {
+    constructor(issues, mismatches = []) {
         super(`Kanonisches Datenbankschema verletzt: ${issues.join('; ')}`);
         this.name = 'SchemaVerificationError';
         this.issues = issues;
+        this.mismatches = mismatches;
+        this.mismatchDetails = mismatches.map(mismatch =>
+            `${mismatch.kind} ${mismatch.identifier}: ` +
+            `expected=${JSON.stringify(mismatch.expected)} actual=${JSON.stringify(mismatch.actual)}`
+        );
     }
+}
+
+function recordSchemaMismatch(issues, mismatches, {
+    actual,
+    expected,
+    identifier,
+    kind,
+    message
+}) {
+    issues.push(message);
+    mismatches.push({ identifier, kind, expected: expected ?? null, actual: actual ?? null });
 }
 
 function splitDefinitions(definitions) {
@@ -265,8 +281,7 @@ function schemaPartsEqual(actual, expected) {
     return isDeepStrictEqual(actual, expected);
 }
 
-async function verifyCanonicalSchema(connection) {
-    const contract = parseCanonicalSchema();
+async function verifyCanonicalSchema(connection, contract = parseCanonicalSchema()) {
     const [tableRows] = await connection.execute(
         `SELECT TABLE_NAME AS tableName FROM information_schema.TABLES
          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = 'BASE TABLE'`
@@ -324,29 +339,64 @@ async function verifyCanonicalSchema(connection) {
     }
 
     const issues = [];
+    const mismatches = [];
     for (const [tableName, table] of contract) {
         if (!actualTables.has(tableName)) {
-            issues.push(`Tabelle ${tableName} fehlt`);
+            recordSchemaMismatch(issues, mismatches, {
+                actual: null,
+                expected: { present: true },
+                identifier: tableName,
+                kind: 'table',
+                message: `Tabelle ${tableName} fehlt`
+            });
             continue;
         }
         for (const [columnName, expected] of table.columns) {
             const key = `${tableName}.${columnName}`;
             const actual = actualColumns.get(key);
-            if (!actual) issues.push(`Spalte ${key} fehlt`);
+            if (!actual) {
+                recordSchemaMismatch(issues, mismatches, {
+                    actual: null,
+                    expected,
+                    identifier: key,
+                    kind: 'column',
+                    message: `Spalte ${key} fehlt`
+                });
+            }
             else if (!schemaPartsEqual(actual, expected)) {
-                issues.push(`Spalte ${key} weicht in Typ, NULL-Regel oder Default ab`);
+                recordSchemaMismatch(issues, mismatches, {
+                    actual,
+                    expected,
+                    identifier: key,
+                    kind: 'column',
+                    message: `Spalte ${key} weicht in Typ, NULL-Regel oder Default ab`
+                });
             }
         }
         for (const [indexName, expected] of table.indexes) {
-            const actual = actualIndexes.get(`${tableName}.${indexName}`);
+            const key = `${tableName}.${indexName}`;
+            const actual = actualIndexes.get(key);
             if (!actual || !schemaPartsEqual(actual, expected)) {
-                issues.push(`Index ${tableName}.${indexName} fehlt oder weicht ab`);
+                recordSchemaMismatch(issues, mismatches, {
+                    actual,
+                    expected,
+                    identifier: key,
+                    kind: 'index',
+                    message: `Index ${key} fehlt oder weicht ab`
+                });
             }
         }
         for (const [constraintName, expected] of table.constraints) {
-            const actual = actualConstraints.get(`${tableName}.${constraintName}`);
+            const key = `${tableName}.${constraintName}`;
+            const actual = actualConstraints.get(key);
             if (!actual || !schemaPartsEqual(actual, expected)) {
-                issues.push(`Constraint ${tableName}.${constraintName} fehlt oder weicht ab`);
+                recordSchemaMismatch(issues, mismatches, {
+                    actual,
+                    expected,
+                    identifier: key,
+                    kind: 'constraint',
+                    message: `Constraint ${key} fehlt oder weicht ab`
+                });
             }
         }
     }
@@ -355,7 +405,7 @@ async function verifyCanonicalSchema(connection) {
     if (weekdays.length !== 7 || weekdays.some((weekday, index) => weekday !== index)) {
         issues.push('opening_hours muss genau die Wochentage 0 bis 6 enthalten');
     }
-    if (issues.length > 0) throw new SchemaVerificationError(issues);
+    if (issues.length > 0) throw new SchemaVerificationError(issues, mismatches);
     return {
         columns: [...contract.values()].reduce((sum, table) => sum + table.columns.size, 0),
         constraints: [...contract.values()].reduce((sum, table) => sum + table.constraints.size, 0),
@@ -370,5 +420,6 @@ module.exports = {
     normalizeGenerationExpression,
     normalizeReferentialRule,
     removeRedundantExpressionParentheses,
-    parseCanonicalSchema, schemaPartsEqual, splitDefinitions, verifyCanonicalSchema
+    parseCanonicalSchema, recordSchemaMismatch, schemaPartsEqual, splitDefinitions,
+    verifyCanonicalSchema
 };

@@ -16,13 +16,15 @@ const {
 } = require('../database/bootstrap');
 const { migrations } = require('../database/migrations/automatic');
 const {
+    SchemaVerificationError,
     buildActualForeignKeys,
     normalizeActualColumn,
     normalizeCheckClause,
     normalizeGenerationExpression,
     normalizeReferentialRule,
     parseCanonicalSchema,
-    schemaPartsEqual
+    schemaPartsEqual,
+    verifyCanonicalSchema
 } = require('../database/schemaContract');
 const {
     setupTokenMatches,
@@ -279,6 +281,79 @@ test('normalisiert echte MySQL-Klammerung ohne AND/OR-Präzedenz zu verlieren', 
     assert.notEqual(
         normalizeCheckClause("(is_open = 0 AND open_time IS NULL) OR is_open = 1"),
         normalizeCheckClause("is_open = 0 AND (open_time IS NULL OR is_open = 1)")
+    );
+});
+
+test('liefert bei Schema-Drift normalisierte Expected/Actual-Metadaten', async () => {
+    const contract = new Map([['test_table', {
+        columns: new Map([['generated_value', {
+            columnType: 'varchar(255)',
+            defaultValue: null,
+            generationExpression: "case when status='active' then source_value else null end",
+            generationStorage: 'stored',
+            nullable: true
+        }]]),
+        constraints: new Map([['chk_test_status', {
+            type: 'CHECK',
+            clause: normalizeCheckClause("status IN ('active', 'converted')")
+        }]]),
+        indexes: new Map()
+    }]]);
+    const resultSets = [
+        [[{ tableName: 'test_table' }]],
+        [[{
+            tableName: 'test_table',
+            columnName: 'generated_value',
+            columnType: 'varchar(255)',
+            isNullable: 'YES',
+            defaultValue: null,
+            extra: 'STORED GENERATED',
+            generationExpression: "case when (`status` = _utf8mb4'active') then `source_value` else NULL end"
+        }]],
+        [[]],
+        [[]],
+        [[{
+            tableName: 'test_table',
+            constraintName: 'chk_test_status',
+            checkClause: "`status` in (_utf8mb4'active',_utf8mb4'archived')"
+        }]],
+        [[...Array(7).keys()].map(weekday => ({ weekday }))]
+    ];
+    const connection = {
+        async execute() {
+            return resultSets.shift();
+        }
+    };
+
+    await assert.rejects(
+        verifyCanonicalSchema(connection, contract),
+        error => {
+            assert.equal(error instanceof SchemaVerificationError, true);
+            assert.deepEqual(error.issues, [
+                'Constraint test_table.chk_test_status fehlt oder weicht ab'
+            ]);
+            assert.deepEqual(error.mismatches, [{
+                identifier: 'test_table.chk_test_status',
+                kind: 'constraint',
+                expected: {
+                    type: 'CHECK',
+                    clause: "status in('active','converted')"
+                },
+                actual: {
+                    clause: "status in('active','archived')",
+                    type: 'CHECK'
+                }
+            }]);
+            assert.deepEqual(error.mismatchDetails, [
+                'constraint test_table.chk_test_status: ' +
+                'expected={"type":"CHECK","clause":"status in(\'active\',\'converted\')"} ' +
+                'actual={"clause":"status in(\'active\',\'archived\')","type":"CHECK"}'
+            ]);
+            const inspectedError = require('node:util').inspect(error);
+            assert.match(inspectedError, /expected=.*converted/u);
+            assert.match(inspectedError, /actual=.*archived/u);
+            return true;
+        }
     );
 });
 
