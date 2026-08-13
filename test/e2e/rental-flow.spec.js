@@ -141,6 +141,8 @@ test('verarbeitet den paginierten Kundenauftrags-Vertrag und zeigt vor Rückgabe
     }));
 
     await page.goto('/profile.html');
+    await page.locator('#nav-orders').click();
+    await expect(page.locator('#ordersView')).toBeVisible();
 
     await expect(page.locator('#myOrdersList')).toContainText('R202600001');
     await expect(page.locator('#myOrdersList')).toContainText('1 Bestellung gefunden');
