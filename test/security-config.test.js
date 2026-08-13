@@ -2,12 +2,19 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const {
   assertSecurityEnvironment,
   createHelmetOptions,
   createSessionCookieOptions,
   isProduction
 } = require('../config/security');
+
+const serverSource = fs.readFileSync(
+  path.resolve(__dirname, '../segnitz_rental.js'),
+  'utf8'
+);
 
 test('detects production environments', () => {
   assert.equal(isProduction({ NODE_ENV: 'production' }), true);
@@ -68,5 +75,16 @@ test('enables a restrictive baseline CSP', () => {
   assert.deepEqual(
     productionOptions.contentSecurityPolicy.directives.upgradeInsecureRequests,
     []
+  );
+});
+
+test('rate limits item cancellation and return mutations after admin authorization', () => {
+  assert.match(
+    serverSource,
+    /app\.put\(\s*'\/admin\/order-items\/:itemId\/cancel',\s*checkAdmin,\s*adminReturnMutationLimiter,/
+  );
+  assert.match(
+    serverSource,
+    /app\.put\(\s*'\/admin\/order-items\/:itemId\/return',\s*checkAdmin,\s*adminReturnMutationLimiter,/
   );
 });

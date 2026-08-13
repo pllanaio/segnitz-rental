@@ -215,6 +215,17 @@ const loginLimiter = rateLimit({
     message: 'Zu viele Login-Versuche. Bitte versuche es in 15 Minuten erneut.'
 });
 
+const adminReturnMutationLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 60,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: req => String(req.session?.user || 'unknown-admin'),
+    message: {
+        error: 'Zu viele Rückgabeaktionen. Bitte versuche es in einigen Minuten erneut.'
+    }
+});
+
 app.post('/login', loginLimiter, async (req, res) => {
     const { username, password } = req.body;
 
@@ -2586,7 +2597,7 @@ app.put('/admin/orders/:id/cancel', checkAdmin, async (req, res) => {
     }
 });
 
-app.put('/admin/order-items/:itemId/cancel', checkAdmin, async (req, res) => {
+app.put('/admin/order-items/:itemId/cancel', checkAdmin, adminReturnMutationLimiter, async (req, res) => {
     let connection;
 
     try {
@@ -3382,7 +3393,7 @@ function calculateLateDays(actualReturnDate, plannedReturnDate) {
     return Math.ceil((actual - planned) / (1000 * 60 * 60 * 24));
 }
 
-app.put('/admin/order-items/:itemId/return', checkAdmin, async (req, res) => {
+app.put('/admin/order-items/:itemId/return', checkAdmin, adminReturnMutationLimiter, async (req, res) => {
     let connection;
 
     try {
