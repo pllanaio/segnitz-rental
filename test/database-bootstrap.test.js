@@ -16,9 +16,13 @@ const {
 } = require('../database/bootstrap');
 const { migrations } = require('../database/migrations/automatic');
 const {
+    buildActualForeignKeys,
+    normalizeActualColumn,
     normalizeCheckClause,
     normalizeGenerationExpression,
-    parseCanonicalSchema
+    normalizeReferentialRule,
+    parseCanonicalSchema,
+    schemaPartsEqual
 } = require('../database/schemaContract');
 const {
     setupTokenMatches,
@@ -182,6 +186,78 @@ test('normalisiert MySQL-Zeichensatzpräfixe ohne Lifecycle-Werte zu verändern'
         normalizeCheckClause("status IN ('pending_payment')"),
         normalizeCheckClause("status IN ('pending')")
     );
+});
+
+test('normalisiert die CHECK_CLAUSE-Darstellung aus MySQL 8.4 ohne Drift zu verbergen', () => {
+    const mysqlClause =
+        "((`status` in (_utf8mb4'setup_required' collate utf8mb4_0900_ai_ci," +
+        "_utf8mb4'ready' collate utf8mb4_0900_ai_ci)))";
+
+    assert.equal(
+        normalizeCheckClause(mysqlClause),
+        normalizeCheckClause("status IN ('setup_required', 'ready')")
+    );
+    assert.notEqual(
+        normalizeCheckClause(mysqlClause),
+        normalizeCheckClause("status IN ('setup_required', 'disabled')")
+    );
+    assert.notEqual(
+        normalizeCheckClause("status COLLATE utf8mb4_bin = 'ready'"),
+        normalizeCheckClause("status = 'ready'")
+    );
+});
+
+test('normalisiert echte MySQL-8.4-Fremdschlüsselmetadaten strukturell', () => {
+    const actual = buildActualForeignKeys([
+        {
+            tableName: 'rental_product_categories',
+            constraintName: 'fk_rpc_product',
+            columnName: 'product_id',
+            referencedTable: 'rental_products',
+            referencedColumn: 'id',
+            deleteRule: 'CASCADE',
+            updateRule: 'NO ACTION'
+        }
+    ]).get('rental_product_categories.fk_rpc_product');
+    const expected = {
+        columns: ['product_id'],
+        deleteRule: 'CASCADE',
+        referencedColumns: ['id'],
+        referencedTable: 'rental_products',
+        type: 'FOREIGN KEY',
+        updateRule: 'RESTRICT'
+    };
+
+    assert.equal(normalizeReferentialRule('NO ACTION'), 'RESTRICT');
+    assert.equal(schemaPartsEqual(actual, expected), true);
+    assert.equal(schemaPartsEqual(actual, { ...expected, deleteRule: 'SET NULL' }), false);
+});
+
+test('normalisiert echte MySQL-8.4-Metadaten gespeicherter generierter Spalten', () => {
+    const carts = parseCanonicalSchema().get('rental_carts').columns;
+    const guestColumn = normalizeActualColumn({
+        columnType: 'varchar(255)',
+        defaultValue: null,
+        extra: 'STORED GENERATED',
+        generationExpression:
+            "(case when ((`status` = _utf8mb4'active') and (`user_email` is null)) " +
+            'then `session_id` else NULL end)',
+        isNullable: 'YES'
+    });
+    const userColumn = normalizeActualColumn({
+        columnType: 'varchar(255)',
+        defaultValue: null,
+        extra: 'STORED GENERATED',
+        generationExpression:
+            "(case when ((`status` = _utf8mb4'active') and (`user_email` is not null)) " +
+            'then lower(`user_email`) else NULL end)',
+        isNullable: 'YES'
+    });
+
+    assert.deepEqual(guestColumn, carts.get('active_guest_session_id'));
+    assert.deepEqual(userColumn, carts.get('active_user_email'));
+    assert.equal(schemaPartsEqual(guestColumn, { ...guestColumn, columnType: 'varchar(191)' }), false);
+    assert.equal(schemaPartsEqual(guestColumn, { ...guestColumn, defaultValue: 'active' }), false);
 });
 
 test('normalisiert echte MySQL-Klammerung ohne AND/OR-Präzedenz zu verlieren', () => {

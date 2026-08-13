@@ -1,6 +1,7 @@
 'use strict';
 
 const path = require('node:path');
+const { isDeepStrictEqual } = require('node:util');
 const { readSqlStatements } = require('./sql');
 
 const schemaPath = path.join(__dirname, 'schema.sql');
@@ -58,9 +59,26 @@ function normalizeDefault(value) {
     return normalized.replace(/^current_timestamp\(\)$/u, 'current_timestamp');
 }
 
+function normalizeReferentialRule(rule) {
+    const normalized = String(rule || 'RESTRICT').toUpperCase().replace(/\s+/gu, ' ').trim();
+
+    // MySQL enforces NO ACTION and RESTRICT identically and reports an
+    // omitted rule as NO ACTION in REFERENTIAL_CONSTRAINTS. schema.sql uses
+    // RESTRICT explicitly where that is useful documentation, so compare the
+    // two spellings as the same effective rule.
+    return normalized === 'NO ACTION' ? 'RESTRICT' : normalized;
+}
+
 function normalizeCheckClause(clause) {
     let normalized = String(clause || '')
         .replace(/`/gu, '')
+        // MySQL 8.4 can serialize an introduced string literal together with
+        // the table's default collation. Remove only that literal annotation;
+        // explicit column/expression collations remain part of the contract.
+        .replace(
+            /(_utf8mb4'(?:''|[^'])*')\s+collate\s+utf8mb4_0900_ai_ci\b/giu,
+            '$1'
+        )
         .replace(
             /(^|[\s,(=])_(?:utf8mb4|utf8mb3|utf8|latin1|binary)(?=')/giu,
             '$1'
@@ -155,12 +173,17 @@ function parseConstraint(definition) {
     const updateMatch = /\bON\s+UPDATE\s+(CASCADE|RESTRICT|SET\s+NULL|NO\s+ACTION)/iu.exec(options);
     return [name, {
         columns: parseIdentifierList(foreignKeyMatch[1]),
-        deleteRule: (deleteMatch?.[1] || 'RESTRICT').toUpperCase().replace(/\s+/gu, ' '),
+        deleteRule: normalizeReferentialRule(deleteMatch?.[1]),
         referencedColumns: parseIdentifierList(foreignKeyMatch[3]),
         referencedTable: foreignKeyMatch[2],
         type: 'FOREIGN KEY',
-        updateRule: (updateMatch?.[1] || 'RESTRICT').toUpperCase().replace(/\s+/gu, ' ')
+        updateRule: normalizeReferentialRule(updateMatch?.[1])
     }];
+}
+
+function columnDefinitionWithoutGenerationExpression(definition) {
+    const generationStart = definition.search(/\bGENERATED\s+ALWAYS\s+AS\b/iu);
+    return generationStart === -1 ? definition : definition.slice(0, generationStart);
 }
 
 function parseCanonicalSchema(statements = readSqlStatements(schemaPath)) {
@@ -196,12 +219,13 @@ function parseCanonicalSchema(statements = readSqlStatements(schemaPath)) {
             if (!typeMatch) continue;
             const defaultMatch = /\bDEFAULT\s+(NULL|'(?:[^']|'')*'|-?\d+(?:\.\d+)?|CURRENT_TIMESTAMP(?:\(\))?)/iu.exec(columnMatch[2]);
             const generationMatch = /\bGENERATED\s+ALWAYS\s+AS\s*\(([\s\S]*)\)\s+(STORED|VIRTUAL)\b/iu.exec(columnMatch[2]);
+            const columnAttributes = columnDefinitionWithoutGenerationExpression(columnMatch[2]);
             table.columns.set(columnMatch[1], {
                 columnType: normalizeColumnType(typeMatch[1]),
                 defaultValue: normalizeDefault(defaultMatch?.[1]),
                 generationExpression: normalizeGenerationExpression(generationMatch?.[1]),
                 generationStorage: generationMatch?.[2].toLowerCase() || null,
-                nullable: !/\bNOT\s+NULL\b/iu.test(columnMatch[2])
+                nullable: !/\bNOT\s+NULL\b/iu.test(columnAttributes)
             });
         }
         tables.set(tableName, table);
@@ -215,14 +239,30 @@ function buildActualForeignKeys(rows) {
         const key = `${row.tableName}.${row.constraintName}`;
         if (!foreignKeys.has(key)) {
             foreignKeys.set(key, {
-                columns: [], deleteRule: row.deleteRule, referencedColumns: [],
-                referencedTable: row.referencedTable, type: 'FOREIGN KEY', updateRule: row.updateRule
+                columns: [], deleteRule: normalizeReferentialRule(row.deleteRule), referencedColumns: [],
+                referencedTable: row.referencedTable, type: 'FOREIGN KEY',
+                updateRule: normalizeReferentialRule(row.updateRule)
             });
         }
         foreignKeys.get(key).columns.push(row.columnName);
         foreignKeys.get(key).referencedColumns.push(row.referencedColumn);
     }
     return foreignKeys;
+}
+
+function normalizeActualColumn(row) {
+    return {
+        columnType: normalizeColumnType(row.columnType),
+        defaultValue: normalizeDefault(row.defaultValue),
+        generationExpression: normalizeGenerationExpression(row.generationExpression),
+        generationStorage: /STORED\s+GENERATED/iu.test(row.extra) ? 'stored' :
+            /VIRTUAL\s+GENERATED/iu.test(row.extra) ? 'virtual' : null,
+        nullable: String(row.isNullable).toUpperCase() === 'YES'
+    };
+}
+
+function schemaPartsEqual(actual, expected) {
+    return isDeepStrictEqual(actual, expected);
 }
 
 async function verifyCanonicalSchema(connection) {
@@ -266,14 +306,10 @@ async function verifyCanonicalSchema(connection) {
     const [openingHourRows] = await connection.execute('SELECT weekday FROM opening_hours ORDER BY weekday');
 
     const actualTables = new Set(tableRows.map(row => row.tableName));
-    const actualColumns = new Map(columnRows.map(row => [`${row.tableName}.${row.columnName}`, {
-        columnType: normalizeColumnType(row.columnType),
-        defaultValue: normalizeDefault(row.defaultValue),
-        generationExpression: normalizeGenerationExpression(row.generationExpression),
-        generationStorage: /STORED\s+GENERATED/iu.test(row.extra) ? 'stored' :
-            /VIRTUAL\s+GENERATED/iu.test(row.extra) ? 'virtual' : null,
-        nullable: row.isNullable === 'YES'
-    }]));
+    const actualColumns = new Map(columnRows.map(row => [
+        `${row.tableName}.${row.columnName}`,
+        normalizeActualColumn(row)
+    ]));
     const actualIndexes = new Map();
     for (const row of indexRows) {
         const key = `${row.tableName}.${row.indexName}`;
@@ -297,19 +333,19 @@ async function verifyCanonicalSchema(connection) {
             const key = `${tableName}.${columnName}`;
             const actual = actualColumns.get(key);
             if (!actual) issues.push(`Spalte ${key} fehlt`);
-            else if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+            else if (!schemaPartsEqual(actual, expected)) {
                 issues.push(`Spalte ${key} weicht in Typ, NULL-Regel oder Default ab`);
             }
         }
         for (const [indexName, expected] of table.indexes) {
             const actual = actualIndexes.get(`${tableName}.${indexName}`);
-            if (!actual || JSON.stringify(actual) !== JSON.stringify(expected)) {
+            if (!actual || !schemaPartsEqual(actual, expected)) {
                 issues.push(`Index ${tableName}.${indexName} fehlt oder weicht ab`);
             }
         }
         for (const [constraintName, expected] of table.constraints) {
             const actual = actualConstraints.get(`${tableName}.${constraintName}`);
-            if (!actual || JSON.stringify(actual) !== JSON.stringify(expected)) {
+            if (!actual || !schemaPartsEqual(actual, expected)) {
                 issues.push(`Constraint ${tableName}.${constraintName} fehlt oder weicht ab`);
             }
         }
@@ -329,8 +365,10 @@ async function verifyCanonicalSchema(connection) {
 }
 
 module.exports = {
-    SchemaVerificationError, normalizeCheckClause, normalizeColumnType, normalizeDefault,
+    SchemaVerificationError, buildActualForeignKeys, normalizeActualColumn,
+    normalizeCheckClause, normalizeColumnType, normalizeDefault,
     normalizeGenerationExpression,
+    normalizeReferentialRule,
     removeRedundantExpressionParentheses,
-    parseCanonicalSchema, splitDefinitions, verifyCanonicalSchema
+    parseCanonicalSchema, schemaPartsEqual, splitDefinitions, verifyCanonicalSchema
 };
