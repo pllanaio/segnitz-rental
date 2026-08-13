@@ -233,12 +233,12 @@ test('führt die Rückgabemaske mit Schadensdokumentation und wählbarem Zahlung
     await expect(page).toHaveURL(/\/backend\.html$/);
     await page.getByRole('button', { name: 'Bestellungen' }).click();
 
-    const completedCard = page.locator('#orderList .card', { hasText: 'R202600078' });
+    const completedCard = page.locator('#ordersList .card', { hasText: 'R202600078' });
     await expect(completedCard).toContainText('Zurückgegeben');
     await expect(completedCard).not.toContainText('Teilweise zurückgegeben');
     await expect(completedCard).toContainText('Erstattung offen');
 
-    const openCard = page.locator('#orderList .card', { hasText: 'R202600077' });
+    const openCard = page.locator('#ordersList .card', { hasText: 'R202600077' });
     await openCard.getByRole('button', { name: 'Details' }).click();
     await expect(page.getByRole('link', { name: 'Zahlungslink öffnen' })).toHaveAttribute(
         'href',
