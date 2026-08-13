@@ -34,8 +34,11 @@ Integrationstest-Suiten verwenden damit dieselbe Struktur wie die Anwendung.
 
 Der produktive Dump wird nicht als Testfixture eingecheckt, weil er Personen-,
 Zahlungs- und Signaturdaten enthält. Für eine bestehende Datenbank aus dem Dump vom
-13.08.2026 liegt die einmalige Strukturmigration unter
-[`database/migrations/20260813_align_dump_with_application.sql`](../database/migrations/20260813_align_dump_with_application.sql).
+13.08.2026 müssen die einmaligen Migrationen
+[`20260813_align_dump_with_application.sql`](../database/migrations/20260813_align_dump_with_application.sql)
+und anschließend
+[`20260813_harden_return_lifecycle.sql`](../database/migrations/20260813_harden_return_lifecycle.sql)
+ausgeführt werden.
 
 Die Integrationstests prüfen unter anderem:
 
@@ -48,7 +51,10 @@ Die Integrationstests prüfen unter anderem:
 - vollständigen Storno inklusive Online-Erstattung
 - Zahlung bei Abholung und Abholsperre bei offenen Beträgen
 - Abholung und ordnungsgemäße Rückgabe
-- vollständige Kautionsauszahlung
+- Rückgaben mit Schaden, Verspätung und frei gewählter Bar- oder Online-Nachzahlung
+- Teilrückgabe mit anschließender Positionsstornierung
+- offene, fehlgeschlagene und abgeschlossene Kautionserstattungen
+- Migration historisch inkonsistenter Rückgabezustände
 
 Mollie und Microsoft Graph werden im Testmodus deterministisch ersetzt. Es werden weder echte Zahlungen noch echte E-Mails ausgelöst.
 
@@ -61,7 +67,8 @@ npm run test:e2e
 ```
 
 Die Browser-Suite prüft den Produktkatalog, dynamische Warenkorb- und
-Bestellaktionen, Fehlermeldungen beim Login, Kunden- und Adminlogin sowie die
+Bestellaktionen, Fehlermeldungen beim Login, Kunden- und Adminlogin, die
+Rückgabemaske einschließlich Schadensdokumentation und Zahlungsweg sowie die
 ausgelieferte CSP ohne Inline-Skriptfreigabe.
 
 Alle drei Teststufen laufen automatisch in GitHub Actions.

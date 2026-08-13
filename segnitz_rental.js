@@ -79,8 +79,8 @@ const {
 } = require('./services/mollieService');
 
 const {
-    calculateReturnSettlement,
-    deriveOrderStatusFromInitialPayment,
+    calculateReturnSettlement, deriveAggregateReturnStatus,
+    deriveOrderStatusFromInitialPayment, deriveReturnCaseStatus,
     isDuplicateKeyError,
     isOpenPaymentStatus,
     isStrictIsoDate,
@@ -168,6 +168,38 @@ app.use(session({
     cookie: createSessionCookieOptions()
 }));
 
+function getOrCreateAdminCsrfToken(req) {
+    if (!req.session.adminCsrfToken) {
+        req.session.adminCsrfToken = crypto.randomBytes(32).toString('hex');
+    }
+
+    return req.session.adminCsrfToken;
+}
+
+function adminCsrfTokensEqual(providedToken, expectedToken) {
+    const expectedTokenBuffer = Buffer.from(expectedToken, 'utf8');
+    const providedTokenBuffer = Buffer.from(providedToken, 'utf8');
+
+    return expectedTokenBuffer.length > 0 &&
+        providedTokenBuffer.length === expectedTokenBuffer.length &&
+        crypto.timingSafeEqual(providedTokenBuffer, expectedTokenBuffer);
+}
+
+function requireAdminCsrfToken(req, res, next) {
+    const expectedToken = req.session && req.session.adminCsrfToken;
+    const providedToken = String(req.get('X-CSRF-Token') || '');
+    const tokensMatch = typeof expectedToken === 'string' &&
+        adminCsrfTokensEqual(providedToken, req.session.adminCsrfToken);
+
+    if (!tokensMatch) {
+        return res.status(403).json({
+            error: 'Ungültiges oder fehlendes CSRF-Token.'
+        });
+    }
+
+    return next();
+}
+
 app.use('/', productRoutes);
 app.use('/', cartRoutes);
 
@@ -177,10 +209,15 @@ app.get('/', (req, res) => {
 });
 
 app.get('/auth-status', (req, res) => {
+    const csrfToken = req.session.user && req.session.role === 'global_admin'
+        ? getOrCreateAdminCsrfToken(req)
+        : null;
+
     res.json({
         loggedIn: !!req.session.user,
         user: req.session.user || null,
-        role: req.session.role || null
+        role: req.session.role || null,
+        ...(csrfToken ? { csrfToken } : {})
     });
 });
 
@@ -202,6 +239,16 @@ const loginLimiter = rateLimit({
     legacyHeaders: false,
     skipSuccessfulRequests: true,
     message: 'Zu viele Login-Versuche. Bitte versuche es in 15 Minuten erneut.'
+});
+
+const adminReturnMutationLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 60,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: {
+        error: 'Zu viele Rückgabeaktionen. Bitte versuche es in einigen Minuten erneut.'
+    }
 });
 
 app.post('/login', loginLimiter, async (req, res) => {
@@ -292,7 +339,10 @@ app.post('/login', loginLimiter, async (req, res) => {
                         rows[0].role === 'global_admin'
                             ? '/backend.html'
                             : '/index.html'
-                    )
+                    ),
+                    ...(rows[0].role === 'global_admin'
+                        ? { csrfToken: getOrCreateAdminCsrfToken(req) }
+                        : {})
                 });
             } catch (sessionError) {
 
@@ -1220,6 +1270,7 @@ app.get('/my-orders', async (req, res) => {
                 ro.payment_method,
                 ro.payment_status,
                 ro.return_status,
+                ro.return_case_status,
                 DATE_FORMAT(ro.created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
                 DATE_FORMAT(ro.reserved_until, '%Y-%m-%d %H:%i:%s') AS reserved_until,
                 DATE_FORMAT(ro.returned_at, '%Y-%m-%d %H:%i:%s') AS returned_at,
@@ -1337,6 +1388,7 @@ app.get('/my-orders/:id', async (req, res) => {
                 status,
                 payment_method,
                 payment_status,
+                return_case_status,
                 DATE_FORMAT(reserved_until, '%Y-%m-%d %H:%i:%s') AS reserved_until,
                 DATE_FORMAT(returned_at, '%Y-%m-%d %H:%i:%s') AS returned_at,
                 confirmation_json,
@@ -1448,6 +1500,7 @@ ORDER BY id DESC`,
                 payment_method AS paymentMethod,
                 payment_status AS paymentStatus,
                 amount,
+                checkout_url AS checkoutUrl,
                 note,
                 SHA2(CONCAT(
                     payment_type,
@@ -1573,18 +1626,61 @@ async function refreshCancelledOrderPaymentStatus(connection, orderId) {
 
 async function refreshReturnCaseStatus(connection, orderId) {
     const [orderRows] = await connection.execute(
-        `SELECT status FROM rental_orders WHERE id = ? LIMIT 1`,
+        `SELECT status, payment_status
+         FROM rental_orders
+         WHERE id = ?
+         LIMIT 1`,
         [orderId]
     );
     if (orderRows.length === 0) return null;
 
     const [paymentRows] = await connection.execute(
-        `SELECT COUNT(*) AS openCount
+        `SELECT
+            SUM(payment_status IN ('pending', 'open', 'authorized')) AS pendingCount,
+            SUM(payment_status IN ('failed', 'cancelled', 'expired')) AS failedCount
          FROM rental_order_payments
          WHERE order_id = ?
          AND payment_type IN ('rental_adjustment', 'return_additional_charge')
          AND payment_status IN (
             'pending', 'open', 'authorized', 'failed', 'cancelled', 'expired'
+         )`,
+        [orderId]
+    );
+    const [refundRows] = await connection.execute(
+        `SELECT
+            SUM(refund.payment_status IN ('pending', 'open', 'authorized')) AS pendingCount,
+            SUM(refund.payment_status IN ('failed', 'cancelled', 'expired')) AS failedCount
+         FROM rental_order_payments refund
+         WHERE refund.order_id = ?
+         AND refund.payment_type IN (
+            'deposit_refund',
+            'order_cancellation_refund',
+            'duplicate_payment_refund'
+         )
+         AND NOT EXISTS (
+            SELECT 1
+            FROM rental_order_payments newerRefund
+            WHERE newerRefund.order_id = refund.order_id
+            AND newerRefund.payment_type = refund.payment_type
+            AND newerRefund.order_item_id <=> refund.order_item_id
+            AND newerRefund.payment_method = refund.payment_method
+            AND newerRefund.mollie_payment_id <=> refund.mollie_payment_id
+            AND newerRefund.id > refund.id
+         )`,
+        [orderId]
+    );
+    const [uncreatedRefundRows] = await connection.execute(
+        `SELECT COUNT(*) AS missingCount
+         FROM rental_order_items item
+         WHERE item.order_id = ?
+         AND item.item_status LIKE 'returned_%'
+         AND COALESCE(item.deposit_refund_amount, 0) > 0
+         AND NOT EXISTS (
+            SELECT 1
+            FROM rental_order_payments refund
+            WHERE refund.order_id = item.order_id
+            AND refund.order_item_id = item.id
+            AND refund.payment_type = 'deposit_refund'
          )`,
         [orderId]
     );
@@ -1597,24 +1693,23 @@ async function refreshReturnCaseStatus(connection, orderId) {
         [orderId]
     );
 
-    const orderStatus = String(orderRows[0].status || '');
-    const hasOpenPayment = Number(paymentRows[0]?.openCount || 0) > 0;
-    const pickedUpCount = Number(itemRows[0]?.pickedUpCount || 0);
-    const returnedCount = Number(itemRows[0]?.returnedCount || 0);
-    let returnCaseStatus = null;
+    const returnCaseStatus = deriveReturnCaseStatus({
+        orderStatus: orderRows[0].status,
+        orderPaymentStatus: orderRows[0].payment_status,
+        pickedUpCount: Number(itemRows[0]?.pickedUpCount || 0),
+        returnedCount: Number(itemRows[0]?.returnedCount || 0),
+        pendingPaymentCount: Number(paymentRows[0]?.pendingCount || 0),
+        failedPaymentCount: Number(paymentRows[0]?.failedCount || 0),
+        pendingRefundCount:
+            Number(refundRows[0]?.pendingCount || 0) +
+            Number(uncreatedRefundRows[0]?.missingCount || 0),
+        failedRefundCount: Number(refundRows[0]?.failedCount || 0)
+    });
 
-    if (orderStatus === 'returned') {
-        returnCaseStatus = hasOpenPayment ? 'payment_pending' : 'closed';
-    } else if (pickedUpCount > 0) {
-        returnCaseStatus = returnedCount > 0 ? 'partial' : 'open';
-    }
-
-    if (returnCaseStatus) {
-        await connection.execute(
-            `UPDATE rental_orders SET return_case_status = ? WHERE id = ?`,
-            [returnCaseStatus, orderId]
-        );
-    }
+    await connection.execute(
+        `UPDATE rental_orders SET return_case_status = ? WHERE id = ?`,
+        [returnCaseStatus, orderId]
+    );
 
     return returnCaseStatus;
 }
@@ -2013,6 +2108,7 @@ app.get('/admin/orders', checkAdmin, async (req, res) => {
                 ro.payment_method,
                 ro.payment_status,
                 ro.return_status,
+                ro.return_case_status,
                 DATE_FORMAT(ro.created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
                 DATE_FORMAT(ro.reserved_until, '%Y-%m-%d %H:%i:%s') AS reserved_until,
                 DATE_FORMAT(ro.returned_at, '%Y-%m-%d %H:%i:%s') AS returned_at,
@@ -2196,6 +2292,7 @@ ORDER BY id DESC`,
         payment_status AS paymentStatus,
         amount,
         mollie_payment_id AS molliePaymentId,
+        checkout_url AS checkoutUrl,
         DATE_FORMAT(paid_at, '%Y-%m-%d %H:%i:%s') AS paidAt,
         note,
         DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS createdAt,
@@ -2528,7 +2625,7 @@ app.put('/admin/orders/:id/cancel', checkAdmin, async (req, res) => {
     }
 });
 
-app.put('/admin/order-items/:itemId/cancel', checkAdmin, async (req, res) => {
+app.put('/admin/order-items/:itemId/cancel', checkAdmin, requireAdminCsrfToken, adminReturnMutationLimiter, async (req, res) => {
     let connection;
 
     try {
@@ -2720,6 +2817,42 @@ FOR UPDATE`,
             if (item.cart_id) {
                 await connection.execute('DELETE FROM rental_carts WHERE id = ?', [item.cart_id]);
             }
+        } else if (
+            Number(itemStates.activeCount || 0) === 0 &&
+            Number(itemStates.pickedUpCount || 0) === 0 &&
+            Number(itemStates.returnedCount || 0) > 0
+        ) {
+            const [returnedItems] = await connection.execute(
+                `SELECT return_status, return_processed_by_user_id
+                 FROM rental_order_items
+                 WHERE order_id = ?
+                 AND item_status LIKE 'returned_%'`,
+                [item.order_id]
+            );
+            const finalOrderReturnStatus = deriveAggregateReturnStatus(
+                returnedItems.map(returnedItem => returnedItem.return_status)
+            ) || 'returned_ok';
+            const returnProcessedByUserId = returnedItems.find(
+                returnedItem => returnedItem.return_processed_by_user_id
+            )?.return_processed_by_user_id || null;
+
+            await connection.execute(
+                `UPDATE rental_orders
+                 SET status = 'returned',
+                     return_status = ?,
+                     returned_at = COALESCE(returned_at, NOW()),
+                     return_processed_by_user_id = COALESCE(
+                        return_processed_by_user_id,
+                        ?
+                     )
+                 WHERE id = ?`,
+                [
+                    finalOrderReturnStatus,
+                    returnProcessedByUserId,
+                    item.order_id
+                ]
+            );
+            await refreshReturnCaseStatus(connection, item.order_id);
         } else if (Number(itemStates.pickedUpCount || 0) > 0) {
             await connection.execute(
                 `UPDATE rental_orders
@@ -2779,28 +2912,59 @@ FOR UPDATE`,
     }
 });
 
-app.post('/admin/order-items/:itemId/return-images', checkAdmin, uploadReturnImages.array('images', 10), async (req, res) => {
+async function removeUploadedFiles(files = []) {
+    await Promise.allSettled(
+        files
+            .map(file => file?.path)
+            .filter(Boolean)
+            .map(filePath => fsp.unlink(filePath))
+    );
+}
+
+app.post('/admin/order-items/:itemId/return-images', checkAdmin, requireAdminCsrfToken, adminReturnMutationLimiter, uploadReturnImages.array('images', 10), async (req, res) => {
     let connection;
+    let committed = false;
+    const uploadedFiles = Array.isArray(req.files) ? req.files : [];
 
     try {
+        if (uploadedFiles.length === 0) {
+            return res.status(400).json({ error: 'Es wurden keine Rückgabefotos übermittelt.' });
+        }
+
         connection = await mysql.createConnection(dbConfig);
+        await connection.beginTransaction();
 
         const [items] = await connection.execute(
-            `SELECT id, order_id
+            `SELECT id, order_id, item_status
              FROM rental_order_items
              WHERE id = ?
-             LIMIT 1`,
+             LIMIT 1
+             FOR UPDATE`,
             [req.params.itemId]
         );
 
         if (items.length === 0) {
+            await connection.rollback();
+            await removeUploadedFiles(uploadedFiles);
             return res.status(404).json({ error: 'Bestellposition nicht gefunden.' });
         }
 
         const item = items[0];
+
+        if (
+            item.item_status !== 'picked_up' &&
+            !String(item.item_status || '').startsWith('returned_')
+        ) {
+            await connection.rollback();
+            await removeUploadedFiles(uploadedFiles);
+            return res.status(409).json({
+                error: 'Rückgabefotos sind erst nach der Abholung zulässig.'
+            });
+        }
+
         const uploadedByUserId = await getUserIdByEmail(connection, req.session.user);
 
-        for (const file of req.files) {
+        for (const file of uploadedFiles) {
             const imagePath = `img/returns/${file.filename}`;
 
             await connection.execute(
@@ -2811,9 +2975,21 @@ app.post('/admin/order-items/:itemId/return-images', checkAdmin, uploadReturnIma
             );
         }
 
+        await connection.commit();
+        committed = true;
+
         res.json({ message: 'Rückgabefotos für den Artikel wurden hochgeladen.' });
 
     } catch (error) {
+        if (connection && !committed) {
+            try {
+                await connection.rollback();
+            } catch (rollbackError) {
+                console.error('Rollback der Rückgabefotos fehlgeschlagen:', rollbackError);
+            }
+        }
+
+        if (!committed) await removeUploadedFiles(uploadedFiles);
         console.error('Fehler beim Hochladen der Artikel-Rückgabefotos:', error);
         res.status(500).json({ error: 'Rückgabefotos konnten nicht hochgeladen werden.' });
     } finally {
@@ -3171,6 +3347,12 @@ FOR UPDATE`,
                 redirectUrl: `${baseUrl}/index.html?payment=extension&orderId=${encodeURIComponent(item.order_id)}&paymentType=rental_adjustment&itemId=${encodeURIComponent(req.params.itemId)}`
             });
 
+            paymentUrl = getMollieCheckoutUrl(payment);
+
+            if (!paymentUrl) {
+                throw new Error('Mollie Checkout-URL für die Verlängerung fehlt.');
+            }
+
             await connection.execute(
                 `INSERT INTO rental_order_payments
          (
@@ -3180,22 +3362,18 @@ FOR UPDATE`,
             payment_method,
             payment_status,
             amount,
-            mollie_payment_id
+            mollie_payment_id,
+            checkout_url
          )
-         VALUES (?, ?, 'rental_adjustment', 'online', 'pending', ?, ?)`,
+         VALUES (?, ?, 'rental_adjustment', 'online', 'pending', ?, ?, ?)`,
                 [
                     item.order_id,
                     req.params.itemId,
                     amountDue,
-                    payment.id
+                    payment.id,
+                    paymentUrl
                 ]
             );
-
-            paymentUrl = getMollieCheckoutUrl(payment);
-
-            if (!paymentUrl) {
-                throw new Error('Mollie Checkout-URL für die Verlängerung fehlt.');
-            }
         }
 
         await connection.commit();
@@ -3252,7 +3430,7 @@ function calculateLateDays(actualReturnDate, plannedReturnDate) {
     return Math.ceil((actual - planned) / (1000 * 60 * 60 * 24));
 }
 
-app.put('/admin/order-items/:itemId/return', checkAdmin, async (req, res) => {
+app.put('/admin/order-items/:itemId/return', checkAdmin, requireAdminCsrfToken, adminReturnMutationLimiter, async (req, res) => {
     let connection;
 
     try {
@@ -3262,13 +3440,9 @@ app.put('/admin/order-items/:itemId/return', checkAdmin, async (req, res) => {
             adjustedRentalStart,
             adjustedRentalEnd,
             adjustedPricePerDay,
-            returnStatus,
             isDamaged,
             damageDescription,
-            isLate,
             lateDescription,
-            depositDecision,
-            depositDeductionPercent,
             depositDeductionReason,
             additionalChargeReason,
             additionalChargeAmount,
@@ -3297,6 +3471,7 @@ app.put('/admin/order-items/:itemId/return', checkAdmin, async (req, res) => {
 ro.order_no,
 ro.customer_email,
 ro.payment_method,
+ro.payment_status AS order_payment_status,
 ro.mollie_payment_id,
 ro.mollie_customer_id,
 ro.mollie_mandate_id
@@ -3396,6 +3571,33 @@ FOR UPDATE`,
             });
         }
 
+        const normalizedDamageDescription = String(damageDescription || '').trim();
+        const normalizedAdditionalChargeReason = String(additionalChargeReason || '').trim();
+        const normalizedAdditionalChargePaymentMethod = String(
+            additionalChargePaymentMethod || 'online'
+        ).trim().toLowerCase();
+
+        if (normalizedIsDamaged && !normalizedDamageDescription) {
+            await connection.rollback();
+            return res.status(400).json({
+                error: 'Für einen beschädigten Artikel ist eine Schadensbeschreibung erforderlich.'
+            });
+        }
+
+        if (normalizedAdditionalChargeAmount > 0 && !normalizedAdditionalChargeReason) {
+            await connection.rollback();
+            return res.status(400).json({
+                error: 'Für eine Zusatzforderung ist eine Begründung erforderlich.'
+            });
+        }
+
+        if (!['cash', 'online'].includes(normalizedAdditionalChargePaymentMethod)) {
+            await connection.rollback();
+            return res.status(400).json({
+                error: 'Die Zahlungsart der Zusatzforderung ist ungültig.'
+            });
+        }
+
         const finalReturnStatus =
             normalizedIsDamaged && normalizedIsLate
                 ? 'returned_late_damaged'
@@ -3478,7 +3680,7 @@ FOR UPDATE`,
         const customerAdditionalDue = settlement.customerAdditionalDue;
         const settlementReasons = [
             String(depositDeductionReason || '').trim(),
-            normalizedAdditionalChargeAmount > 0 ? String(additionalChargeReason || 'Zusatzkosten aus Rückgabe').trim() : '',
+            normalizedAdditionalChargeAmount > 0 ? normalizedAdditionalChargeReason : '',
             openRentalAdjustmentAmount > 0 ? `Offene Mietverlängerung: ${openRentalAdjustmentAmount.toFixed(2)} €` : '',
             lateFee > 0 ? `Verspätung (${lateDays} Tag${lateDays === 1 ? '' : 'e'}): ${lateFee.toFixed(2)} €` : ''
         ].filter(Boolean);
@@ -3517,7 +3719,7 @@ FOR UPDATE`,
                 finalReturnStatus,
                 finalReturnStatus,
                 normalizedIsDamaged ? 1 : 0,
-                normalizedIsDamaged ? String(damageDescription || '').trim() || 'Beschädigung bei Rückgabe festgestellt' : null,
+                normalizedIsDamaged ? normalizedDamageDescription : null,
                 normalizedIsLate ? 1 : 0,
                 normalizedIsLate ? String(lateDescription || '').trim() || `${lateDays} Tag${lateDays === 1 ? '' : 'e'} verspätet` : null,
                 finalDepositDecision,
@@ -3525,7 +3727,7 @@ FOR UPDATE`,
                 depositDeductionAmount,
                 calculatedDepositRefundAmount,
                 settlementReasons.join(' | ') || null,
-                additionalChargeReason || null,
+                normalizedAdditionalChargeReason || null,
                 normalizedAdditionalChargeAmount,
                 returnNotes || null,
                 processedByUserId,
@@ -3541,23 +3743,6 @@ FOR UPDATE`,
             [item.order_id]
         );
 
-        const [openBlockingPaymentsBeforeOrderClose] = await connection.execute(
-            `SELECT id
-     FROM rental_order_payments
-     WHERE order_id = ?
-     AND order_item_id = ?
-     AND payment_type IN ('rental_adjustment', 'return_additional_charge')
-     AND payment_status IN (
-        'pending', 'open', 'authorized', 'failed', 'cancelled', 'expired'
-     )
-     LIMIT 1`,
-            [item.order_id, req.params.itemId]
-        );
-
-        const hasBlockingPaymentForReturnCase =
-            openBlockingPaymentsBeforeOrderClose.length > 0 ||
-            customerAdditionalDue > 0;
-
         if (remainingOpenItems[0].count === 0) {
             const [returnStatusRows] = await connection.execute(
                 `SELECT return_status AS returnStatus
@@ -3567,40 +3752,30 @@ FOR UPDATE`,
                 [item.order_id]
             );
 
-            const itemReturnStatuses = returnStatusRows.map(row => row.returnStatus);
-
-            let finalOrderReturnStatus = 'returned_ok';
-
-            if (itemReturnStatuses.includes('returned_late_damaged')) {
-                finalOrderReturnStatus = 'returned_late_damaged';
-            } else if (itemReturnStatuses.includes('returned_damaged')) {
-                finalOrderReturnStatus = 'returned_damaged';
-            } else if (itemReturnStatuses.includes('returned_late')) {
-                finalOrderReturnStatus = 'returned_late';
-            }
+            const finalOrderReturnStatus = deriveAggregateReturnStatus(
+                returnStatusRows.map(row => row.returnStatus)
+            ) || 'returned_ok';
 
             await connection.execute(
                 `UPDATE rental_orders
          SET status = 'returned',
              return_status = ?,
              returned_at = NOW(),
-             return_case_status = CASE
-    WHEN ? THEN 'payment_pending'
-    ELSE 'closed'
-END
+             return_processed_by_user_id = COALESCE(return_processed_by_user_id, ?)
          WHERE id = ?`,
                 [
                     finalOrderReturnStatus,
-                    hasBlockingPaymentForReturnCase,
+                    processedByUserId,
                     item.order_id
                 ]
             );
         } else {
             await connection.execute(
                 `UPDATE rental_orders
-         SET return_case_status = 'partial'
+         SET return_case_status = 'partial',
+             return_processed_by_user_id = COALESCE(return_processed_by_user_id, ?)
          WHERE id = ?`,
-                [item.order_id]
+                [processedByUserId, item.order_id]
             );
         }
 
@@ -3660,25 +3835,34 @@ END
                     [item.order_id, item.mollie_payment_id]
                 );
 
-                if (payments.length > 0) {
-                    const originalPaymentId = payments[0].mollie_payment_id;
+                const originalPaymentId = payments[0]?.mollie_payment_id || (
+                    item.order_payment_status === 'paid'
+                        ? item.mollie_payment_id
+                        : null
+                );
 
-                    try {
-                        const refund = await createMollieRefundForPayment({
-                            paymentId: originalPaymentId,
-                            amount: calculatedDepositRefundAmount,
-                            description: `Kautionsrückerstattung ${item.order_no} - ${item.title} (#${req.params.itemId})`,
-                            metadata: {
-                                orderId: String(item.order_id),
-                                itemId: String(req.params.itemId),
-                                type: 'deposit_refund'
-                            },
-                            idempotencyKey: `deposit-refund-${item.order_id}-${req.params.itemId}`
-                        });
-                        const refundStatus = mapMollieRefundStatus(refund.status);
+                if (!originalPaymentId) {
+                    throw new Error(
+                        'Für die Kautionsrückerstattung fehlt eine bezahlte Mollie-Ausgangszahlung.'
+                    );
+                }
 
-                        await connection.execute(
-                            `INSERT INTO rental_order_payments
+                try {
+                    const refund = await createMollieRefundForPayment({
+                        paymentId: originalPaymentId,
+                        amount: calculatedDepositRefundAmount,
+                        description: `Kautionsrückerstattung ${item.order_no} - ${item.title} (#${req.params.itemId})`,
+                        metadata: {
+                            orderId: String(item.order_id),
+                            itemId: String(req.params.itemId),
+                            type: 'deposit_refund'
+                        },
+                        idempotencyKey: `deposit-refund-${item.order_id}-${req.params.itemId}`
+                    });
+                    const refundStatus = mapMollieRefundStatus(refund.status);
+
+                    await connection.execute(
+                        `INSERT INTO rental_order_payments
                  (
                     order_id,
                     order_item_id,
@@ -3693,23 +3877,22 @@ END
                  )
                  VALUES (?, ?, 'deposit_refund', 'online', ?, ?, ?, ?, ?,
                     CASE WHEN ? = 'paid' THEN NOW() ELSE NULL END)`,
-                            [
-                                item.order_id,
-                                req.params.itemId,
-                                refundStatus,
-                                -Math.abs(calculatedDepositRefundAmount),
-                                originalPaymentId,
-                                refund.id,
-                                refundStatus === 'paid'
-                                    ? 'Kaution automatisch per Mollie erstattet'
-                                    : 'Kautionsrückerstattung bei Mollie beauftragt',
-                                refundStatus
-                            ]
-                        );
-                    } catch (refundError) {
-                        console.error('Mollie-Refund fehlgeschlagen:', refundError);
-                        throw refundError;
-                    }
+                        [
+                            item.order_id,
+                            req.params.itemId,
+                            refundStatus,
+                            -Math.abs(calculatedDepositRefundAmount),
+                            originalPaymentId,
+                            refund.id,
+                            refundStatus === 'paid'
+                                ? 'Kaution automatisch per Mollie erstattet'
+                                : 'Kautionsrückerstattung bei Mollie beauftragt',
+                            refundStatus
+                        ]
+                    );
+                } catch (refundError) {
+                    console.error('Mollie-Refund fehlgeschlagen:', refundError);
+                    throw refundError;
                 }
             } else if (initialPaymentMethod === 'cash') {
                 await connection.execute(
@@ -3732,6 +3915,10 @@ END
                         'Kaution zur Barauszahlung vorgemerkt'
                     ]
                 );
+            } else {
+                throw new Error(
+                    'Für die Kautionsrückerstattung fehlt eine gültige ursprüngliche Zahlungsart.'
+                );
             }
         }
 
@@ -3750,7 +3937,7 @@ END
         if (
             customerAdditionalDue > 0 &&
             existingOpenReturnCharges.length === 0 &&
-            initialPaymentMethod === 'cash'
+            normalizedAdditionalChargePaymentMethod === 'cash'
         ) {
             await connection.execute(
                 `INSERT INTO rental_order_payments
@@ -3801,14 +3988,16 @@ END
                 payment_method,
                 payment_status,
                 amount,
-                mollie_payment_id
+                mollie_payment_id,
+                checkout_url
              )
-             VALUES (?, ?, 'return_additional_charge', 'online', 'pending', ?, ?)`,
+             VALUES (?, ?, 'return_additional_charge', 'online', 'pending', ?, ?, ?)`,
                     [
                         item.order_id,
                         req.params.itemId,
                         customerAdditionalDue,
-                        payment.id
+                        payment.id,
+                        checkoutUrl
                 ]
             );
 
@@ -3828,7 +4017,7 @@ END
                     item,
                     returnChargeEmail.checkoutUrl,
                     customerAdditionalDue,
-                    additionalChargeReason
+                    normalizedAdditionalChargeReason
                 );
             } catch (mailError) {
                 console.error('Rückgabe gespeichert, aber Nachzahlungs-Mail fehlgeschlagen:', mailError);
@@ -5103,7 +5292,7 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
     }
 });
 
-app.post('/admin/order-payments/:id/retry-refund', checkAdmin, async (req, res) => {
+app.post('/admin/order-payments/:id/retry-refund', checkAdmin, requireAdminCsrfToken, adminReturnMutationLimiter, async (req, res) => {
     let connection;
 
     try {
@@ -5240,6 +5429,8 @@ app.post('/admin/order-payments/:id/retry-refund', checkAdmin, async (req, res) 
             await refreshCancelledOrderPaymentStatus(connection, failedRefund.order_id);
         }
 
+        await refreshReturnCaseStatus(connection, failedRefund.order_id);
+
         await connection.commit();
 
         return res.json({
@@ -5265,7 +5456,7 @@ app.post('/admin/order-payments/:id/retry-refund', checkAdmin, async (req, res) 
     }
 });
 
-app.post('/admin/order-payments/manual-refund', checkAdmin, async (req, res) => {
+app.post('/admin/order-payments/manual-refund', checkAdmin, requireAdminCsrfToken, adminReturnMutationLimiter, async (req, res) => {
     const {
         orderId,
         orderItemId,
@@ -5374,6 +5565,8 @@ app.post('/admin/order-payments/manual-refund', checkAdmin, async (req, res) => 
                 await refreshCancelledOrderPaymentStatus(connection, orderId);
             }
 
+            await refreshReturnCaseStatus(connection, orderId);
+
             await connection.commit();
 
             try {
@@ -5421,6 +5614,7 @@ async function refundEligibleDepositsAfterPaymentsSettled(connection, orderId) {
             ro.order_no,
             ro.customer_email,
             ro.payment_method,
+            ro.payment_status AS order_payment_status,
             ro.mollie_payment_id AS order_mollie_payment_id
          FROM rental_order_items roi
          JOIN rental_orders ro ON ro.id = roi.order_id
@@ -5487,11 +5681,17 @@ async function refundEligibleDepositsAfterPaymentsSettled(connection, orderId) {
                 [orderId, item.order_mollie_payment_id]
             );
 
-            if (payments.length === 0) {
-                continue;
-            }
+            const originalPaymentId = payments[0]?.mollie_payment_id || (
+                item.order_payment_status === 'paid'
+                    ? item.order_mollie_payment_id
+                    : null
+            );
 
-            const originalPaymentId = payments[0].mollie_payment_id;
+            if (!originalPaymentId) {
+                throw new Error(
+                    `Für die Kautionsrückerstattung von Position #${item.id} fehlt eine bezahlte Mollie-Ausgangszahlung.`
+                );
+            }
 
             const refund = await createMollieRefundForPayment({
                 paymentId: originalPaymentId,
@@ -5555,6 +5755,10 @@ async function refundEligibleDepositsAfterPaymentsSettled(connection, orderId) {
                     -Math.abs(refundAmount),
                     'Kaution zur Barauszahlung vorgemerkt nach Zahlung aller Ausstände'
                 ]
+            );
+        } else {
+            throw new Error(
+                `Für die Kautionsrückerstattung von Position #${item.id} fehlt eine gültige ursprüngliche Zahlungsart.`
             );
         }
     }

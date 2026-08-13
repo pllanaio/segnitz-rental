@@ -2,12 +2,19 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const {
   assertSecurityEnvironment,
   createHelmetOptions,
   createSessionCookieOptions,
   isProduction
 } = require('../config/security');
+
+const serverSource = fs.readFileSync(
+  path.resolve(__dirname, '../segnitz_rental.js'),
+  'utf8'
+);
 
 test('detects production environments', () => {
   assert.equal(isProduction({ NODE_ENV: 'production' }), true);
@@ -68,5 +75,32 @@ test('enables a restrictive baseline CSP', () => {
   assert.deepEqual(
     productionOptions.contentSecurityPolicy.directives.upgradeInsecureRequests,
     []
+  );
+});
+
+test('protects changed return mutations with CSRF validation and rate limiting', () => {
+  assert.match(
+    serverSource,
+    /adminCsrfTokensEqual\(\s*providedToken,\s*req\.session\.adminCsrfToken\s*\)/
+  );
+  assert.match(
+    serverSource,
+    /app\.put\(\s*'\/admin\/order-items\/:itemId\/cancel',\s*checkAdmin,\s*requireAdminCsrfToken,\s*adminReturnMutationLimiter,/
+  );
+  assert.match(
+    serverSource,
+    /app\.post\(\s*'\/admin\/order-items\/:itemId\/return-images',\s*checkAdmin,\s*requireAdminCsrfToken,\s*adminReturnMutationLimiter,/
+  );
+  assert.match(
+    serverSource,
+    /app\.put\(\s*'\/admin\/order-items\/:itemId\/return',\s*checkAdmin,\s*requireAdminCsrfToken,\s*adminReturnMutationLimiter,/
+  );
+  assert.match(
+    serverSource,
+    /app\.post\(\s*'\/admin\/order-payments\/:id\/retry-refund',\s*checkAdmin,\s*requireAdminCsrfToken,\s*adminReturnMutationLimiter,/
+  );
+  assert.match(
+    serverSource,
+    /app\.post\(\s*'\/admin\/order-payments\/manual-refund',\s*checkAdmin,\s*requireAdminCsrfToken,\s*adminReturnMutationLimiter,/
   );
 });
