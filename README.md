@@ -1,6 +1,17 @@
 ## Segnitz Rental Manager
 Modular rental tool for several types of products including tools, cars and construction machinery with database integration, pdf signing option and payment gateway integration
 
+## Datenbank
+
+Das kanonische MySQL-Schema liegt unter `database/schema.sql`. Automatisierte Tests
+erstellen daraus eine leere Datenbank neu; der Datenbankname muss dafür `test` oder
+`ci` als eigenes Namenssegment enthalten (zum Beispiel `segnitz_test`). Reale
+Kunden-, Zahlungs- und Signaturdaten werden nicht als Testdaten verwendet.
+
+Für eine bestehende Datenbank aus dem Dump vom 13.08.2026 ist nach einem Backup die
+einmalige Migration
+`database/migrations/20260813_align_dump_with_application.sql` vorgesehen.
+
 ## Authors and acknowledgment
 Leon Pllana @ Segnitz Rental
 
@@ -23,7 +34,6 @@ Bootstrap v5.3.3 - https://getbootstrap.com <br>
 @popperjs/core v2.11.8 - https://github.com/floating-ui/floating-ui#readme <br>
 Signature Pad v2.3.2 - https://github.com/szimek/signature_pad <br>
 Tempus Dominus v6.9.4 - https://getdatepicker.com/<br>
-
 
 
 

@@ -1,9 +1,47 @@
 let myOrders = [];
-let orderIdToCancel = null;
 let currentMyOrderPage = 1;
 const myOrdersPerPage = 10;
+let myOrderPagination = {
+    page: 1,
+    limit: myOrdersPerPage,
+    total: 0,
+    totalPages: 1
+};
+let myOrderFilterOptions = {
+    years: [],
+    months: [],
+    statuses: [],
+    returnStatuses: [],
+    paymentStatuses: []
+};
+
+function handleProfileActionClick(event) {
+    const button = event.target.closest('[data-profile-action]');
+
+    if (!button || button.disabled) return;
+
+    const action = button.dataset.profileAction;
+    const orderId = Number(button.dataset.orderId);
+    const productId = Number(button.dataset.productId);
+
+    const actions = {
+        'open-order-details': () => openMyOrderDetails(orderId),
+        'change-order-page': () => changeMyOrderPage(Number(button.dataset.direction)),
+        'submit-review': () => submitProductReview(productId, orderId)
+    };
+
+    actions[action]?.();
+}
 
 document.addEventListener('DOMContentLoaded', async () => {
+    document.addEventListener('click', handleProfileActionClick);
+
+    document.querySelectorAll('[data-profile-view]').forEach(button => {
+        button.addEventListener('click', () => switchProfileView(button.dataset.profileView));
+    });
+
+    document.getElementById('profileLogoutButton')?.addEventListener('click', logout);
+
     try {
         const response = await fetch('/my-profile');
 
@@ -48,9 +86,9 @@ function initMyOrderFilters() {
         const element = document.getElementById(id);
 
         if (element) {
-            element.addEventListener('change', () => {
+            element.addEventListener('change', async () => {
                 currentMyOrderPage = 1;
-                renderMyOrders();
+                await loadMyOrders();
             });
         }
     });
@@ -99,12 +137,12 @@ function setMyOrderSelectOptions(selectId, values, labelMap = {}) {
 function populateMyOrderFilters() {
     setMyOrderSelectOptions(
         'myOrderYearFilter',
-        [...new Set(myOrders.map(getMyOrderYear))].sort().reverse()
+        myOrderFilterOptions.years || []
     );
 
     setMyOrderSelectOptions(
         'myOrderMonthFilter',
-        [...new Set(myOrders.map(getMyOrderMonth))],
+        myOrderFilterOptions.months || [],
         {
             '01': 'Januar',
             '02': 'Februar',
@@ -121,9 +159,9 @@ function populateMyOrderFilters() {
         }
     );
 
-    setMyOrderSelectOptions('myOrderStatusFilter', [...new Set(myOrders.map(order => order.status || ''))]);
-    setMyOrderSelectOptions('myOrderReturnStatusFilter', [...new Set(myOrders.map(order => deriveMyOrderReturnStatus(order) || ''))]);
-    setMyOrderSelectOptions('myOrderPaymentStatusFilter', [...new Set(myOrders.map(order => order.payment_status || ''))]);
+    setMyOrderSelectOptions('myOrderStatusFilter', myOrderFilterOptions.statuses || []);
+    setMyOrderSelectOptions('myOrderReturnStatusFilter', myOrderFilterOptions.returnStatuses || []);
+    setMyOrderSelectOptions('myOrderPaymentStatusFilter', myOrderFilterOptions.paymentStatuses || []);
 }
 
 async function loadMyOrders() {
@@ -132,7 +170,24 @@ async function loadMyOrders() {
     if (!container) return;
 
     try {
-        const response = await fetch('/my-orders');
+        const params = new URLSearchParams({
+            page: String(currentMyOrderPage),
+            limit: String(myOrdersPerPage)
+        });
+
+        const filters = {
+            year: getMyOrderFilterValue('myOrderYearFilter'),
+            month: getMyOrderFilterValue('myOrderMonthFilter'),
+            status: getMyOrderFilterValue('myOrderStatusFilter'),
+            returnStatus: getMyOrderFilterValue('myOrderReturnStatusFilter'),
+            paymentStatus: getMyOrderFilterValue('myOrderPaymentStatusFilter')
+        };
+
+        Object.entries(filters).forEach(([key, value]) => {
+            if (value) params.set(key, value);
+        });
+
+        const response = await fetch(`/my-orders?${params.toString()}`);
         const result = await response.json();
 
         if (!response.ok) {
@@ -140,24 +195,15 @@ async function loadMyOrders() {
             return;
         }
 
-        myOrders = result;
+        myOrders = Array.isArray(result.items) ? result.items : [];
+        myOrderPagination = result.pagination || myOrderPagination;
+        myOrderFilterOptions = result.filterOptions || myOrderFilterOptions;
         populateMyOrderFilters();
         renderMyOrders();
     } catch (error) {
         console.error('Fehler beim Laden der Bestellungen:', error);
         container.innerHTML = '<div class="alert alert-danger">Bestellungen konnten nicht geladen werden.</div>';
     }
-}
-
-function canCancelOrder(order) {
-    const status = String(order.status || '').trim().toLowerCase();
-    const items = order.items || [];
-
-    const hasRentalStartingTodayOrPast = items.some(item =>
-        isRentalStartTodayOrPast(item.rentalStart)
-    );
-
-    return ['reserved', 'confirmed'].includes(status) && !hasRentalStartingTodayOrPast;
 }
 
 function renderMyOrders() {
@@ -168,38 +214,17 @@ function renderMyOrders() {
         return;
     }
 
-    const yearFilter = getMyOrderFilterValue('myOrderYearFilter');
-    const monthFilter = getMyOrderFilterValue('myOrderMonthFilter');
-    const statusFilter = getMyOrderFilterValue('myOrderStatusFilter');
-    const returnStatusFilter = getMyOrderFilterValue('myOrderReturnStatusFilter');
-    const paymentStatusFilter = getMyOrderFilterValue('myOrderPaymentStatusFilter');
-
-    const visibleOrders = myOrders
-        .filter(order => {
-            const returnStatus = deriveMyOrderReturnStatus(order);
-
-            if (yearFilter && getMyOrderYear(order) !== yearFilter) return false;
-            if (monthFilter && getMyOrderMonth(order) !== monthFilter) return false;
-            if (statusFilter && String(order.status || '') !== statusFilter) return false;
-            if (returnStatusFilter && String(returnStatus || '') !== returnStatusFilter) return false;
-            if (paymentStatusFilter && String(order.payment_status || '') !== paymentStatusFilter) return false;
-
-            return true;
-        })
-        .sort((a, b) => String(getMyOrderDate(b)).localeCompare(String(getMyOrderDate(a))));
+    const visibleOrders = myOrders;
 
     if (visibleOrders.length === 0) {
         container.innerHTML = '<div class="alert alert-info">Keine Bestellungen für diese Filter gefunden.</div>';
         return;
     }
 
-    const totalPages = Math.max(Math.ceil(visibleOrders.length / myOrdersPerPage), 1);
+    const totalPages = Math.max(Number(myOrderPagination.totalPages || 1), 1);
     currentMyOrderPage = Math.min(currentMyOrderPage, totalPages);
 
-    const startIndex = (currentMyOrderPage - 1) * myOrdersPerPage;
-    const paginatedOrders = visibleOrders.slice(startIndex, startIndex + myOrdersPerPage);
-
-    container.innerHTML = paginatedOrders.map(order => `
+    container.innerHTML = visibleOrders.map(order => `
         <div class="card mb-2">
             <div class="card-body d-flex justify-content-between align-items-center gap-3">
                 <div>
@@ -211,7 +236,7 @@ function renderMyOrders() {
 
                 <div class="d-flex gap-2 flex-wrap justify-content-end">
                     <button type="button" class="btn btn-outline-primary btn-sm"
-                        onclick="openMyOrderDetails(${order.id})">
+                        data-profile-action="open-order-details" data-order-id="${order.id}">
                         Details anzeigen
                     </button>
                 </div>
@@ -224,20 +249,20 @@ function renderMyOrders() {
 
     pagination.innerHTML = `
         <div class="text-muted small">
-            ${visibleOrders.length} Bestellung${visibleOrders.length === 1 ? '' : 'en'} gefunden,
+            ${Number(myOrderPagination.total || 0)} Bestellung${Number(myOrderPagination.total || 0) === 1 ? '' : 'en'} gefunden,
             Seite ${currentMyOrderPage} von ${totalPages}
         </div>
 
         <div class="btn-group">
             <button type="button" class="btn btn-outline-primary btn-sm"
                 ${currentMyOrderPage <= 1 ? 'disabled' : ''}
-                onclick="changeMyOrderPage(-1)">
+                data-profile-action="change-order-page" data-direction="-1">
                 Zurück
             </button>
 
             <button type="button" class="btn btn-outline-primary btn-sm"
                 ${currentMyOrderPage >= totalPages ? 'disabled' : ''}
-                onclick="changeMyOrderPage(1)">
+                data-profile-action="change-order-page" data-direction="1">
                 Weiter
             </button>
         </div>
@@ -246,9 +271,9 @@ function renderMyOrders() {
     container.appendChild(pagination);
 }
 
-function changeMyOrderPage(direction) {
+async function changeMyOrderPage(direction) {
     currentMyOrderPage += direction;
-    renderMyOrders();
+    await loadMyOrders();
 }
 
 async function openMyOrderDetails(orderId) {
@@ -269,13 +294,6 @@ async function openMyOrderDetails(orderId) {
         console.error('Fehler beim Laden der Bestellung:', error);
         showAlert('Bestellung konnte nicht geladen werden.', 'danger');
     }
-}
-
-function cancelMyOrder(orderId) {
-    orderIdToCancel = orderId;
-
-    const modal = new bootstrap.Modal(document.getElementById('cancelOrderModal'));
-    modal.show();
 }
 
 function renderMyOrderDetails(order) {
@@ -422,19 +440,14 @@ function renderReviewCard(item, orderId) {
 
                 <button type="button"
                     class="btn btn-outline-success btn-sm"
-                    onclick="submitProductReview(${item.productId}, ${orderId})">
+                    data-profile-action="submit-review"
+                    data-product-id="${item.productId}"
+                    data-order-id="${orderId}">
                     Bewertung speichern
                 </button>
             </div>
         </div>
     `;
-}
-
-function isRentalStartTodayOrPast(rentalStart) {
-    if (!rentalStart) return false;
-
-    const today = new Date().toISOString().slice(0, 10);
-    return String(rentalStart).slice(0, 10) <= today;
 }
 
 function renderMyOrderItemCard(item, order) {
@@ -587,11 +600,23 @@ function calculateRentalDays(startDate, endDate) {
     );
 }
 
+function calculateLateDays(actualReturnDate, plannedReturnDate) {
+    if (!actualReturnDate || !plannedReturnDate) return 0;
+
+    const actual = new Date(String(actualReturnDate).slice(0, 10));
+    const planned = new Date(String(plannedReturnDate).slice(0, 10));
+
+    if (actual <= planned) return 0;
+    return Math.ceil((actual - planned) / (1000 * 60 * 60 * 24));
+}
+
 function calculateOrderItemFinancials(item) {
     const originalDays = calculateRentalDays(item.rentalStart, item.rentalEnd);
 
     const effectiveStart = item.adjustedRentalStart || item.rentalStart;
-    const effectiveEnd = item.actualReturnDate || item.adjustedRentalEnd || item.rentalEnd;
+    const effectiveEnd = item.adjustedRentalEnd || item.rentalEnd;
+    const plannedEnd = item.adjustedRentalEnd || item.rentalEnd;
+    const lateDays = calculateLateDays(item.actualReturnDate || null, plannedEnd);
 
     const effectiveDays = calculateRentalDays(effectiveStart, effectiveEnd);
     const extendedDays = Math.max(
@@ -600,14 +625,17 @@ function calculateOrderItemFinancials(item) {
     );
 
     const pricePerDay = Number(item.adjustedPricePerDay || item.pricePerDay || 0);
+    const lateFee = lateDays * pricePerDay;
     const rentalTotal = effectiveDays * pricePerDay;
     const originalRentalTotal = originalDays * Number(item.pricePerDay || 0);
     const rentalAdjustment = rentalTotal - originalRentalTotal;
 
     const deposit = Number(item.deposit || 0);
-    const depositRefund = Number(item.depositRefundAmount ?? deposit);
-    const depositRetained = Math.max(deposit - depositRefund, 0);
-    const additionalCharge = Number(item.additionalChargeAmount || 0);
+    const isReturned = String(item.itemStatus || '').startsWith('returned_') || Boolean(item.returnedAt);
+    const depositRefund = isReturned ? Number(item.depositRefundAmount || 0) : 0;
+    const depositRetained = isReturned ? Math.max(deposit - depositRefund, 0) : 0;
+    const repairCharge = Number(item.additionalChargeAmount || 0);
+    const additionalCharge = repairCharge + lateFee;
 
     const grossTotalWithDeposit = rentalTotal + deposit;
     const customerAdditionalDue = Math.max(additionalCharge - deposit, 0);
@@ -628,12 +656,16 @@ function calculateOrderItemFinancials(item) {
         customerCredit,
         originalRentalTotal,
         rentalAdjustment,
+        lateDays,
+        lateFee,
+        repairCharge,
         additionalChargeReason: item.additionalChargeReason || ''
     };
 }
 
 function renderMyOrderFinancialSummary(order) {
     const items = order.items || [];
+    const financialItems = items.filter(item => String(item.itemStatus || 'active') !== 'cancelled');
 
     const payments = order.payments || [];
 
@@ -667,7 +699,7 @@ function renderMyOrderFinancialSummary(order) {
         `;
     }).join('');
 
-    const totals = items.reduce((sum, item) => {
+    const totals = financialItems.reduce((sum, item) => {
         const f = calculateOrderItemFinancials(item);
 
         sum.rentalTotal += f.rentalTotal;
@@ -696,16 +728,44 @@ function renderMyOrderFinancialSummary(order) {
     const openRentalAdjustments = payments
         .filter(payment =>
             payment.paymentType === 'rental_adjustment' &&
-            ['pending', 'open', 'authorized'].includes(payment.paymentStatus)
+            ['pending', 'open', 'authorized', 'failed', 'cancelled', 'expired'].includes(payment.paymentStatus)
         )
         .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
 
     const chargeableRentalAdjustment = Math.max(openRentalAdjustments, 0);
+    const unsettledReturnAdditionalCharges = payments
+        .filter(payment =>
+            payment.paymentType === 'return_additional_charge' &&
+            ['pending', 'open', 'authorized', 'failed', 'cancelled', 'expired'].includes(payment.paymentStatus)
+        )
+        .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
 
     const paidDepositRefunds = payments
         .filter(payment =>
             payment.paymentType === 'deposit_refund' &&
             payment.paymentStatus === 'paid'
+        )
+        .reduce((sum, payment) => sum + Math.abs(Number(payment.amount || 0)), 0);
+    const latestCancellationRefundsByTarget = new Map();
+    payments
+        .filter(payment =>
+            ['order_cancellation_refund', 'duplicate_payment_refund'].includes(payment.paymentType)
+        )
+        .sort((a, b) => Number(a.id || 0) - Number(b.id || 0))
+        .forEach(payment => {
+            const key = [
+                payment.refundGroupKey || payment.paymentType,
+                payment.orderItemId || 'order'
+            ].join(':');
+            latestCancellationRefundsByTarget.set(key, payment);
+        });
+    const latestCancellationRefunds = [...latestCancellationRefundsByTarget.values()];
+    const paidCancellationRefunds = latestCancellationRefunds
+        .filter(payment => payment.paymentStatus === 'paid')
+        .reduce((sum, payment) => sum + Math.abs(Number(payment.amount || 0)), 0);
+    const outstandingCancellationRefunds = latestCancellationRefunds
+        .filter(payment =>
+            ['pending', 'open', 'authorized', 'failed', 'cancelled'].includes(payment.paymentStatus)
         )
         .reduce((sum, payment) => sum + Math.abs(Number(payment.amount || 0)), 0);
 
@@ -714,18 +774,20 @@ function renderMyOrderFinancialSummary(order) {
         0
     );
 
+    const legacyReturnAdditionalDue = unsettledReturnAdditionalCharges > 0
+        ? 0
+        : Math.max(totals.customerAdditionalDue - paidReturnAdditionalCharges, 0);
     const totalAdditionalDue =
         chargeableRentalAdjustment +
-        totals.customerAdditionalDue;
+        unsettledReturnAdditionalCharges +
+        legacyReturnAdditionalDue;
 
-    const remainingAdditionalDue = Math.max(
-        totalAdditionalDue - paidReturnAdditionalCharges,
-        0
-    );
+    const remainingAdditionalDue = Math.max(totalAdditionalDue, 0);
 
     const finalBalance =
         remainingAdditionalDue -
-        refundableDeposit;
+        refundableDeposit -
+        outstandingCancellationRefunds;
 
     const finalBalanceClass =
         finalBalance > 0
@@ -809,6 +871,34 @@ function renderMyOrderFinancialSummary(order) {
                 <strong class="text-success">${paidReturnAdditionalCharges.toFixed(2)} €</strong>
             </div>
 
+            ${chargeableRentalAdjustment > 0 ? `
+                <div class="checkout-summary-row">
+                    <span>Noch auszugleichende Mietverlängerungen</span>
+                    <strong class="text-danger">${chargeableRentalAdjustment.toFixed(2)} €</strong>
+                </div>
+            ` : ''}
+
+            ${unsettledReturnAdditionalCharges > 0 ? `
+                <div class="checkout-summary-row">
+                    <span>Noch auszugleichende Rückgabe-Nachzahlungen</span>
+                    <strong class="text-danger">${unsettledReturnAdditionalCharges.toFixed(2)} €</strong>
+                </div>
+            ` : ''}
+
+            ${paidCancellationRefunds > 0 ? `
+                <div class="checkout-summary-row">
+                    <span>Bereits ausgezahlte Erstattungen</span>
+                    <strong class="text-success">${paidCancellationRefunds.toFixed(2)} €</strong>
+                </div>
+            ` : ''}
+
+            ${outstandingCancellationRefunds > 0 ? `
+                <div class="checkout-summary-row">
+                    <span>Noch auszuzahlende Erstattung</span>
+                    <strong class="text-warning">${outstandingCancellationRefunds.toFixed(2)} €</strong>
+                </div>
+            ` : ''}
+
             <div class="checkout-summary-total-row">
                 <span>${finalBalanceLabel}</span>
                 <strong class="${finalBalanceClass}">
@@ -829,7 +919,10 @@ function getStatusBadge(status) {
         active: 'success',
         returned: 'success',
         cancelled: 'dark',
-        picked_up: 'info'
+        picked_up: 'info',
+        pending_payment: 'warning',
+        payment_failed: 'danger',
+        payment_dispute: 'danger'
     };
 
     const labels = {
@@ -840,7 +933,10 @@ function getStatusBadge(status) {
         active: 'Aktiv',
         returned: 'Zurückgegeben',
         cancelled: 'Storniert',
-        picked_up: 'Abgeholt'
+        picked_up: 'Abgeholt',
+        pending_payment: 'Zahlung ausstehend',
+        payment_failed: 'Zahlung fehlgeschlagen',
+        payment_dispute: 'Zahlung strittig'
     };
 
     return `<span class="badge bg-${map[status] || 'secondary'}">${labels[status] || status || '-'}</span>`;
@@ -851,16 +947,30 @@ function getPaymentBadge(status) {
         paid: 'success',
         unpaid: 'warning',
         pending: 'warning',
+        open: 'warning',
+        authorized: 'info',
         failed: 'danger',
-        refunded: 'secondary'
+        cancelled: 'dark',
+        expired: 'dark',
+        refunded: 'secondary',
+        refund_pending: 'warning',
+        refund_failed: 'danger',
+        charged_back: 'danger'
     };
 
     const labels = {
         paid: 'Bezahlt',
         unpaid: 'Unbezahlt',
         pending: 'Ausstehend',
+        open: 'Ausstehend',
+        authorized: 'Autorisiert',
         failed: 'Fehlgeschlagen',
-        refunded: 'Erstattet'
+        cancelled: 'Storniert',
+        expired: 'Abgelaufen',
+        refunded: 'Erstattet',
+        refund_pending: 'Erstattung läuft',
+        refund_failed: 'Erstattung fehlgeschlagen',
+        charged_back: 'Rückbelastet'
     };
 
     return `<span class="badge bg-${map[status] || 'secondary'} me-1">
@@ -869,9 +979,12 @@ function getPaymentBadge(status) {
 }
 
 function deriveMyOrderReturnStatus(order) {
-    const items = order.items || [];
+    const items = (order.items || []).filter(item =>
+        !['cancelled', 'expired'].includes(String(item.itemStatus || '').toLowerCase()) &&
+        item.returnStatus !== 'not_required'
+    );
 
-    if (!items.length) return 'pending';
+    if (!items.length) return 'not_required';
 
     if (items.some(item => item.returnStatus === 'returned_late_damaged')) {
         return 'returned_late_damaged';
@@ -902,7 +1015,8 @@ function getReturnBadge(status, orderStatus = null) {
         returned_ok: 'success',
         returned_late: 'warning',
         returned_damaged: 'danger',
-        returned_late_damaged: 'danger'
+        returned_late_damaged: 'danger',
+        not_required: 'dark'
     };
 
     const labels = {
@@ -910,7 +1024,8 @@ function getReturnBadge(status, orderStatus = null) {
         returned_ok: 'OK',
         returned_late: 'Verspätet',
         returned_damaged: 'Beschädigt',
-        returned_late_damaged: 'Verspätet + beschädigt'
+        returned_late_damaged: 'Verspätet + beschädigt',
+        not_required: 'Nicht erforderlich'
     };
 
     return `<span class="badge bg-${map[status] || 'secondary'}">
@@ -1080,37 +1195,6 @@ function initProfileInputValidation() {
 
 document.addEventListener('DOMContentLoaded', initProfileInputValidation);
 
-document.getElementById('confirmCancelOrderBtn')?.addEventListener('click', async () => {
-    if (!orderIdToCancel) return;
-
-    const modalEl = document.getElementById('cancelOrderModal');
-    const modal = bootstrap.Modal.getInstance(modalEl);
-
-    try {
-        const response = await fetch(`/my-orders/${orderIdToCancel}/cancel`, {
-            method: 'POST'
-        });
-
-        const result = await response.json();
-
-        if (!response.ok) {
-            showAlert(result.error || 'Bestellung konnte nicht storniert werden.', 'danger');
-            return;
-        }
-
-        showAlert(result.message || 'Bestellung wurde storniert.', 'success');
-
-        modal.hide();
-        orderIdToCancel = null;
-
-        await loadMyOrders();
-
-    } catch (error) {
-        console.error('Fehler beim Stornieren der Bestellung:', error);
-        showAlert('Bestellung konnte nicht storniert werden.', 'danger');
-    }
-});
-
 async function submitProductReview(productId, orderId) {
     const ratingInput = document.getElementById(`rating-${productId}`);
     const reviewTextInput = document.getElementById(`reviewText-${productId}`);
@@ -1124,7 +1208,7 @@ async function submitProductReview(productId, orderId) {
     }
 
     const submitButton = document.querySelector(
-        `button[onclick="submitProductReview(${productId}, ${orderId})"]`
+        `button[data-profile-action="submit-review"][data-product-id="${productId}"][data-order-id="${orderId}"]`
     );
 
     if (submitButton) {
@@ -1210,36 +1294,6 @@ document.addEventListener('DOMContentLoaded', () => {
         cleanupBootstrapModalState();
     });
 });
-
-async function cancelMyOrderItem(orderId, itemId) {
-    const confirmed = window.confirm(
-        'Möchten Sie diesen Artikel wirklich stornieren?'
-    );
-
-    if (!confirmed) return;
-
-    try {
-        const response = await fetch(`/my-orders/${orderId}/items/${itemId}/cancel`, {
-            method: 'POST'
-        });
-
-        const result = await response.json();
-
-        if (!response.ok) {
-            showAlert(result.error || 'Artikel konnte nicht storniert werden.', 'danger');
-            return;
-        }
-
-        showAlert(result.message || 'Artikel wurde storniert.', 'success');
-
-        await loadMyOrders();
-        await refreshMyOrderDetails(orderId);
-
-    } catch (error) {
-        console.error('Fehler beim Stornieren des Artikels:', error);
-        showAlert('Artikel konnte nicht storniert werden.', 'danger');
-    }
-}
 
 function logout() {
     fetch('/logout', {

@@ -1,6 +1,8 @@
 function getFormValue(formData, fieldName) {
+    if (!Array.isArray(formData)) return null;
+
     const element = formData
-        .flatMap(step => step.elements)
+        .flatMap(step => Array.isArray(step?.elements) ? step.elements : [])
         .find(el => el.name === fieldName);
 
     return element ? element.value : null;
@@ -25,7 +27,8 @@ async function generateOrderNo(connection) {
          FROM rental_orders
          WHERE order_no LIKE ?
          ORDER BY order_no DESC
-         LIMIT 1`,
+         LIMIT 1
+         FOR UPDATE`,
         [`R${year}%`]
     );
 
@@ -45,7 +48,7 @@ function calculateRentalDays(startDate, endDate) {
     return Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1;
 }
 
-function buildOrderSummary(orderNo, cartItems) {
+function buildOrderSummary(orderNo, cartItems, status = 'reserved') {
     let rentalTotal = 0;
     let depositTotal = 0;
 
@@ -74,7 +77,7 @@ function buildOrderSummary(orderNo, cartItems) {
 
     return {
         orderNo,
-        status: 'reserved',
+        status,
         items,
         totals: {
             rentalTotal,
@@ -91,4 +94,3 @@ module.exports = {
     calculateRentalDays,
     buildOrderSummary
 };
-

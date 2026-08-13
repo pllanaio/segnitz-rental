@@ -365,23 +365,34 @@ async function sendPaymentReceiptEmail(order, payment) {
         deposit: 'Kaution / ursprünglicher Mietauftrag',
         rental_adjustment: 'Nachzahlung wegen Mietzeitraumänderung',
         return_additional_charge: 'Nachzahlung aus Rückgabe',
-        deposit_refund: 'Kautionsrückerstattung'
+        deposit_refund: 'Kautionsrückerstattung',
+        order_cancellation_refund: 'Rückerstattung wegen Stornierung',
+        duplicate_payment_refund: 'Rückerstattung einer Doppelzahlung'
     };
+    const isRefund = Number(payment.amount || 0) < 0 ||
+        String(payment.payment_type || '').endsWith('_refund');
+    const heading = isRefund ? 'Rückerstattung ausgezahlt' : 'Zahlung erhalten';
+    const actionText = isRefund
+        ? 'Wir haben Ihnen den folgenden Betrag zu Ihrem Mietauftrag ausgezahlt.'
+        : 'Wir haben Ihre Zahlung zu Ihrem Mietauftrag erhalten.';
+    const methodLabel = payment.payment_method === 'cash'
+        ? (isRefund ? 'Barauszahlung vor Ort' : 'Barzahlung vor Ort')
+        : (isRefund ? 'Online-Rückerstattung' : 'Onlinezahlung');
 
     await sendGraphMail({
         to: order.customer_email,
-        subject: `Zahlungsbestätigung zu Mietauftrag ${order.order_no}`,
+        subject: `${isRefund ? 'Auszahlungs' : 'Zahlungs'}bestätigung zu Mietauftrag ${order.order_no}`,
         html: `
-            <h2>Zahlung erhalten</h2>
+            <h2>${heading}</h2>
 
             <p>
-                Wir haben Ihre Zahlung zu Mietauftrag
-                <strong>${escapeHtml(order.order_no)}</strong> erhalten.
+                ${actionText}<br>
+                Mietauftrag: <strong>${escapeHtml(order.order_no)}</strong>
             </p>
 
             <p>
-                Betrag: <strong>${Number(payment.amount).toFixed(2)} €</strong><br>
-                Zahlungsart: <strong>${payment.payment_method === 'cash' ? 'Barzahlung vor Ort' : 'Onlinezahlung'}</strong><br>
+                Betrag: <strong>${Math.abs(Number(payment.amount)).toFixed(2)} €</strong><br>
+                Zahlungsart: <strong>${methodLabel}</strong><br>
                 Zweck: <strong>${escapeHtml(paymentTypeLabels[payment.payment_type] || payment.payment_type)}</strong>
             </p>
 
@@ -402,6 +413,23 @@ async function sendReturnSummaryEmail(order, item, payments = []) {
         payment.paymentType === 'return_additional_charge' ||
         payment.payment_type === 'return_additional_charge'
     );
+    const offsetRentalAdjustments = payments.filter(payment =>
+        (payment.paymentType === 'rental_adjustment' || payment.payment_type === 'rental_adjustment') &&
+        (payment.paymentStatus === 'offset' || payment.payment_status === 'offset')
+    );
+    const offsetRentalAdjustmentAmount = offsetRentalAdjustments.reduce(
+        (sum, payment) => sum + Number(payment.amount || 0),
+        0
+    );
+    const plannedReturnDate = item.adjustedRentalEnd || item.adjusted_rental_end || item.rentalEnd || item.rental_end;
+    const actualReturnDate = item.actualReturnDate || item.actual_return_date;
+    const actualDate = actualReturnDate ? new Date(`${String(actualReturnDate).slice(0, 10)}T00:00:00.000Z`) : null;
+    const plannedDate = plannedReturnDate ? new Date(`${String(plannedReturnDate).slice(0, 10)}T00:00:00.000Z`) : null;
+    const lateDays = actualDate && plannedDate && actualDate > plannedDate
+        ? Math.ceil((actualDate - plannedDate) / (1000 * 60 * 60 * 24))
+        : 0;
+    const pricePerDay = Number(item.adjustedPricePerDay || item.adjusted_price_per_day || item.pricePerDay || item.price_per_day || 0);
+    const lateFee = lateDays * pricePerDay;
 
     const statusLabels = {
         returned_ok: 'Ordnungsgemäß zurückgegeben',
@@ -431,8 +459,8 @@ async function sendReturnSummaryEmail(order, item, payments = []) {
             <h3>Artikel</h3>
             <p>
                 <strong>${escapeHtml(item.title)}</strong><br>
-                Mietzeitraum: ${escapeHtml(item.rentalStart || item.rental_start)} bis ${escapeHtml(item.rentalEnd || item.rental_end)}<br>
-                Tatsächliche Rückgabe: ${escapeHtml(item.actualReturnDate || item.actual_return_date || '-')}<br>
+                Mietzeitraum: ${escapeHtml(item.adjustedRentalStart || item.adjusted_rental_start || item.rentalStart || item.rental_start)} bis ${escapeHtml(plannedReturnDate)}<br>
+                Tatsächliche Rückgabe: ${escapeHtml(actualReturnDate || '-')}<br>
                 Rückgabestatus: <strong>${escapeHtml(statusLabels[item.returnStatus || item.return_status] || item.returnStatus || item.return_status || '-')}</strong>
             </p>
 
@@ -440,6 +468,8 @@ async function sendReturnSummaryEmail(order, item, payments = []) {
             <p>
                 Beschädigt: ${item.isDamaged || item.is_damaged ? 'Ja' : 'Nein'}<br>
                 Verspätet: ${item.isLate || item.is_late ? 'Ja' : 'Nein'}<br>
+                ${item.damageDescription || item.damage_description ? `Schaden: ${escapeHtml(item.damageDescription || item.damage_description)}<br>` : ''}
+                ${item.lateDescription || item.late_description ? `Verspätung: ${escapeHtml(item.lateDescription || item.late_description)}<br>` : ''}
                 ${item.returnNotes || item.return_notes ? `Hinweise: ${escapeHtml(item.returnNotes || item.return_notes)}<br>` : ''}
             </p>
 
@@ -449,7 +479,10 @@ async function sendReturnSummaryEmail(order, item, payments = []) {
                 Kaution zurück: ${Number(item.depositRefundAmount || item.deposit_refund_amount || 0).toFixed(2)} €<br>
                 Kaution einbehalten: ${Number(item.depositDeductionAmount || item.deposit_deduction_amount || 0).toFixed(2)} €<br>
                 Entscheidung: ${escapeHtml(depositDecisionLabels[item.depositDecision || item.deposit_decision] || item.depositDecision || item.deposit_decision || '-')}<br>
-                Zusatzforderung: ${Number(item.additionalChargeAmount || item.additional_charge_amount || 0).toFixed(2)} €
+                Zusatzforderung: ${Number(item.additionalChargeAmount || item.additional_charge_amount || 0).toFixed(2)} €<br>
+                Verspätungskosten: ${lateFee.toFixed(2)} €<br>
+                Mit Kaution verrechnete Mietverlängerung: ${offsetRentalAdjustmentAmount.toFixed(2)} €<br>
+                ${item.depositDeductionReason || item.deposit_deduction_reason ? `Begründung: ${escapeHtml(item.depositDeductionReason || item.deposit_deduction_reason)}` : ''}
             </p>
 
             ${returnCharge ? `

@@ -43,13 +43,13 @@
 
                 <nav class="nav flex-column mt-4">
                     <button class="btn btn-outline-light text-start mb-2 active" id="nav-profile"
-                        onclick="switchProfileView('profile')">
+                        data-profile-view="profile">
                         <i class="bi bi-person-vcard"></i>
                         Meine Daten
                     </button>
 
                     <button class="btn btn-outline-light text-start mb-2" id="nav-orders"
-                        onclick="switchProfileView('orders')">
+                        data-profile-view="orders">
                         <i class="bi bi-receipt"></i>
                         Meine Bestellungen
                     </button>
@@ -62,7 +62,7 @@
                     </button>
                 </a>
 
-                <button class="btn btn-danger w-100 mt-2" onclick="logout()">
+                <button class="btn btn-danger w-100 mt-2" id="profileLogoutButton">
                     <i class="bi bi-x-circle"></i>
                     Abmelden
                 </button>

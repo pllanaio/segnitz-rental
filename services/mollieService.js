@@ -216,6 +216,8 @@ async function createMolliePaymentForOrder(order) {
         payload.method = order.method;
     }
 
+    if (order.idempotencyKey) payload.idempotencyKey = order.idempotencyKey;
+
     return mollie.payments.create(payload);
 }
 
@@ -266,7 +268,8 @@ async function createMollieRefundForPayment({
     paymentId,
     amount,
     description,
-    metadata = {}
+    metadata = {},
+    idempotencyKey
 }) {
     if (!paymentId) {
         throw new Error('paymentId ist für eine Erstattung erforderlich.');
@@ -291,7 +294,7 @@ async function createMollieRefundForPayment({
 
     const mollie = getMollieClient();
 
-    return mollie.paymentRefunds.create({
+    const payload = {
         paymentId,
         amount: {
             currency: 'EUR',
@@ -299,7 +302,11 @@ async function createMollieRefundForPayment({
         },
         description,
         metadata
-    });
+    };
+
+    if (idempotencyKey) payload.idempotencyKey = idempotencyKey;
+
+    return mollie.paymentRefunds.create(payload);
 }
 
 async function listMollieRefundsForPayment(paymentId) {
