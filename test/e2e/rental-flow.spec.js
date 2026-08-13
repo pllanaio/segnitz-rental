@@ -85,9 +85,10 @@ test('führt Admin-Navigation und dynamische Produktaktionen ohne Inline-Handler
 
     await page.locator('#username').fill(TEST_ADMIN.email);
     await page.locator('#password').fill(TEST_ADMIN.password);
-    await page.getByRole('button', { name: 'Einloggen' }).click();
-
-    await page.goto('/backend.html');
+    await Promise.all([
+        page.waitForURL(/\/backend\.html$/),
+        page.getByRole('button', { name: 'Einloggen' }).click()
+    ]);
     await expect(page.locator('#productList')).toContainText(TEST_PRODUCT.title);
 
     await page.getByRole('button', { name: 'Bearbeiten' }).click();
@@ -224,8 +225,10 @@ test('führt die Rückgabemaske mit Schadensdokumentation und wählbarem Zahlung
     await page.goto('/login.html');
     await page.locator('#username').fill(TEST_ADMIN.email);
     await page.locator('#password').fill(TEST_ADMIN.password);
-    await page.getByRole('button', { name: 'Einloggen' }).click();
-    await page.goto('/backend.html');
+    await Promise.all([
+        page.waitForURL(/\/backend\.html$/),
+        page.getByRole('button', { name: 'Einloggen' }).click()
+    ]);
     await expect(page).toHaveTitle('Segnitz Rental - Backend');
     await expect(page).toHaveURL(/\/backend\.html$/);
     await page.getByRole('button', { name: 'Bestellungen' }).click();
