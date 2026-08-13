@@ -123,6 +123,95 @@ const MAX_GUEST_ORDER_IDS = 50;
 const GUEST_VERIFICATION_MAX_AGE_MS = 15 * 60 * 1000;
 const LEGACY_LOGIN_PASSWORD_MAX_LENGTH = 128;
 const LEGACY_LOGIN_PASSWORD_MAX_BYTES = 512;
+const INITIAL_MOLLIE_SOURCE_PAYMENT_TYPES = Object.freeze([
+    'initial_payment',
+    'rental',
+    'deposit'
+]);
+const ADDITIONAL_MOLLIE_SOURCE_PAYMENT_TYPES = Object.freeze([
+    'rental_adjustment',
+    'return_additional_charge'
+]);
+
+function getMollieSourcePaymentTypes(paymentType) {
+    const normalizedPaymentType = String(paymentType || '').trim().toLowerCase();
+
+    if (INITIAL_MOLLIE_SOURCE_PAYMENT_TYPES.includes(normalizedPaymentType)) {
+        return [...INITIAL_MOLLIE_SOURCE_PAYMENT_TYPES];
+    }
+
+    if (ADDITIONAL_MOLLIE_SOURCE_PAYMENT_TYPES.includes(normalizedPaymentType)) {
+        return [normalizedPaymentType];
+    }
+
+    return [];
+}
+
+async function updateMollieSourcePaymentStatus(connection, {
+    orderId,
+    paymentId,
+    paymentType,
+    paymentStatus,
+    paymentRecordId = null,
+    noteSuffix = null,
+    preservePaid = false
+}) {
+    const sourcePaymentTypes = getMollieSourcePaymentTypes(paymentType);
+    const normalizedOrderId = Number(orderId);
+    const normalizedPaymentRecordId = Number(paymentRecordId);
+
+    if (
+        !Number.isInteger(normalizedOrderId) ||
+        normalizedOrderId < 1 ||
+        typeof paymentId !== 'string' ||
+        paymentId.trim() === '' ||
+        sourcePaymentTypes.length === 0
+    ) {
+        return 0;
+    }
+
+    const typePlaceholders = sourcePaymentTypes.map(() => '?').join(', ');
+    const assignments = [
+        'payment_status = ?',
+        `paid_at = CASE
+            WHEN ? = 'paid' THEN COALESCE(paid_at, NOW())
+            ELSE paid_at
+         END`
+    ];
+    const params = [paymentStatus, paymentStatus];
+
+    if (typeof noteSuffix === 'string' && noteSuffix.trim() !== '') {
+        assignments.push(
+            `note = CONCAT(
+                COALESCE(note, ''),
+                CASE WHEN note IS NULL OR note = '' THEN '' ELSE ' | ' END,
+                ?
+             )`
+        );
+        params.push(noteSuffix.trim());
+    }
+
+    let sql = `UPDATE rental_order_payments
+               SET ${assignments.join(',\n                   ')}
+               WHERE order_id = ?
+               AND mollie_payment_id = ?
+               AND mollie_refund_id IS NULL
+               AND payment_method = 'online'
+               AND payment_type IN (${typePlaceholders})`;
+    params.push(normalizedOrderId, paymentId, ...sourcePaymentTypes);
+
+    if (Number.isInteger(normalizedPaymentRecordId) && normalizedPaymentRecordId > 0) {
+        sql += ' AND id = ?';
+        params.push(normalizedPaymentRecordId);
+    }
+
+    if (preservePaid) {
+        sql += " AND payment_status != 'paid'";
+    }
+
+    const [result] = await connection.execute(sql, params);
+    return Number(result.affectedRows || 0);
+}
 
 function rememberGuestOrder(req, orderId) {
     if (req.session.user) return;
@@ -2429,6 +2518,11 @@ async function cancelOpenMolliePayments(
          WHERE order_id = ?
          ${itemScopeSql}
          AND payment_method = 'online'
+         AND mollie_refund_id IS NULL
+         AND payment_type IN (
+            'initial_payment', 'rental', 'deposit',
+            'rental_adjustment', 'return_additional_charge'
+         )
          AND payment_status IN ('pending', 'open', 'authorized')
          AND mollie_payment_id IS NOT NULL`,
         [orderId, ...itemScopeParams]
@@ -2443,9 +2537,17 @@ async function cancelOpenMolliePayments(
                  note = CONCAT(COALESCE(note, ''),
                     CASE WHEN note IS NULL OR note = '' THEN '' ELSE ' | ' END,
                     ?)
-             WHERE mollie_payment_id = ?
+             WHERE order_id = ?
+             ${itemScopeSql}
+             AND mollie_payment_id = ?
+             AND mollie_refund_id IS NULL
+             AND payment_method = 'online'
+             AND payment_type IN (
+                'initial_payment', 'rental', 'deposit',
+                'rental_adjustment', 'return_additional_charge'
+             )
              AND payment_status IN ('pending', 'open', 'authorized')`,
-            [reason, row.mollie_payment_id]
+            [reason, orderId, ...itemScopeParams, row.mollie_payment_id]
         );
     }
 
@@ -4542,13 +4644,13 @@ FOR UPDATE`,
             } else if (mollieStatus !== 'paid') {
                 openRentalAdjustmentAmount += Number(adjustment.amount || 0);
             } else {
-                await connection.execute(
-                    `UPDATE rental_order_payments
-                     SET payment_status = ?,
-                         paid_at = CASE WHEN ? = 'paid' THEN COALESCE(paid_at, NOW()) ELSE paid_at END
-                     WHERE mollie_payment_id = ? AND mollie_refund_id IS NULL`,
-                    [mollieStatus, mollieStatus, adjustment.mollie_payment_id]
-                );
+                await updateMollieSourcePaymentStatus(connection, {
+                    orderId: item.order_id,
+                    paymentId: adjustment.mollie_payment_id,
+                    paymentType: 'rental_adjustment',
+                    paymentStatus: mollieStatus,
+                    paymentRecordId: adjustment.id
+                });
             }
         }
 
@@ -5859,12 +5961,13 @@ app.post('/orders/:id/payment-status/sync', async (req, res) => {
                 let duplicateRefundStatus = null;
 
                 if (mappedPaymentStatus === 'paid') {
-                    await connection.execute(
-                        `UPDATE rental_order_payments
-                         SET payment_status = 'paid', paid_at = COALESCE(paid_at, NOW())
-                         WHERE mollie_payment_id = ? AND mollie_refund_id IS NULL`,
-                        [molliePayment.id]
-                    );
+                    await updateMollieSourcePaymentStatus(connection, {
+                        orderId: paymentRows[0].order_id,
+                        paymentId: molliePayment.id,
+                        paymentType: paymentRows[0].payment_type,
+                        paymentStatus: 'paid',
+                        paymentRecordId: paymentRows[0].paymentRecordId
+                    });
                     duplicateRefundStatus = await refundDuplicateOnlinePayment(
                         connection,
                         {
@@ -5879,13 +5982,13 @@ app.post('/orders/:id/payment-status/sync', async (req, res) => {
                         await enqueueMollieCancellationIntent(connection, molliePayment.id);
                     }
 
-                    await connection.execute(
-                        `UPDATE rental_order_payments
-                         SET payment_status = 'offset'
-                         WHERE mollie_payment_id = ?
-                         AND mollie_refund_id IS NULL`,
-                        [molliePayment.id]
-                    );
+                    await updateMollieSourcePaymentStatus(connection, {
+                        orderId: paymentRows[0].order_id,
+                        paymentId: molliePayment.id,
+                        paymentType: paymentRows[0].payment_type,
+                        paymentStatus: 'offset',
+                        paymentRecordId: paymentRows[0].paymentRecordId
+                    });
                 }
 
                 if (!duplicateRefundStatus) {
@@ -5939,12 +6042,13 @@ app.post('/orders/:id/payment-status/sync', async (req, res) => {
                 let duplicateRefundStatus = null;
 
                 if (mappedPaymentStatus === 'paid') {
-                    await connection.execute(
-                        `UPDATE rental_order_payments
-                         SET payment_status = 'paid', paid_at = COALESCE(paid_at, NOW())
-                         WHERE mollie_payment_id = ? AND mollie_refund_id IS NULL`,
-                        [molliePayment.id]
-                    );
+                    await updateMollieSourcePaymentStatus(connection, {
+                        orderId: paymentRows[0].order_id,
+                        paymentId: molliePayment.id,
+                        paymentType: paymentRows[0].payment_type,
+                        paymentStatus: 'paid',
+                        paymentRecordId: paymentRows[0].paymentRecordId
+                    });
 
                     duplicateRefundStatus = await refundDuplicateOnlinePayment(
                         connection,
@@ -5972,18 +6076,14 @@ app.post('/orders/:id/payment-status/sync', async (req, res) => {
                         await enqueueMollieCancellationIntent(connection, molliePayment.id);
                     }
 
-                    await connection.execute(
-                        `UPDATE rental_order_payments
-                         SET payment_status = 'replaced',
-                             note = CONCAT(
-                                COALESCE(note, ''),
-                                CASE WHEN note IS NULL OR note = '' THEN '' ELSE ' | ' END,
-                                'Online-Link nach Barzahlung geschlossen'
-                             )
-                         WHERE mollie_payment_id = ?
-                         AND mollie_refund_id IS NULL`,
-                        [molliePayment.id]
-                    );
+                    await updateMollieSourcePaymentStatus(connection, {
+                        orderId: paymentRows[0].order_id,
+                        paymentId: molliePayment.id,
+                        paymentType: paymentRows[0].payment_type,
+                        paymentStatus: 'replaced',
+                        paymentRecordId: paymentRows[0].paymentRecordId,
+                        noteSuffix: 'Online-Link nach Barzahlung geschlossen'
+                    });
                 }
 
                 await refundEligibleDepositsAfterPaymentsSettled(connection, req.params.id);
@@ -6002,21 +6102,13 @@ app.post('/orders/:id/payment-status/sync', async (req, res) => {
                 });
             }
 
-            await connection.execute(
-                `UPDATE rental_order_payments
-         SET payment_status = ?,
-             paid_at = CASE
-                WHEN ? = 'paid' THEN COALESCE(paid_at, NOW())
-                ELSE paid_at
-             END
-         WHERE mollie_payment_id = ?
-         AND mollie_refund_id IS NULL`,
-                [
-                    mappedPaymentStatus,
-                    mappedPaymentStatus,
-                    molliePayment.id
-                ]
-            );
+            await updateMollieSourcePaymentStatus(connection, {
+                orderId: paymentRows[0].order_id,
+                paymentId: molliePayment.id,
+                paymentType: paymentRows[0].payment_type,
+                paymentStatus: mappedPaymentStatus,
+                paymentRecordId: paymentRows[0].paymentRecordId
+            });
 
             await syncMollieRefundsForPayment(connection, molliePayment.id, prefetchedRefunds);
 
@@ -6425,12 +6517,13 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
                 const mollieStatus = mapMolliePaymentStatus(molliePayment.status);
 
                 if (mollieStatus === 'paid') {
-                    await connection.execute(
-                        `UPDATE rental_order_payments
-                         SET payment_status = 'paid', paid_at = COALESCE(paid_at, NOW())
-                         WHERE mollie_payment_id = ? AND mollie_refund_id IS NULL`,
-                        [openAdditionalPayment.mollie_payment_id]
-                    );
+                    await updateMollieSourcePaymentStatus(connection, {
+                        orderId,
+                        paymentId: openAdditionalPayment.mollie_payment_id,
+                        paymentType,
+                        paymentStatus: 'paid',
+                        paymentRecordId: openAdditionalPayment.id
+                    });
                     await refundEligibleDepositsAfterPaymentsSettled(connection, orderId);
                     await refreshReturnCaseStatus(connection, orderId);
                     await connection.commit();
@@ -7051,8 +7144,10 @@ app.post('/webhooks/mollie', async (req, res) => {
 
         const [cashPaidRows] = await connection.execute(
             `SELECT cashPaid.id,
+                    onlinePayment.id AS paymentRecordId,
                     onlinePayment.order_id,
                     onlinePayment.order_item_id,
+                    onlinePayment.payment_type,
                     onlinePayment.amount,
                     onlinePayment.mollie_payment_id,
                     ro.order_no
@@ -7063,6 +7158,7 @@ app.post('/webhooks/mollie', async (req, res) => {
       AND cashPaid.payment_type = onlinePayment.payment_type
      JOIN rental_orders ro ON ro.id = onlinePayment.order_id
      WHERE onlinePayment.mollie_payment_id = ?
+     AND onlinePayment.payment_method = 'online'
      AND onlinePayment.payment_type IN ('rental_adjustment', 'return_additional_charge')
      AND cashPaid.payment_method = 'cash'
      AND cashPaid.payment_status = 'paid'
@@ -7073,12 +7169,13 @@ app.post('/webhooks/mollie', async (req, res) => {
 
         if (cashPaidRows.length > 0) {
             if (mappedPaymentStatus === 'paid') {
-                await connection.execute(
-                    `UPDATE rental_order_payments
-                     SET payment_status = 'paid', paid_at = COALESCE(paid_at, NOW())
-                     WHERE mollie_payment_id = ? AND mollie_refund_id IS NULL`,
-                    [payment.id]
-                );
+                await updateMollieSourcePaymentStatus(connection, {
+                    orderId: cashPaidRows[0].order_id,
+                    paymentId: payment.id,
+                    paymentType: cashPaidRows[0].payment_type,
+                    paymentStatus: 'paid',
+                    paymentRecordId: cashPaidRows[0].paymentRecordId
+                });
                 await refundDuplicateOnlinePayment(connection, cashPaidRows[0]);
                 await refundEligibleDepositsAfterPaymentsSettled(
                     connection,
@@ -7089,16 +7186,15 @@ app.post('/webhooks/mollie', async (req, res) => {
                 return res.sendStatus(200);
             }
 
-            await connection.execute(
-                `UPDATE rental_order_payments
-         SET payment_status = 'replaced',
-             note = CONCAT(COALESCE(note, ''), ' | Online-Link nach Barzahlung ignoriert')
-         WHERE mollie_payment_id = ?
-         AND payment_status IN (
-            'pending', 'open', 'authorized', 'failed', 'cancelled', 'expired'
-         )`,
-                [payment.id]
-            );
+            await updateMollieSourcePaymentStatus(connection, {
+                orderId: cashPaidRows[0].order_id,
+                paymentId: payment.id,
+                paymentType: cashPaidRows[0].payment_type,
+                paymentStatus: 'replaced',
+                paymentRecordId: cashPaidRows[0].paymentRecordId,
+                noteSuffix: 'Online-Link nach Barzahlung ignoriert',
+                preservePaid: true
+            });
 
             await connection.commit();
             return res.sendStatus(200);
@@ -7106,6 +7202,7 @@ app.post('/webhooks/mollie', async (req, res) => {
 
         const [paymentContextRows] = await connection.execute(
             `SELECT
+                rop.id AS paymentRecordId,
                 rop.order_id,
                 rop.order_item_id,
                 rop.payment_type,
@@ -7125,6 +7222,11 @@ app.post('/webhooks/mollie', async (req, res) => {
              LEFT JOIN rental_order_items roi ON roi.id = rop.order_item_id
              WHERE rop.mollie_payment_id = ?
              AND rop.mollie_refund_id IS NULL
+             AND rop.payment_method = 'online'
+             AND rop.payment_type IN (
+                'initial_payment', 'rental', 'deposit',
+                'rental_adjustment', 'return_additional_charge'
+             )
              ORDER BY CASE WHEN rop.payment_type = 'initial_payment' THEN 0 ELSE 1 END,
                       rop.id DESC
              LIMIT 1
@@ -7146,12 +7248,13 @@ app.post('/webhooks/mollie', async (req, res) => {
 
         if (isAdditionalPayment && wasAlreadySettled) {
             if (mappedPaymentStatus === 'paid') {
-                await connection.execute(
-                    `UPDATE rental_order_payments
-                     SET payment_status = 'paid', paid_at = COALESCE(paid_at, NOW())
-                     WHERE mollie_payment_id = ? AND mollie_refund_id IS NULL`,
-                    [payment.id]
-                );
+                await updateMollieSourcePaymentStatus(connection, {
+                    orderId: paymentContext.order_id,
+                    paymentId: payment.id,
+                    paymentType: paymentContext.payment_type,
+                    paymentStatus: 'paid',
+                    paymentRecordId: paymentContext.paymentRecordId
+                });
                 await refundDuplicateOnlinePayment(
                     connection,
                     paymentContext,
@@ -7164,14 +7267,14 @@ app.post('/webhooks/mollie', async (req, res) => {
                 await enqueueMollieCancellationIntent(connection, payment.id);
             }
 
-            await connection.execute(
-                `UPDATE rental_order_payments
-                 SET payment_status = ?
-                 WHERE mollie_payment_id = ?
-                 AND mollie_refund_id IS NULL
-                 AND payment_status != 'paid'`,
-                [paymentContext.payment_status, payment.id]
-            );
+            await updateMollieSourcePaymentStatus(connection, {
+                orderId: paymentContext.order_id,
+                paymentId: payment.id,
+                paymentType: paymentContext.payment_type,
+                paymentStatus: paymentContext.payment_status,
+                paymentRecordId: paymentContext.paymentRecordId,
+                preservePaid: true
+            });
             await refreshReturnCaseStatus(connection, paymentContext.order_id);
             await connection.commit();
             return res.sendStatus(200);
@@ -7179,12 +7282,13 @@ app.post('/webhooks/mollie', async (req, res) => {
 
         if (additionalPaymentWasCancelled) {
             if (mappedPaymentStatus === 'paid') {
-                await connection.execute(
-                    `UPDATE rental_order_payments
-                     SET payment_status = 'paid', paid_at = COALESCE(paid_at, NOW())
-                     WHERE mollie_payment_id = ? AND mollie_refund_id IS NULL`,
-                    [payment.id]
-                );
+                await updateMollieSourcePaymentStatus(connection, {
+                    orderId: paymentContext.order_id,
+                    paymentId: payment.id,
+                    paymentType: paymentContext.payment_type,
+                    paymentStatus: 'paid',
+                    paymentRecordId: paymentContext.paymentRecordId
+                });
 
                 const cancellationOrder = {
                     id: paymentContext.order_id,
@@ -7212,33 +7316,32 @@ app.post('/webhooks/mollie', async (req, res) => {
                 }
             } else if (isOpenPaymentStatus(mappedPaymentStatus)) {
                 await enqueueMollieCancellationIntent(connection, payment.id);
-                await connection.execute(
-                    `UPDATE rental_order_payments
-                     SET payment_status = 'cancelled'
-                     WHERE mollie_payment_id = ? AND mollie_refund_id IS NULL`,
-                    [payment.id]
-                );
+                await updateMollieSourcePaymentStatus(connection, {
+                    orderId: paymentContext.order_id,
+                    paymentId: payment.id,
+                    paymentType: paymentContext.payment_type,
+                    paymentStatus: 'cancelled',
+                    paymentRecordId: paymentContext.paymentRecordId
+                });
             }
 
             await connection.commit();
             return res.sendStatus(200);
         }
 
-        await connection.execute(
-            `UPDATE rental_order_payments
-             SET payment_status = ?,
-                 paid_at = CASE
-                    WHEN ? = 'paid' THEN COALESCE(paid_at, NOW())
-                    ELSE paid_at
-                 END
-             WHERE mollie_payment_id = ?
-             AND mollie_refund_id IS NULL`,
-            [
-                mappedPaymentStatus,
-                mappedPaymentStatus,
-                payment.id
-            ]
-        );
+        if (paymentContext) {
+            await updateMollieSourcePaymentStatus(connection, {
+                orderId: paymentContext.order_id,
+                paymentId: payment.id,
+                paymentType: paymentContext.payment_type,
+                paymentStatus: mappedPaymentStatus,
+                paymentRecordId: INITIAL_MOLLIE_SOURCE_PAYMENT_TYPES.includes(
+                    paymentContext.payment_type
+                )
+                    ? null
+                    : paymentContext.paymentRecordId
+            });
+        }
 
         if (paymentContext && mappedPaymentStatus === 'paid') {
             await refundEligibleDepositsAfterPaymentsSettled(
@@ -7251,16 +7354,21 @@ app.post('/webhooks/mollie', async (req, res) => {
             await refreshReturnCaseStatus(connection, paymentContext.order_id);
         }
 
-        if (mappedPaymentStatus === 'charged_back' && !isDuplicateEvent) {
+        if (mappedPaymentStatus === 'charged_back' && !isDuplicateEvent && paymentContext) {
             await connection.execute(
-                `UPDATE rental_orders ro
-         JOIN rental_order_payments rop ON rop.order_id = ro.id
-         SET ro.payment_status = 'charged_back',
-             ro.return_case_status = 'payment_dispute'
-         WHERE rop.mollie_payment_id = ?`,
-                [payment.id]
+                `UPDATE rental_orders
+                 SET payment_status = 'charged_back',
+                     return_case_status = 'payment_dispute'
+                 WHERE id = ?`,
+                [paymentContext.order_id]
             );
 
+            const chargebackSourceTypes = getMollieSourcePaymentTypes(
+                paymentContext.payment_type
+            );
+            const chargebackSourcePlaceholders = chargebackSourceTypes
+                .map(() => '?')
+                .join(', ');
             await connection.execute(
                 `INSERT INTO rental_order_payments
          (
@@ -7283,13 +7391,17 @@ app.post('/webhooks/mollie', async (req, res) => {
             mollie_payment_id,
             'Chargeback über Mollie erkannt'
          FROM rental_order_payments
-         WHERE mollie_payment_id = ?
+         WHERE order_id = ?
+         AND mollie_payment_id = ?
+         AND mollie_refund_id IS NULL
+         AND payment_method = 'online'
+         AND payment_type IN (${chargebackSourcePlaceholders})
          AND payment_status = 'charged_back'
          ORDER BY CASE WHEN payment_type = 'initial_payment' THEN 0 ELSE 1 END,
                   ABS(amount) DESC,
                   id ASC
          LIMIT 1`,
-                [payment.id]
+                [paymentContext.order_id, payment.id, ...chargebackSourceTypes]
             );
         }
 
@@ -7357,12 +7469,12 @@ app.post('/webhooks/mollie', async (req, res) => {
             paymentContext?.payment_type === 'initial_payment'
         ) {
             await enqueueMollieCancellationIntent(connection, payment.id);
-            await connection.execute(
-                `UPDATE rental_order_payments
-                 SET payment_status = 'cancelled'
-                 WHERE mollie_payment_id = ? AND mollie_refund_id IS NULL`,
-                [payment.id]
-            );
+            await updateMollieSourcePaymentStatus(connection, {
+                orderId: paymentContext.order_id,
+                paymentId: payment.id,
+                paymentType: paymentContext.payment_type,
+                paymentStatus: 'cancelled'
+            });
         }
 
         await connection.execute(

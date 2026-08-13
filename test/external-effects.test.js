@@ -480,6 +480,83 @@ test('App-Code verbietet direkte mutierende Mollie-Aufrufe außerhalb des Outbox
     }
 });
 
+test('Payment-Sync trennt Ursprungszahlung und Refund-Ledger trotz gemeinsamer Mollie-ID', () => {
+    const source = fs.readFileSync(path.join(__dirname, '..', 'segnitz_rental.js'), 'utf8');
+    const sourceStatusHelper = source.slice(
+        source.indexOf('const INITIAL_MOLLIE_SOURCE_PAYMENT_TYPES'),
+        source.indexOf('function rememberGuestOrder')
+    );
+    const syncRoute = source.slice(
+        source.indexOf("app.post('/orders/:id/payment-status/sync'"),
+        source.indexOf("app.post('/admin/order-payments/manual'")
+    );
+    const webhookRoute = source.slice(
+        source.indexOf("app.post('/webhooks/mollie'"),
+        source.indexOf('let cleanupTimer = null')
+    );
+    const cancellationHelper = source.slice(
+        source.indexOf('async function cancelOpenMolliePayments'),
+        source.indexOf('async function enqueueMollieCancellationIntent')
+    );
+    const returnSettlementRoute = source.slice(
+        source.indexOf("app.put('/admin/order-items/:itemId/return'"),
+        source.indexOf("app.delete('/admin/return-images/:id'")
+    );
+    const manualPaymentRoute = source.slice(
+        source.indexOf("app.post('/admin/order-payments/manual'"),
+        source.indexOf("app.post('/admin/order-payments/:id/retry-refund'")
+    );
+
+    assert.match(
+        sourceStatusHelper,
+        /INITIAL_MOLLIE_SOURCE_PAYMENT_TYPES = Object\.freeze\(\[\s*'initial_payment',\s*'rental',\s*'deposit'/u
+    );
+    assert.match(
+        sourceStatusHelper,
+        /ADDITIONAL_MOLLIE_SOURCE_PAYMENT_TYPES = Object\.freeze\(\[\s*'rental_adjustment',\s*'return_additional_charge'/u
+    );
+    assert.match(sourceStatusHelper, /AND mollie_refund_id IS NULL/u);
+    assert.match(sourceStatusHelper, /AND payment_method = 'online'/u);
+    assert.match(sourceStatusHelper, /AND payment_type IN \(\$\{typePlaceholders\}\)/u);
+    assert.match(webhookRoute, /rop\.id AS paymentRecordId/u);
+    assert.match(
+        webhookRoute,
+        /rop\.payment_type IN \([\s\S]*?'initial_payment'[\s\S]*?'return_additional_charge'[\s\S]*?\)/u
+    );
+    assert.match(syncRoute, /updateMollieSourcePaymentStatus/u);
+    assert.match(webhookRoute, /updateMollieSourcePaymentStatus/u);
+    assert.doesNotMatch(
+        syncRoute,
+        /UPDATE rental_order_payments[\s\S]{0,300}?WHERE mollie_payment_id = \?/u
+    );
+    assert.doesNotMatch(
+        webhookRoute,
+        /UPDATE rental_order_payments[\s\S]{0,300}?WHERE mollie_payment_id = \?/u
+    );
+    assert.match(cancellationHelper, /AND mollie_refund_id IS NULL/u);
+    assert.match(
+        cancellationHelper,
+        /payment_type IN \([\s\S]*?'initial_payment'[\s\S]*?'return_additional_charge'[\s\S]*?\)/u
+    );
+    assert.doesNotMatch(cancellationHelper, /WHERE mollie_payment_id = \?/u);
+    assert.match(
+        returnSettlementRoute,
+        /updateMollieSourcePaymentStatus\(connection, \{[\s\S]*?paymentType: 'rental_adjustment',[\s\S]*?paymentRecordId: adjustment\.id/u
+    );
+    assert.doesNotMatch(
+        returnSettlementRoute,
+        /UPDATE rental_order_payments[\s\S]{0,300}?WHERE mollie_payment_id = \?/u
+    );
+    assert.match(
+        manualPaymentRoute,
+        /updateMollieSourcePaymentStatus\(connection, \{[\s\S]*?paymentId: openAdditionalPayment\.mollie_payment_id,[\s\S]*?paymentRecordId: openAdditionalPayment\.id/u
+    );
+    assert.doesNotMatch(
+        manualPaymentRoute,
+        /UPDATE rental_order_payments[\s\S]{0,300}?WHERE mollie_payment_id = \?/u
+    );
+});
+
 test('Registrierung persistiert Benutzer und Verifikations-Mail in derselben Transaktion', () => {
     const source = fs.readFileSync(path.join(__dirname, '..', 'segnitz_rental.js'), 'utf8');
     const registration = source.slice(

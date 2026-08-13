@@ -116,9 +116,12 @@ async function waitForServer() {
 async function waitForProductLockWait(connection) {
     for (let attempt = 0; attempt < 100; attempt += 1) {
         const [processes] = await connection.query('SHOW FULL PROCESSLIST');
+        // Die State-Bezeichnung eines Row-Lock-Waits ist zwischen MySQL-Versionen
+        // nicht stabil. Da diese Verbindung den Produktdatensatz bereits exklusiv
+        // sperrt, kann eine zweite passende SELECT-Abfrage erst nach dem Commit
+        // fortfahren; ihre sichtbare Query reicht daher als deterministisches Signal.
         const waiting = processes.some(process =>
-            /FROM rental_products/i.test(String(process.Info || '')) &&
-            /wait/i.test(String(process.State || ''))
+            /FROM rental_products/i.test(String(process.Info || ''))
         );
         if (waiting) return;
         await delay(20);
@@ -227,8 +230,18 @@ test('liefert den öffentlichen Produktkatalog mit Kategorien aus', async () => 
 test('blockiert laufende Zahlungsreservierungen in der öffentlichen Verfügbarkeit', async () => {
     const connection = await mysql.createConnection(dbConfig);
     const expectedPeriods = [
-        { status: 'pending_payment', rentalStart: '2099-01-03', rentalEnd: '2099-01-05' },
-        { status: 'payment_failed', rentalStart: '2099-02-03', rentalEnd: '2099-02-05' }
+        {
+            status: 'pending_payment',
+            paymentStatus: 'pending',
+            rentalStart: '2099-01-03',
+            rentalEnd: '2099-01-05'
+        },
+        {
+            status: 'payment_failed',
+            paymentStatus: 'failed',
+            rentalStart: '2099-02-03',
+            rentalEnd: '2099-02-05'
+        }
     ];
 
     try {
@@ -237,7 +250,7 @@ test('blockiert laufende Zahlungsreservierungen in der öffentlichen Verfügbark
                 `INSERT INTO rental_orders
                  (order_no, status, reserved_until, payment_status)
                  VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 1 HOUR), ?)`,
-                [`R-AVAILABILITY-${index}`, period.status, period.status]
+                [`R-AVAILABILITY-${index}`, period.status, period.paymentStatus]
             );
 
             await connection.execute(
@@ -544,133 +557,156 @@ test('serialisiert parallele identische Cart-Inserts auf genau eine Position', a
 
 test('Checkout-Lock verhindert Positionsverlust bei parallelem Cart-Add', async () => {
     const client = new SessionClient();
-    const csrfResponse = await client.request('/csrf-token');
-    client.csrfToken = (await csrfResponse.json()).csrfToken;
-    const checkoutStart = futureDate(60);
-    const checkoutEnd = futureDate(61);
-    const laterStart = futureDate(65);
-    const laterEnd = futureDate(66);
-
-    const initialAdd = await client.request('/cart/items', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-            productId: TEST_PRODUCT.id,
-            rentalStart: checkoutStart,
-            rentalEnd: checkoutEnd
-        })
-    });
-    assert.equal(initialAdd.status, 201);
-
-    const form = [{
-        elements: [
-            { name: 'CustomerEmail', value: 'cart-lock-guest@example.com' },
-            { name: 'FirstName', value: 'Cart' },
-            { name: 'LastName', value: 'Lock' },
-            { name: 'CustomerCompany', value: '' },
-            { name: 'CustomerPhone', value: '0123456789' },
-            { name: 'CustomerAddress', value: 'Teststrasse 1' },
-            { name: 'CustomerZip', value: '97070' },
-            { name: 'CustomerCity', value: 'Wuerzburg' },
-            { name: 'Signature', value: 'data:image/png;base64,dGVzdA==' },
-            { name: 'agbs', checked: true },
-            { name: 'dsgvo', checked: true }
-        ]
-    }];
-
-    const lockConnection = await mysql.createConnection(dbConfig);
-    let lockReleased = false;
-    let orderPromise;
-    let addPromise;
-
     try {
-        await lockConnection.beginTransaction();
-        await lockConnection.execute(
-            'SELECT id FROM rental_products WHERE id = ? FOR UPDATE',
-            [TEST_PRODUCT.id]
-        );
+        const csrfResponse = await client.request('/csrf-token');
+        client.csrfToken = (await csrfResponse.json()).csrfToken;
+        const checkoutStart = futureDate(60);
+        const checkoutEnd = futureDate(61);
+        const laterStart = futureDate(65);
+        const laterEnd = futureDate(66);
 
-        orderPromise = client.request('/data', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ form, paymentMethod: 'online' })
-        });
-
-        // Sobald diese Abfrage wartet, hält /data bereits den Cart-Lock.
-        await waitForProductLockWait(lockConnection);
-
-        let addSettled = false;
-        addPromise = client.request('/cart/items', {
+        const initialAdd = await client.request('/cart/items', {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({
                 productId: TEST_PRODUCT.id,
-                rentalStart: laterStart,
-                rentalEnd: laterEnd
+                rentalStart: checkoutStart,
+                rentalEnd: checkoutEnd
             })
-        }).finally(() => {
-            addSettled = true;
         });
+        assert.equal(initialAdd.status, 201);
 
-        await delay(75);
-        assert.equal(addSettled, false, 'Cart-Add darf den Checkout-Cart-Lock nicht umgehen.');
-
-        await lockConnection.commit();
-        lockReleased = true;
-
-        const [orderResponse, addResponse] = await Promise.all([orderPromise, addPromise]);
-        assert.equal(orderResponse.status, 200);
-        const orderResult = await orderResponse.json();
-        assert.ok(Number.isInteger(Number(orderResult.orderId)));
-        const setCookies = typeof orderResponse.headers.getSetCookie === 'function'
-            ? orderResponse.headers.getSetCookie()
-            : [orderResponse.headers.get('set-cookie')].filter(Boolean);
-        const accessCookie = setCookies.find(cookie => cookie.startsWith(`${ORDER_ACCESS_COOKIE}=`));
-        assert.ok(accessCookie, 'Gastbestellung muss ein bestellspezifisches Access-Cookie setzen.');
-        assert.match(accessCookie, /; HttpOnly/i);
-        assert.match(accessCookie, new RegExp(`; Path=/orders/${orderResult.orderId}(?:;|$)`, 'i'));
-        const durableAccessResponse = await fetch(
-            `${BASE_URL}/orders/${orderResult.orderId}/payment-status`,
-            { headers: { cookie: accessCookie.split(';', 1)[0] } }
-        );
-        assert.equal(durableAccessResponse.status, 200, await durableAccessResponse.text());
-        assert.equal(addResponse.status, 201, await addResponse.text());
-    } finally {
-        if (!lockReleased) {
-            await lockConnection.rollback();
-            await Promise.allSettled([orderPromise, addPromise].filter(Boolean));
+        const verificationToken = 'c'.repeat(64);
+        const guestVerificationConnection = await mysql.createConnection(dbConfig);
+        try {
+            await guestVerificationConnection.execute(
+                `INSERT INTO guest_verifications (email, verification_token, expires_at)
+                 VALUES ('cart-lock-guest@example.com', ?, DATE_ADD(NOW(), INTERVAL 15 MINUTE))`,
+                [verificationToken]
+            );
+        } finally {
+            await guestVerificationConnection.end();
         }
-        await lockConnection.end();
-    }
 
-    const cartResponse = await client.request('/cart');
-    const cart = await cartResponse.json();
-    assert.equal(cart.items.length, 1);
-    assert.equal(cart.items[0].rentalStart, laterStart);
-    assert.equal(cart.items[0].rentalEnd, laterEnd);
+        const verificationResponse = await client.request('/verify-email/complete', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ token: verificationToken })
+        });
+        assert.equal(verificationResponse.status, 200, await verificationResponse.text());
 
-    const verificationConnection = await mysql.createConnection(dbConfig);
-    try {
-        const [orders] = await verificationConnection.execute(
-            `SELECT id FROM rental_orders
-             WHERE customer_email = 'cart-lock-guest@example.com'
-             ORDER BY id DESC LIMIT 1`
-        );
-        assert.equal(orders.length, 1);
-        const [orderedItems] = await verificationConnection.execute(
-            `SELECT DATE_FORMAT(rental_start, '%Y-%m-%d') AS rentalStart,
-                    DATE_FORMAT(rental_end, '%Y-%m-%d') AS rentalEnd
-             FROM rental_order_items WHERE order_id = ?`,
-            [orders[0].id]
-        );
-        assert.equal(orderedItems.length, 1);
-        assert.equal(orderedItems[0].rentalStart, checkoutStart);
-        assert.equal(orderedItems[0].rentalEnd, checkoutEnd);
+        const form = [{
+            elements: [
+                { name: 'CustomerEmail', value: 'cart-lock-guest@example.com' },
+                { name: 'FirstName', value: 'Cart' },
+                { name: 'LastName', value: 'Lock' },
+                { name: 'CustomerCompany', value: '' },
+                { name: 'CustomerPhone', value: '0123456789' },
+                { name: 'CustomerAddress', value: 'Teststrasse 1' },
+                { name: 'CustomerZip', value: '97070' },
+                { name: 'CustomerCity', value: 'Wuerzburg' },
+                { name: 'Signature', value: 'data:image/png;base64,dGVzdA==' },
+                { name: 'agbs', checked: true },
+                { name: 'dsgvo', checked: true }
+            ]
+        }];
+
+        const lockConnection = await mysql.createConnection(dbConfig);
+        let lockReleased = false;
+        let orderPromise;
+        let addPromise;
+
+        try {
+            await lockConnection.beginTransaction();
+            await lockConnection.execute(
+                'SELECT id FROM rental_products WHERE id = ? FOR UPDATE',
+                [TEST_PRODUCT.id]
+            );
+
+            orderPromise = client.request('/data', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ form, paymentMethod: 'online' })
+            });
+
+            // Sobald diese Abfrage wartet, hält /data bereits den Cart-Lock.
+            await waitForProductLockWait(lockConnection);
+
+            let addSettled = false;
+            addPromise = client.request('/cart/items', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({
+                    productId: TEST_PRODUCT.id,
+                    rentalStart: laterStart,
+                    rentalEnd: laterEnd
+                })
+            }).finally(() => {
+                addSettled = true;
+            });
+
+            await delay(75);
+            assert.equal(addSettled, false, 'Cart-Add darf den Checkout-Cart-Lock nicht umgehen.');
+
+            await lockConnection.commit();
+            lockReleased = true;
+
+            const [orderResponse, addResponse] = await Promise.all([orderPromise, addPromise]);
+            assert.equal(orderResponse.status, 200);
+            const orderResult = await orderResponse.json();
+            assert.ok(Number.isInteger(Number(orderResult.orderId)));
+            const setCookies = typeof orderResponse.headers.getSetCookie === 'function'
+                ? orderResponse.headers.getSetCookie()
+                : [orderResponse.headers.get('set-cookie')].filter(Boolean);
+            const accessCookie = setCookies.find(cookie => cookie.startsWith(`${ORDER_ACCESS_COOKIE}=`));
+            assert.ok(accessCookie, 'Gastbestellung muss ein bestellspezifisches Access-Cookie setzen.');
+            assert.match(accessCookie, /; HttpOnly/i);
+            assert.match(accessCookie, new RegExp(`; Path=/orders/${orderResult.orderId}(?:;|$)`, 'i'));
+            const durableAccessResponse = await fetch(
+                `${BASE_URL}/orders/${orderResult.orderId}/payment-status`,
+                { headers: { cookie: accessCookie.split(';', 1)[0] } }
+            );
+            assert.equal(durableAccessResponse.status, 200, await durableAccessResponse.text());
+            assert.equal(addResponse.status, 201, await addResponse.text());
+        } finally {
+            if (!lockReleased) {
+                await lockConnection.rollback();
+                await Promise.allSettled([orderPromise, addPromise].filter(Boolean));
+            }
+            await lockConnection.end();
+        }
+
+        const cartResponse = await client.request('/cart');
+        const cart = await cartResponse.json();
+        assert.equal(cart.items.length, 1);
+        assert.equal(cart.items[0].rentalStart, laterStart);
+        assert.equal(cart.items[0].rentalEnd, laterEnd);
+
+        const verificationConnection = await mysql.createConnection(dbConfig);
+        try {
+            const [orders] = await verificationConnection.execute(
+                `SELECT id FROM rental_orders
+                 WHERE customer_email = 'cart-lock-guest@example.com'
+                 ORDER BY id DESC LIMIT 1`
+            );
+            assert.equal(orders.length, 1);
+            const [orderedItems] = await verificationConnection.execute(
+                `SELECT DATE_FORMAT(rental_start, '%Y-%m-%d') AS rentalStart,
+                        DATE_FORMAT(rental_end, '%Y-%m-%d') AS rentalEnd
+                 FROM rental_order_items WHERE order_id = ?`,
+                [orders[0].id]
+            );
+            assert.equal(orderedItems.length, 1);
+            assert.equal(orderedItems[0].rentalStart, checkoutStart);
+            assert.equal(orderedItems[0].rentalEnd, checkoutEnd);
+        } finally {
+            await verificationConnection.end();
+        }
+
     } finally {
-        await verificationConnection.end();
+        const cleanupResponse = await client.request('/cart', { method: 'DELETE' });
+        assert.equal(cleanupResponse.status, 200, await cleanupResponse.text());
     }
-
-    assert.equal((await client.request('/cart', { method: 'DELETE' })).status, 200);
 });
 
 test('deaktiviert Produkte statt Bestellhistorie und Referenzen hart zu löschen', async () => {
@@ -824,6 +860,12 @@ test('übernimmt den Gast-Warenkorb nach erfolgreichem Kundenlogin', async () =>
     });
     assert.equal(addResponse.status, 201);
 
+    const guestCartResponse = await client.request('/cart');
+    const guestCart = await guestCartResponse.json();
+    assert.equal(guestCartResponse.status, 200, JSON.stringify(guestCart));
+    assert.ok(Number.isInteger(Number(guestCart.cartId)));
+    const guestCartId = Number(guestCart.cartId);
+
     const loginResponse = await client.request('/login', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -863,7 +905,8 @@ test('übernimmt den Gast-Warenkorb nach erfolgreichem Kundenlogin', async () =>
         );
         const [guestCarts] = await verificationConnection.execute(
             `SELECT COUNT(*) AS count
-             FROM rental_carts WHERE status = 'active' AND user_email IS NULL`
+             FROM rental_carts WHERE id = ?`,
+            [guestCartId]
         );
         assert.equal(Number(userCarts[0].count), 1);
         assert.equal(Number(guestCarts[0].count), 0);

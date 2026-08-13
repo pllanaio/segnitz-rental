@@ -22,6 +22,19 @@ const TEST_MOLLIE_API_KEY = 'test_abcdefghijklmnopqrstuvwxyz1234';
 let serverProcess;
 let serverOutput = '';
 
+function readSessionCookie(response) {
+    const values = typeof response.headers.getSetCookie === 'function'
+        ? response.headers.getSetCookie()
+        : [response.headers.get('set-cookie')].filter(Boolean);
+
+    for (const value of values) {
+        const match = String(value).match(/(?:^|,\s*)(segnitz\.sid=[^;]+)/);
+        if (match) return match[1];
+    }
+
+    return null;
+}
+
 class SessionClient {
     constructor() {
         this.cookie = '';
@@ -48,10 +61,13 @@ class SessionClient {
             headers
         });
 
-        const setCookie = response.headers.get('set-cookie');
+        const setCookie = readSessionCookie(response);
         if (setCookie) {
             this.cookie = setCookie.split(';', 1)[0];
         }
+
+        const responseCsrfToken = response.headers.get('x-csrf-token');
+        if (responseCsrfToken) this.csrfToken = responseCsrfToken;
 
         return response;
     }
@@ -347,8 +363,9 @@ test('filtert Kunden- und Adminbestellungen nach konkretem Jahr und Monat', asyn
 
     for (const invalidYear of ['0000', '9999']) {
         const invalidResponse = await admin.request(`/admin/orders?year=${invalidYear}`);
-        assert.equal(invalidResponse.status, 400, await invalidResponse.text());
-        assert.deepEqual(await invalidResponse.json(), { error: 'Ungültiges Filterjahr.' });
+        const invalidBody = await invalidResponse.json();
+        assert.equal(invalidResponse.status, 400, JSON.stringify(invalidBody));
+        assert.deepEqual(invalidBody, { error: 'Ungültiges Filterjahr.' });
     }
 });
 
@@ -671,20 +688,61 @@ test('verarbeitet Online-Zahlung, Mollie-Webhook und vollständigen Storno-Refun
         `UPDATE rental_order_payments SET mollie_payment_id = ? WHERE order_id = ?`,
         [paidPaymentId, order.orderId]
     );
+    const pendingRefundResult = await execute(
+        `INSERT INTO rental_order_payments
+         (order_id, payment_type, payment_method, payment_status, amount, mollie_payment_id, note)
+         VALUES (?, 'duplicate_payment_refund', 'online', 'pending', -1, ?,
+                 'Regression: Refund-Ledger darf nicht als Source-Zahlung aktualisiert werden')`,
+        [order.orderId, paidPaymentId]
+    );
 
-    const webhookResponse = await customer.request('/webhooks/mollie', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ id: paidPaymentId })
-    });
-    assert.equal(webhookResponse.status, 200);
+    try {
+        const webhookResponse = await customer.request('/webhooks/mollie', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ id: paidPaymentId })
+        });
+        assert.equal(webhookResponse.status, 200);
 
-    const duplicateWebhookResponse = await customer.request('/webhooks/mollie', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ id: paidPaymentId })
-    });
-    assert.equal(duplicateWebhookResponse.status, 200);
+        const duplicateWebhookResponse = await customer.request('/webhooks/mollie', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ id: paidPaymentId })
+        });
+        assert.equal(duplicateWebhookResponse.status, 200);
+
+        const sourceAndRefundLedger = await queryRows(
+            `SELECT id, payment_type, payment_status
+             FROM rental_order_payments
+             WHERE order_id = ? AND mollie_payment_id = ?
+             ORDER BY id`,
+            [order.orderId, paidPaymentId]
+        );
+        assert.deepEqual(
+            sourceAndRefundLedger
+                .filter(row => ['initial_payment', 'rental', 'deposit'].includes(row.payment_type))
+                .map(row => ({ type: row.payment_type, status: row.payment_status }))
+                .sort((left, right) => left.type.localeCompare(right.type)),
+            [
+                { type: 'deposit', status: 'paid' },
+                { type: 'initial_payment', status: 'paid' },
+                { type: 'rental', status: 'paid' }
+            ]
+        );
+        assert.deepEqual(
+            sourceAndRefundLedger.find(row => Number(row.id) === Number(pendingRefundResult.insertId)),
+            {
+                id: pendingRefundResult.insertId,
+                payment_type: 'duplicate_payment_refund',
+                payment_status: 'pending'
+            }
+        );
+    } finally {
+        await execute(
+            'DELETE FROM rental_order_payments WHERE id = ?',
+            [pendingRefundResult.insertId]
+        );
+    }
 
     const [paidOrder] = await queryRows(
         `SELECT status, payment_status, mollie_payment_status, mollie_payment_method
@@ -766,8 +824,9 @@ test('Recheckout reaktiviert kein zwischenzeitlich deaktiviertes Produkt', async
         const response = await customer.request(`/orders/${order.orderId}/mollie-checkout`, {
             method: 'POST'
         });
-        assert.equal(response.status, 409, await response.text());
-        assert.deepEqual(await response.json(), {
+        const responseBody = await response.json();
+        assert.equal(response.status, 409, JSON.stringify(responseBody));
+        assert.deepEqual(responseBody, {
             error: 'Mindestens ein Produkt dieser Bestellung ist nicht mehr aktiv.'
         });
 
@@ -1339,9 +1398,11 @@ test('storniert eine offene Online-Miete, blockiert ihre Abholung und erstattet 
     });
     assert.equal(webhookResponse.status, 200, await webhookResponse.text());
 
-    const [cancelledAfterPayment] = await queryRows(
+    const cancelledAfterPayment = await waitForDatabaseRow(
         'SELECT status, payment_status FROM rental_orders WHERE id = ?',
-        [order.orderId]
+        [order.orderId],
+        row => row.status === 'cancelled' && row.payment_status === 'refunded',
+        'Abschluss der verspäteten Storno-Erstattung'
     );
     assert.deepEqual(cancelledAfterPayment, {
         status: 'cancelled',
@@ -1648,12 +1709,14 @@ test('erstattet eine verspätete Online-Verlängerungszahlung, wenn sie bei Rüc
     });
     assert.equal(lateWebhook.status, 200, await lateWebhook.text());
 
-    const [duplicateRefund] = await queryRows(
+    const duplicateRefund = await waitForDatabaseRow(
         `SELECT payment_status, amount FROM rental_order_payments
          WHERE order_id = ? AND order_item_id = ?
          AND payment_type = 'duplicate_payment_refund'
          AND mollie_payment_id = ?`,
-        [order.orderId, item.id, latePaidExtensionId]
+        [order.orderId, item.id, latePaidExtensionId],
+        row => row.payment_status === 'paid',
+        'Erstattung der verspäteten, bereits verrechneten Verlängerungszahlung'
     );
     assert.equal(duplicateRefund.payment_status, 'paid');
     assert.equal(Number(duplicateRefund.amount), -160);
@@ -1738,12 +1801,14 @@ test('verhindert Doppelzahlung bei Bar-Fallback einer Online-Nachzahlung und inf
     assert.equal(redirectStatusResponse.status, 200, JSON.stringify(redirectStatus));
     assert.equal(redirectStatus.payment_status, 'paid');
     assert.equal(redirectStatus.settled_by_cash, true);
-    assert.equal(redirectStatus.duplicate_refund_status, 'paid');
+    assert.equal(redirectStatus.duplicate_refund_status, 'pending');
 
-    const [duplicateRefund] = await queryRows(
+    const duplicateRefund = await waitForDatabaseRow(
         `SELECT payment_status, amount FROM rental_order_payments
          WHERE order_id = ? AND order_item_id = ? AND payment_type = 'duplicate_payment_refund'`,
-        [order.orderId, item.id]
+        [order.orderId, item.id],
+        row => row.payment_status === 'paid',
+        'Erstattung der verspäteten Onlinezahlung nach Bar-Fallback'
     );
     assert.equal(duplicateRefund.payment_status, 'paid');
     assert.equal(Number(duplicateRefund.amount), -160);
@@ -2000,12 +2065,14 @@ test('erstattet Teilstorno und anschließenden Reststorno einer bezahlten Online
     });
     assert.equal(lateExtensionWebhook.status, 200, await lateExtensionWebhook.text());
 
-    const [lateExtensionRefund] = await queryRows(
+    const lateExtensionRefund = await waitForDatabaseRow(
         `SELECT payment_status, amount FROM rental_order_payments
          WHERE order_id = ? AND order_item_id = ?
          AND payment_type = 'order_cancellation_refund'
          AND mollie_payment_id = ?`,
-        [order.orderId, items[0].id, latePaidExtensionId]
+        [order.orderId, items[0].id, latePaidExtensionId],
+        row => row.payment_status === 'paid',
+        'Erstattung der verspäteten Verlängerungszahlung nach Teilstorno'
     );
     assert.equal(lateExtensionRefund.payment_status, 'paid');
     assert.equal(Number(lateExtensionRefund.amount), -80);
@@ -2017,9 +2084,11 @@ test('erstattet Teilstorno und anschließenden Reststorno einer bezahlten Online
     });
     assert.equal(fullCancel.status, 200, await fullCancel.text());
 
-    const [fullyCancelledOrder] = await queryRows(
+    const fullyCancelledOrder = await waitForDatabaseRow(
         'SELECT status, payment_status FROM rental_orders WHERE id = ?',
-        [order.orderId]
+        [order.orderId],
+        row => row.status === 'cancelled' && row.payment_status === 'refunded',
+        'Abschluss der Reststorno-Erstattung'
     );
     assert.deepEqual(fullyCancelledOrder, {
         status: 'cancelled',

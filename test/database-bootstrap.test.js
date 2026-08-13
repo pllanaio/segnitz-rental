@@ -271,6 +271,11 @@ test('normalisiert die exakten MySQL-8.4-Istwerte aus dem CI-Schema-Gate', () =>
     const activeGuestActual =
         "case when status=_utf8mb4\\\\'active\\\\' and user_email is null " +
         'then session_id else null end';
+    const activeUserActual =
+        "case when status=_utf8mb4\\\\'active\\\\' and user_email is not null " +
+        'then lower(user_email)else null end';
+    const cartStatusActual =
+        "status in(_utf8mb4\\\\'active\\\\',_utf8mb4\\\\'converted\\\\')";
     const orderLifecycleActual =
         "(status in(_utf8mb4\\\\'reserved\\\\',_utf8mb4\\\\'pending_payment\\\\'," +
         "_utf8mb4\\\\'payment_failed\\\\',_utf8mb4\\\\'paid\\\\',_utf8mb4\\\\'confirmed\\\\'," +
@@ -301,6 +306,30 @@ test('normalisiert die exakten MySQL-8.4-Istwerte aus dem CI-Schema-Gate', () =>
         '(deposit_deduction_amount is null or deposit_deduction_amount>=0)and' +
         '(deposit_refund_amount is null or deposit_refund_amount>=0)and' +
         '(additional_charge_amount is null or additional_charge_amount>=0)';
+    const orderItemLifecycleActual =
+        "(item_status is null or(item_status in(_utf8mb4\\\\'active\\\\'," +
+        "_utf8mb4\\\\'picked_up\\\\',_utf8mb4\\\\'cancelled\\\\',_utf8mb4\\\\'expired\\\\'," +
+        "_utf8mb4\\\\'returned_ok\\\\',_utf8mb4\\\\'returned_damaged\\\\'," +
+        "_utf8mb4\\\\'returned_late\\\\',_utf8mb4\\\\'returned_late_damaged\\\\')))and" +
+        "(return_status is null or(return_status in(_utf8mb4\\\\'pending\\\\'," +
+        "_utf8mb4\\\\'not_required\\\\',_utf8mb4\\\\'returned_ok\\\\'," +
+        "_utf8mb4\\\\'returned_damaged\\\\',_utf8mb4\\\\'returned_late\\\\'," +
+        "_utf8mb4\\\\'returned_late_damaged\\\\')))and(deposit_decision is null or" +
+        "(deposit_decision in(_utf8mb4\\\\'no_refund\\\\',_utf8mb4\\\\'full_refund\\\\'," +
+        "_utf8mb4\\\\'partial_refund\\\\')))";
+    const paymentLifecycleActual =
+        "(payment_type in(_utf8mb4\\\\'initial_payment\\\\',_utf8mb4\\\\'rental\\\\'," +
+        "_utf8mb4\\\\'deposit\\\\',_utf8mb4\\\\'rental_adjustment\\\\'," +
+        "_utf8mb4\\\\'return_additional_charge\\\\',_utf8mb4\\\\'deposit_refund\\\\'," +
+        "_utf8mb4\\\\'order_cancellation_refund\\\\',_utf8mb4\\\\'duplicate_payment_refund\\\\'," +
+        "_utf8mb4\\\\'chargeback\\\\',_utf8mb4\\\\'refund_record\\\\'))and" +
+        "(payment_status in(_utf8mb4\\\\'pending\\\\',_utf8mb4\\\\'open\\\\'," +
+        "_utf8mb4\\\\'authorized\\\\',_utf8mb4\\\\'paid\\\\',_utf8mb4\\\\'failed\\\\'," +
+        "_utf8mb4\\\\'cancelled\\\\',_utf8mb4\\\\'expired\\\\',_utf8mb4\\\\'charged_back\\\\'," +
+        "_utf8mb4\\\\'offset\\\\',_utf8mb4\\\\'replaced\\\\',_utf8mb4\\\\'refunded\\\\'))";
+    const outboxStatusActual =
+        "status in(_utf8mb4\\\\'pending\\\\',_utf8mb4\\\\'processing\\\\'," +
+        "_utf8mb4\\\\'retry\\\\',_utf8mb4\\\\'succeeded\\\\',_utf8mb4\\\\'dead\\\\')";
 
     // JSON.stringify emits four backslashes for the two actual characters
     // delivered by mysql2. Keep that exact representation under test.
@@ -320,12 +349,33 @@ test('normalisiert die exakten MySQL-8.4-Istwerte aus dem CI-Schema-Gate', () =>
         contract.get('rental_carts').columns.get('active_guest_session_id').generationExpression
     );
     assert.equal(
+        normalizeGenerationExpression(activeUserActual),
+        contract.get('rental_carts').columns.get('active_user_email').generationExpression
+    );
+    assert.equal(
+        normalizeCheckClause(cartStatusActual),
+        contract.get('rental_carts').constraints.get('chk_rental_carts_status').clause
+    );
+    assert.equal(
         normalizeCheckClause(orderLifecycleActual),
         contract.get('rental_orders').constraints.get('chk_rental_orders_lifecycle').clause
     );
     assert.equal(
         normalizeCheckClause(orderItemValuesActual),
         contract.get('rental_order_items').constraints.get('chk_rental_order_items_values').clause
+    );
+    assert.equal(
+        normalizeCheckClause(orderItemLifecycleActual),
+        contract.get('rental_order_items').constraints.get('chk_rental_order_items_lifecycle').clause
+    );
+    assert.equal(
+        normalizeCheckClause(paymentLifecycleActual),
+        contract.get('rental_order_payments')
+            .constraints.get('chk_rental_order_payments_lifecycle').clause
+    );
+    assert.equal(
+        normalizeCheckClause(outboxStatusActual),
+        contract.get('external_effects_outbox').constraints.get('chk_external_effects_status').clause
     );
 
     assert.notEqual(
