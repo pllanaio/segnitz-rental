@@ -168,15 +168,15 @@ app.use(session({
     cookie: createSessionCookieOptions()
 }));
 
-function getOrCreateAdminCsrfToken(req) {
-    if (!req.session.adminCsrfToken) {
-        req.session.adminCsrfToken = crypto.randomBytes(32).toString('hex');
+function getOrCreateCsrfToken(req) {
+    if (!req.session.csrfToken) {
+        req.session.csrfToken = crypto.randomBytes(32).toString('hex');
     }
 
-    return req.session.adminCsrfToken;
+    return req.session.csrfToken;
 }
 
-function adminCsrfTokensEqual(providedToken, expectedToken) {
+function csrfTokensEqual(providedToken, expectedToken) {
     const expectedTokenBuffer = Buffer.from(expectedToken, 'utf8');
     const providedTokenBuffer = Buffer.from(providedToken, 'utf8');
 
@@ -185,11 +185,21 @@ function adminCsrfTokensEqual(providedToken, expectedToken) {
         crypto.timingSafeEqual(providedTokenBuffer, expectedTokenBuffer);
 }
 
-function requireAdminCsrfToken(req, res, next) {
-    const expectedToken = req.session && req.session.adminCsrfToken;
+function requireCsrfToken(req, res, next) {
+    const method = String(req.method || 'GET').toUpperCase();
+    const exemptPath = req.path === '/setup-admin' || req.path === '/webhooks/mollie';
+
+    if (
+        ['GET', 'HEAD', 'OPTIONS'].includes(method) ||
+        exemptPath
+    ) {
+        return next();
+    }
+
+    const expectedToken = req.session.csrfToken;
     const providedToken = String(req.get('X-CSRF-Token') || '');
     const tokensMatch = typeof expectedToken === 'string' &&
-        adminCsrfTokensEqual(providedToken, req.session.adminCsrfToken);
+        csrfTokensEqual(providedToken, req.session.csrfToken);
 
     if (!tokensMatch) {
         return res.status(403).json({
@@ -271,6 +281,7 @@ app.post('/setup-admin', setupLimiter, async (req, res) => {
         req.session.user = admin.email;
         req.session.role = admin.role;
         req.session.createdAt = Date.now();
+        const csrfToken = getOrCreateCsrfToken(req);
 
         await new Promise((resolve, reject) => {
             req.session.save(error => error ? reject(error) : resolve());
@@ -280,6 +291,8 @@ app.post('/setup-admin', setupLimiter, async (req, res) => {
             `${new Date().toISOString()} - Ersteinrichtung abgeschlossen: ` +
             `globales Adminkonto ${admin.email} wurde erstellt`
         );
+
+        res.set('X-CSRF-Token', csrfToken);
 
         return res.status(201).json({
             message: 'Adminkonto wurde erstellt. Die Installation ist betriebsbereit.',
@@ -298,6 +311,14 @@ app.post('/setup-admin', setupLimiter, async (req, res) => {
                 : error.message
         });
     }
+});
+
+app.get('/csrf-token', (req, res) => {
+    res.set('Cache-Control', 'no-store');
+
+    const csrfToken = getOrCreateCsrfToken(req);
+    res.set('X-CSRF-Token', csrfToken);
+    return res.json({ csrfToken });
 });
 
 app.use(async (req, res, next) => {
@@ -327,6 +348,8 @@ app.use(async (req, res, next) => {
     });
 });
 
+app.use(requireCsrfToken);
+
 app.use('/', productRoutes);
 app.use('/', cartRoutes);
 
@@ -336,9 +359,11 @@ app.get('/', (req, res) => {
 });
 
 app.get('/auth-status', (req, res) => {
-    const csrfToken = req.session.user && req.session.role === 'global_admin'
-        ? getOrCreateAdminCsrfToken(req)
+    const csrfToken = req.session.user
+        ? getOrCreateCsrfToken(req)
         : null;
+
+    if (csrfToken) res.set('X-CSRF-Token', csrfToken);
 
     res.json({
         loggedIn: !!req.session.user,
@@ -460,6 +485,9 @@ app.post('/login', loginLimiter, async (req, res) => {
                     rows[0].role
                 );
 
+                const csrfToken = getOrCreateCsrfToken(req);
+                res.set('X-CSRF-Token', csrfToken);
+
                 return res.status(200).json({
                     message: 'Login erfolgreich!',
                     redirectTo: redirectAfterLogin || (
@@ -467,9 +495,7 @@ app.post('/login', loginLimiter, async (req, res) => {
                             ? '/backend.html'
                             : '/index.html'
                     ),
-                    ...(rows[0].role === 'global_admin'
-                        ? { csrfToken: getOrCreateAdminCsrfToken(req) }
-                        : {})
+                    csrfToken
                 });
             } catch (sessionError) {
 
@@ -2752,7 +2778,7 @@ app.put('/admin/orders/:id/cancel', checkAdmin, async (req, res) => {
     }
 });
 
-app.put('/admin/order-items/:itemId/cancel', checkAdmin, requireAdminCsrfToken, adminReturnMutationLimiter, async (req, res) => {
+app.put('/admin/order-items/:itemId/cancel', checkAdmin, adminReturnMutationLimiter, async (req, res) => {
     let connection;
 
     try {
@@ -3048,7 +3074,7 @@ async function removeUploadedFiles(files = []) {
     );
 }
 
-app.post('/admin/order-items/:itemId/return-images', checkAdmin, requireAdminCsrfToken, adminReturnMutationLimiter, uploadReturnImages.array('images', 10), async (req, res) => {
+app.post('/admin/order-items/:itemId/return-images', checkAdmin, adminReturnMutationLimiter, uploadReturnImages.array('images', 10), async (req, res) => {
     let connection;
     let committed = false;
     const uploadedFiles = Array.isArray(req.files) ? req.files : [];
@@ -3557,7 +3583,7 @@ function calculateLateDays(actualReturnDate, plannedReturnDate) {
     return Math.ceil((actual - planned) / (1000 * 60 * 60 * 24));
 }
 
-app.put('/admin/order-items/:itemId/return', checkAdmin, requireAdminCsrfToken, adminReturnMutationLimiter, async (req, res) => {
+app.put('/admin/order-items/:itemId/return', checkAdmin, adminReturnMutationLimiter, async (req, res) => {
     let connection;
 
     try {
@@ -5419,7 +5445,7 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
     }
 });
 
-app.post('/admin/order-payments/:id/retry-refund', checkAdmin, requireAdminCsrfToken, adminReturnMutationLimiter, async (req, res) => {
+app.post('/admin/order-payments/:id/retry-refund', checkAdmin, adminReturnMutationLimiter, async (req, res) => {
     let connection;
 
     try {
@@ -5583,7 +5609,7 @@ app.post('/admin/order-payments/:id/retry-refund', checkAdmin, requireAdminCsrfT
     }
 });
 
-app.post('/admin/order-payments/manual-refund', checkAdmin, requireAdminCsrfToken, adminReturnMutationLimiter, async (req, res) => {
+app.post('/admin/order-payments/manual-refund', checkAdmin, adminReturnMutationLimiter, async (req, res) => {
     const {
         orderId,
         orderItemId,
