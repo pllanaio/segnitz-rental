@@ -445,14 +445,16 @@ test('kassiert Barzahlung, blockiert vorzeitige Abholung und verarbeitet Rückga
     assert.equal(returnResponse.status, 200, await returnResponse.text());
 
     const [returnedOrder] = await queryRows(
-        `SELECT status, return_status, return_case_status, payment_status
+        `SELECT status, return_status, return_case_status, payment_status,
+                return_processed_by_user_id
          FROM rental_orders WHERE id = ?`,
         [order.orderId]
     );
     assert.equal(returnedOrder.status, 'returned');
     assert.equal(returnedOrder.return_status, 'returned_ok');
-    assert.equal(returnedOrder.return_case_status, 'closed');
+    assert.equal(returnedOrder.return_case_status, 'refund_pending');
     assert.equal(returnedOrder.payment_status, 'paid');
+    assert.ok(returnedOrder.return_processed_by_user_id > 0);
 
     const [returnedItem] = await queryRows(
         `SELECT item_status, return_status, deposit_decision,
@@ -480,6 +482,412 @@ test('kassiert Barzahlung, blockiert vorzeitige Abholung und verarbeitet Rückga
         },
         { method: 'cash', status: 'pending', amount: -300 }
     );
+
+    const settleRefund = await admin.request('/admin/order-payments/manual-refund', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+            orderId: order.orderId,
+            orderItemId: item.id,
+            paymentType: 'deposit_refund',
+            amount: 300,
+            note: 'Kaution im CI-Test bar ausgezahlt'
+        })
+    });
+    assert.equal(settleRefund.status, 200, await settleRefund.text());
+
+    const [closedOrder] = await queryRows(
+        `SELECT return_case_status FROM rental_orders WHERE id = ?`,
+        [order.orderId]
+    );
+    assert.equal(closedOrder.return_case_status, 'closed');
+});
+
+test('validiert Schäden und nutzt für Rückgabe-Nachzahlungen den gewählten Mollie-Zahlungslink', async () => {
+    const customer = new SessionClient();
+    const admin = new SessionClient();
+    await login(customer, TEST_CUSTOMER);
+    await login(admin, TEST_ADMIN);
+
+    const rentalStart = futureDate(34);
+    const rentalEnd = futureDate(35);
+    const order = await createOrder(customer, 'cash', rentalStart, rentalEnd);
+    const [item] = await queryRows(
+        'SELECT id FROM rental_order_items WHERE order_id = ? LIMIT 1',
+        [order.orderId]
+    );
+
+    const payment = await admin.request('/admin/order-payments/manual', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+            orderId: order.orderId,
+            paymentType: 'initial_payment',
+            amount: 460
+        })
+    });
+    assert.equal(payment.status, 200, await payment.text());
+
+    const pickup = await admin.request(`/admin/order-items/${item.id}/pickup`, {
+        method: 'PUT'
+    });
+    assert.equal(pickup.status, 200, await pickup.text());
+
+    const invalidReturn = await admin.request(`/admin/order-items/${item.id}/return`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+            actualReturnDate: rentalEnd,
+            adjustedRentalStart: rentalStart,
+            adjustedRentalEnd: rentalEnd,
+            adjustedPricePerDay: TEST_PRODUCT.pricePerDay,
+            isDamaged: true,
+            damageDescription: '',
+            additionalChargeReason: 'Reparatur nach Rückgabe',
+            additionalChargeAmount: 400,
+            additionalChargePaymentMethod: 'online'
+        })
+    });
+    assert.equal(invalidReturn.status, 400, await invalidReturn.text());
+
+    const invalidReasonReturn = await admin.request(`/admin/order-items/${item.id}/return`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+            actualReturnDate: rentalEnd,
+            adjustedRentalStart: rentalStart,
+            adjustedRentalEnd: rentalEnd,
+            adjustedPricePerDay: TEST_PRODUCT.pricePerDay,
+            isDamaged: true,
+            damageDescription: 'Hydraulikleitung gerissen',
+            additionalChargeReason: '',
+            additionalChargeAmount: 400,
+            additionalChargePaymentMethod: 'online'
+        })
+    });
+    assert.equal(invalidReasonReturn.status, 400, await invalidReasonReturn.text());
+
+    const invalidPaymentMethodReturn = await admin.request(`/admin/order-items/${item.id}/return`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+            actualReturnDate: rentalEnd,
+            adjustedRentalStart: rentalStart,
+            adjustedRentalEnd: rentalEnd,
+            adjustedPricePerDay: TEST_PRODUCT.pricePerDay,
+            isDamaged: true,
+            damageDescription: 'Hydraulikleitung gerissen',
+            additionalChargeReason: 'Reparatur der Hydraulikleitung',
+            additionalChargeAmount: 400,
+            additionalChargePaymentMethod: 'invoice'
+        })
+    });
+    assert.equal(
+        invalidPaymentMethodReturn.status,
+        400,
+        await invalidPaymentMethodReturn.text()
+    );
+
+    const [unchangedItem] = await queryRows(
+        'SELECT item_status FROM rental_order_items WHERE id = ?',
+        [item.id]
+    );
+    assert.equal(unchangedItem.item_status, 'picked_up');
+
+    const returnResponse = await admin.request(`/admin/order-items/${item.id}/return`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+            actualReturnDate: rentalEnd,
+            adjustedRentalStart: rentalStart,
+            adjustedRentalEnd: rentalEnd,
+            adjustedPricePerDay: TEST_PRODUCT.pricePerDay,
+            isDamaged: true,
+            damageDescription: 'Hydraulikleitung gerissen',
+            additionalChargeReason: 'Reparatur der Hydraulikleitung',
+            additionalChargeAmount: 400,
+            additionalChargePaymentMethod: 'online',
+            returnNotes: 'Nachforderung per Mollie-Link'
+        })
+    });
+    assert.equal(returnResponse.status, 200, await returnResponse.text());
+
+    const [returnCharge] = await queryRows(
+        `SELECT id, payment_method, payment_status, amount, mollie_payment_id, checkout_url
+         FROM rental_order_payments
+         WHERE order_id = ?
+         AND order_item_id = ?
+         AND payment_type = 'return_additional_charge'`,
+        [order.orderId, item.id]
+    );
+    assert.equal(returnCharge.payment_method, 'online');
+    assert.equal(returnCharge.payment_status, 'pending');
+    assert.equal(Number(returnCharge.amount), 100);
+    assert.match(returnCharge.mollie_payment_id, /^tr_test_open_/);
+    assert.match(returnCharge.checkout_url, /^https:\/\/checkout\.test\.mollie\.local\//);
+
+    const customerDetailResponse = await customer.request(`/my-orders/${order.orderId}`);
+    const customerDetail = await customerDetailResponse.json();
+    assert.equal(customerDetailResponse.status, 200, JSON.stringify(customerDetail));
+    const customerReturnCharge = customerDetail.payments.find(
+        paymentRow => paymentRow.paymentType === 'return_additional_charge'
+    );
+    assert.equal(customerReturnCharge.checkoutUrl, returnCharge.checkout_url);
+
+    const adminDetailResponse = await admin.request(`/admin/orders/${order.orderId}`);
+    const adminDetail = await adminDetailResponse.json();
+    assert.equal(adminDetailResponse.status, 200, JSON.stringify(adminDetail));
+    const adminReturnCharge = adminDetail.payments.find(
+        paymentRow => paymentRow.paymentType === 'return_additional_charge'
+    );
+    assert.equal(adminReturnCharge.checkoutUrl, returnCharge.checkout_url);
+
+    const [pendingOrder] = await queryRows(
+        `SELECT status, return_status, return_case_status
+         FROM rental_orders WHERE id = ?`,
+        [order.orderId]
+    );
+    assert.deepEqual(pendingOrder, {
+        status: 'returned',
+        return_status: 'returned_damaged',
+        return_case_status: 'payment_pending'
+    });
+
+    const paidReturnChargeId = `tr_test_paid_return_charge_${order.orderId}`;
+    await execute(
+        'UPDATE rental_order_payments SET mollie_payment_id = ? WHERE id = ?',
+        [paidReturnChargeId, returnCharge.id]
+    );
+    const webhook = await customer.request('/webhooks/mollie', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ id: paidReturnChargeId })
+    });
+    assert.equal(webhook.status, 200, await webhook.text());
+
+    const [settledOrder] = await queryRows(
+        'SELECT return_case_status FROM rental_orders WHERE id = ?',
+        [order.orderId]
+    );
+    assert.equal(settledOrder.return_case_status, 'closed');
+});
+
+test('erfasst eine ausdrücklich bar gewählte Rückgabe-Nachzahlung auch bei Onlineauftrag bar', async () => {
+    const customer = new SessionClient();
+    const admin = new SessionClient();
+    await login(customer, TEST_CUSTOMER);
+    await login(admin, TEST_ADMIN);
+
+    const rentalStart = futureDate(42);
+    const rentalEnd = futureDate(43);
+    const order = await createOrder(customer, 'online', rentalStart, rentalEnd);
+    const [item] = await queryRows(
+        'SELECT id FROM rental_order_items WHERE order_id = ? LIMIT 1',
+        [order.orderId]
+    );
+    const paidInitialId = `tr_test_paid_cash_return_${order.orderId}`;
+    await execute(
+        'UPDATE rental_orders SET mollie_payment_id = ? WHERE id = ?',
+        [paidInitialId, order.orderId]
+    );
+    await execute(
+        'UPDATE rental_order_payments SET mollie_payment_id = ? WHERE order_id = ?',
+        [paidInitialId, order.orderId]
+    );
+    const paidWebhook = await customer.request('/webhooks/mollie', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ id: paidInitialId })
+    });
+    assert.equal(paidWebhook.status, 200, await paidWebhook.text());
+
+    const pickup = await admin.request(`/admin/order-items/${item.id}/pickup`, {
+        method: 'PUT'
+    });
+    assert.equal(pickup.status, 200, await pickup.text());
+
+    const returnResponse = await admin.request(`/admin/order-items/${item.id}/return`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+            actualReturnDate: rentalEnd,
+            adjustedRentalStart: rentalStart,
+            adjustedRentalEnd: rentalEnd,
+            adjustedPricePerDay: TEST_PRODUCT.pricePerDay,
+            isDamaged: true,
+            damageDescription: 'Gehäuse beschädigt',
+            additionalChargeReason: 'Gehäusereparatur',
+            additionalChargeAmount: 400,
+            additionalChargePaymentMethod: 'cash'
+        })
+    });
+    assert.equal(returnResponse.status, 200, await returnResponse.text());
+
+    const [charge] = await queryRows(
+        `SELECT payment_method, payment_status, amount
+         FROM rental_order_payments
+         WHERE order_id = ?
+         AND order_item_id = ?
+         AND payment_type = 'return_additional_charge'`,
+        [order.orderId, item.id]
+    );
+    assert.deepEqual(
+        {
+            method: charge.payment_method,
+            status: charge.payment_status,
+            amount: Number(charge.amount)
+        },
+        { method: 'cash', status: 'pending', amount: 100 }
+    );
+
+    const settleCharge = await admin.request('/admin/order-payments/manual', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+            orderId: order.orderId,
+            orderItemId: item.id,
+            paymentType: 'return_additional_charge',
+            amount: 100
+        })
+    });
+    assert.equal(settleCharge.status, 200, await settleCharge.text());
+
+    const [closedOrder] = await queryRows(
+        'SELECT return_case_status FROM rental_orders WHERE id = ?',
+        [order.orderId]
+    );
+    assert.equal(closedOrder.return_case_status, 'closed');
+});
+
+test('schließt einen gemischten Auftrag nach letzter Stornierung und wartet auf beide Barauszahlungen', async () => {
+    const customer = new SessionClient();
+    const admin = new SessionClient();
+    await login(customer, TEST_CUSTOMER);
+    await login(admin, TEST_ADMIN);
+
+    const firstStart = futureDate(36);
+    const firstEnd = futureDate(37);
+    const secondStart = futureDate(38);
+    const secondEnd = futureDate(39);
+
+    await addCartItem(customer, firstStart, firstEnd);
+    await addCartItem(customer, secondStart, secondEnd);
+    const orderResponse = await customer.request('/data', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+            paymentMethod: 'cash',
+            form: orderForm(TEST_CUSTOMER.email)
+        })
+    });
+    const order = await orderResponse.json();
+    assert.equal(orderResponse.status, 200, JSON.stringify(order));
+
+    const items = await queryRows(
+        'SELECT id FROM rental_order_items WHERE order_id = ? ORDER BY id ASC',
+        [order.orderId]
+    );
+    assert.equal(items.length, 2);
+
+    const payment = await admin.request('/admin/order-payments/manual', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+            orderId: order.orderId,
+            paymentType: 'initial_payment',
+            amount: 920
+        })
+    });
+    assert.equal(payment.status, 200, await payment.text());
+
+    const pickup = await admin.request(`/admin/order-items/${items[0].id}/pickup`, {
+        method: 'PUT'
+    });
+    assert.equal(pickup.status, 200, await pickup.text());
+
+    const firstReturn = await admin.request(`/admin/order-items/${items[0].id}/return`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+            actualReturnDate: firstEnd,
+            adjustedRentalStart: firstStart,
+            adjustedRentalEnd: firstEnd,
+            adjustedPricePerDay: TEST_PRODUCT.pricePerDay,
+            isDamaged: false,
+            additionalChargeAmount: 0,
+            additionalChargePaymentMethod: 'cash'
+        })
+    });
+    assert.equal(firstReturn.status, 200, await firstReturn.text());
+
+    const cancelSecond = await admin.request(`/admin/order-items/${items[1].id}/cancel`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({})
+    });
+    assert.equal(cancelSecond.status, 200, await cancelSecond.text());
+
+    const [mixedOrder] = await queryRows(
+        `SELECT status, return_status, return_case_status
+         FROM rental_orders WHERE id = ?`,
+        [order.orderId]
+    );
+    assert.deepEqual(mixedOrder, {
+        status: 'returned',
+        return_status: 'returned_ok',
+        return_case_status: 'refund_pending'
+    });
+
+    const refunds = await queryRows(
+        `SELECT order_item_id, payment_type, payment_status, amount
+         FROM rental_order_payments
+         WHERE order_id = ?
+         AND payment_type IN ('deposit_refund', 'order_cancellation_refund')
+         ORDER BY payment_type`,
+        [order.orderId]
+    );
+    assert.deepEqual(
+        refunds.map(refund => ({
+            itemId: refund.order_item_id,
+            type: refund.payment_type,
+            status: refund.payment_status,
+            amount: Number(refund.amount)
+        })),
+        [
+            {
+                itemId: items[0].id,
+                type: 'deposit_refund',
+                status: 'pending',
+                amount: -300
+            },
+            {
+                itemId: items[1].id,
+                type: 'order_cancellation_refund',
+                status: 'pending',
+                amount: -460
+            }
+        ]
+    );
+
+    for (const refund of refunds) {
+        const settle = await admin.request('/admin/order-payments/manual-refund', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+                orderId: order.orderId,
+                orderItemId: refund.order_item_id,
+                paymentType: refund.payment_type,
+                amount: Math.abs(Number(refund.amount))
+            })
+        });
+        assert.equal(settle.status, 200, await settle.text());
+    }
+
+    const [closedOrder] = await queryRows(
+        'SELECT return_case_status FROM rental_orders WHERE id = ?',
+        [order.orderId]
+    );
+    assert.equal(closedOrder.return_case_status, 'closed');
 });
 
 test('storniert eine offene Online-Miete, blockiert ihre Abholung und erstattet eine verspätet eingegangene Zahlung ohne Status-Reaktivierung', async () => {
@@ -655,7 +1063,7 @@ test('verlängert eine bezahlte Bar-Miete atomar und verrechnet offene Verlänge
     assert.equal(Number(depositRefund.amount), -40);
 });
 
-test('bezahlt und verlängert eine Online-Miete, zeigt Zahlungsledger im Kundenkonto und erstattet die Kaution nach Rückgabe online', async () => {
+test('erstattet eine Online-Kaution auch mit historischer Zahlung nur am Auftrag', async () => {
     const customer = new SessionClient();
     await login(customer, TEST_CUSTOMER);
     const rentalStart = futureDate(60);
@@ -713,6 +1121,13 @@ test('bezahlt und verlängert eine Online-Miete, zeigt Zahlungsledger im Kundenk
     ));
     assert.ok(customerDetail.items[0].pickedUpAt);
 
+    await execute(
+        `DELETE FROM rental_order_payments
+         WHERE order_id = ?
+         AND payment_type IN ('initial_payment', 'rental', 'deposit')`,
+        [order.orderId]
+    );
+
     const returnResponse = await admin.request(`/admin/order-items/${item.id}/return`, {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
@@ -730,7 +1145,7 @@ test('bezahlt und verlängert eine Online-Miete, zeigt Zahlungsledger im Kundenk
     assert.equal(returnResponse.status, 200, await returnResponse.text());
 
     const [refund] = await queryRows(
-        `SELECT payment_method, payment_status, amount, mollie_refund_id
+        `SELECT payment_method, payment_status, amount, mollie_payment_id, mollie_refund_id
          FROM rental_order_payments
          WHERE order_id = ? AND order_item_id = ? AND payment_type = 'deposit_refund'`,
         [order.orderId, item.id]
@@ -738,7 +1153,14 @@ test('bezahlt und verlängert eine Online-Miete, zeigt Zahlungsledger im Kundenk
     assert.equal(refund.payment_method, 'online');
     assert.equal(refund.payment_status, 'paid');
     assert.equal(Number(refund.amount), -300);
+    assert.equal(refund.mollie_payment_id, paidInitialId);
     assert.match(refund.mollie_refund_id, /^re_test_paid_/);
+
+    const [closedOrder] = await queryRows(
+        'SELECT return_case_status FROM rental_orders WHERE id = ?',
+        [order.orderId]
+    );
+    assert.equal(closedOrder.return_case_status, 'closed');
 });
 
 test('erstattet eine verspätete Online-Verlängerungszahlung, wenn sie bei Rückgabe bereits mit der Kaution verrechnet wurde', async () => {

@@ -232,6 +232,7 @@ function renderMyOrders() {
                     ${getStatusBadge(order.status)}
                     ${getPaymentBadge(order.payment_status)}
                     ${getReturnBadge(deriveMyOrderReturnStatus(order), order.status)}
+                    ${getReturnCaseBadge(order.return_case_status, order.status)}
                 </div>
 
                 <div class="d-flex gap-2 flex-wrap justify-content-end">
@@ -352,7 +353,9 @@ function renderMyOrderDetails(order) {
                         ` : ''}
                     ` : ''}
 
-                    <strong>Zahlung:</strong> ${getPaymentBadge(order.payment_status)}
+                    <strong>Zahlung:</strong> ${getPaymentBadge(order.payment_status)}<br>
+                    <strong>Rückgabeabwicklung:</strong>
+                    ${getReturnCaseBadge(order.return_case_status, order.status) || '-'}
                 </p>
             </div>
 
@@ -802,11 +805,39 @@ function renderMyOrderFinancialSummary(order) {
             : finalBalance < 0
                 ? 'Kunde erhält insgesamt zurück'
                 : 'Bestellung vollständig ausgeglichen';
+    const openOnlinePaymentLinks = payments
+        .filter(payment =>
+            ['rental_adjustment', 'return_additional_charge'].includes(payment.paymentType) &&
+            payment.paymentMethod === 'online' &&
+            ['pending', 'open', 'authorized'].includes(payment.paymentStatus) &&
+            getSafeCheckoutUrl(payment.checkoutUrl)
+        )
+        .map(payment => ({
+            ...payment,
+            checkoutUrl: getSafeCheckoutUrl(payment.checkoutUrl)
+        }));
 
     return `
     <div class="card mt-4 checkout-summary">
         <div class="card-body">
             <h5 class="mb-3">Gesamtpreisberechnung</h5>
+
+            ${openOnlinePaymentLinks.length > 0 ? `
+                <div class="alert alert-warning">
+                    <strong>Offene Nachzahlung</strong>
+                    ${openOnlinePaymentLinks.map(payment => `
+                        <div class="d-flex justify-content-between align-items-center gap-2 mt-2 flex-wrap">
+                            <span>${payment.paymentType === 'rental_adjustment'
+                                ? 'Mietverlängerung'
+                                : 'Rückgabe-Nachzahlung'}: ${Number(payment.amount || 0).toFixed(2)} €</span>
+                            <a class="btn btn-primary btn-sm" href="${payment.checkoutUrl}"
+                                target="_blank" rel="noopener noreferrer">
+                                Jetzt online bezahlen
+                            </a>
+                        </div>
+                    `).join('')}
+                </div>
+            ` : ''}
 
             <div class="summary-section-label">Mietkosten</div>
 
@@ -986,15 +1017,22 @@ function deriveMyOrderReturnStatus(order) {
 
     if (!items.length) return 'not_required';
 
-    if (items.some(item => item.returnStatus === 'returned_late_damaged')) {
+    const hasLateReturn = items.some(item =>
+        ['returned_late', 'returned_late_damaged'].includes(item.returnStatus)
+    );
+    const hasDamagedReturn = items.some(item =>
+        ['returned_damaged', 'returned_late_damaged'].includes(item.returnStatus)
+    );
+
+    if (hasLateReturn && hasDamagedReturn) {
         return 'returned_late_damaged';
     }
 
-    if (items.some(item => item.returnStatus === 'returned_damaged')) {
+    if (hasDamagedReturn) {
         return 'returned_damaged';
     }
 
-    if (items.some(item => item.returnStatus === 'returned_late')) {
+    if (hasLateReturn) {
         return 'returned_late';
     }
 
@@ -1030,6 +1068,39 @@ function getReturnBadge(status, orderStatus = null) {
 
     return `<span class="badge bg-${map[status] || 'secondary'}">
         Rückgabe: ${labels[status] || status || 'pending'}
+    </span>`;
+}
+
+function getReturnCaseBadge(status, orderStatus = null) {
+    const normalizedStatus = String(status || '').toLowerCase();
+    const normalizedOrderStatus = String(orderStatus || '').toLowerCase();
+
+    if (!normalizedStatus) return '';
+    if (normalizedStatus === 'open' && normalizedOrderStatus !== 'picked_up') return '';
+
+    const map = {
+        open: 'info',
+        partial: 'warning',
+        payment_pending: 'warning',
+        payment_failed: 'danger',
+        refund_pending: 'warning',
+        refund_failed: 'danger',
+        payment_dispute: 'danger',
+        closed: 'success'
+    };
+    const labels = {
+        open: 'Rückgabe offen',
+        partial: 'Teilrückgabe offen',
+        payment_pending: 'Nachzahlung offen',
+        payment_failed: 'Nachzahlung fehlgeschlagen',
+        refund_pending: 'Erstattung offen',
+        refund_failed: 'Erstattung fehlgeschlagen',
+        payment_dispute: 'Zahlung strittig',
+        closed: 'Abgeschlossen'
+    };
+
+    return `<span class="badge bg-${map[normalizedStatus] || 'secondary'} me-1">
+        Abwicklung: ${labels[normalizedStatus] || normalizedStatus}
     </span>`;
 }
 
@@ -1165,6 +1236,15 @@ function formatTextValue(value) {
     }
 
     return String(value);
+}
+
+function getSafeCheckoutUrl(value) {
+    try {
+        const checkoutUrl = new URL(String(value || ''));
+        return checkoutUrl.protocol === 'https:' ? checkoutUrl.href : null;
+    } catch (error) {
+        return null;
+    }
 }
 
 function allowOnlyDigits(input) {

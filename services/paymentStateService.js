@@ -116,9 +116,65 @@ function calculateReturnSettlement({
     };
 }
 
+function deriveAggregateReturnStatus(returnStatuses = []) {
+    const normalizedStatuses = returnStatuses
+        .map(status => String(status || '').toLowerCase())
+        .filter(status => status.startsWith('returned_'));
+    const hasLateReturn = normalizedStatuses.some(status =>
+        status === 'returned_late' || status === 'returned_late_damaged'
+    );
+    const hasDamagedReturn = normalizedStatuses.some(status =>
+        status === 'returned_damaged' || status === 'returned_late_damaged'
+    );
+
+    if (hasLateReturn && hasDamagedReturn) return 'returned_late_damaged';
+    if (hasDamagedReturn) return 'returned_damaged';
+    if (hasLateReturn) return 'returned_late';
+    return normalizedStatuses.length > 0 ? 'returned_ok' : null;
+}
+
+function deriveReturnCaseStatus({
+    orderStatus,
+    orderPaymentStatus,
+    pickedUpCount = 0,
+    returnedCount = 0,
+    pendingPaymentCount = 0,
+    failedPaymentCount = 0,
+    pendingRefundCount = 0,
+    failedRefundCount = 0
+}) {
+    const normalizedOrderStatus = String(orderStatus || '').toLowerCase();
+    const normalizedPaymentStatus = String(orderPaymentStatus || '').toLowerCase();
+
+    if (
+        normalizedOrderStatus === 'payment_dispute' ||
+        normalizedPaymentStatus === 'charged_back'
+    ) {
+        return 'payment_dispute';
+    }
+
+    if (normalizedOrderStatus === 'returned') {
+        if (Number(failedPaymentCount) > 0) return 'payment_failed';
+        if (Number(pendingPaymentCount) > 0) return 'payment_pending';
+        if (Number(failedRefundCount) > 0) return 'refund_failed';
+        if (Number(pendingRefundCount) > 0) return 'refund_pending';
+        return 'closed';
+    }
+
+    if (Number(pickedUpCount) > 0) {
+        return Number(returnedCount) > 0 ? 'partial' : 'open';
+    }
+
+    if (Number(returnedCount) > 0) return 'partial';
+
+    return null;
+}
+
 module.exports = {
     calculateReturnSettlement,
+    deriveAggregateReturnStatus,
     deriveOrderStatusFromInitialPayment,
+    deriveReturnCaseStatus,
     isDuplicateKeyError,
     isOpenPaymentStatus,
     isStrictIsoDate,

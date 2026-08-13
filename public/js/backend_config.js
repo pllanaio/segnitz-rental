@@ -64,7 +64,8 @@ document.addEventListener('DOMContentLoaded', () => {
         'returnIsDamaged',
         'returnIsLate',
         'returnDepositDeductionPercent',
-        'returnAdditionalChargeAmount'
+        'returnAdditionalChargeAmount',
+        'returnAdditionalChargePaymentMethod'
     ].forEach(id => {
         const element = document.getElementById(id);
         element?.addEventListener('input', applyOrderItemReturnModalRules);
@@ -144,6 +145,7 @@ function handleBackendActionClick(event) {
     const action = button.dataset.backendAction;
     const orderId = getOptionalNumber(button.dataset.orderId);
     const itemId = getOptionalNumber(button.dataset.itemId);
+    const imageId = getOptionalNumber(button.dataset.imageId);
     const paymentId = getOptionalNumber(button.dataset.paymentId);
     const productId = getOptionalNumber(button.dataset.productId);
     const amount = getOptionalNumber(button.dataset.amount) || 0;
@@ -167,6 +169,7 @@ function handleBackendActionClick(event) {
             amount
         ),
         'retry-online-refund': () => retryOnlineRefund(paymentId, orderId),
+        'delete-return-image': () => deleteReturnImage(imageId, orderId),
         'mark-item-picked-up': () => markOrderItemPickedUp(orderId, itemId),
         'open-rental-period': () => openRentalPeriodModal(orderId, itemId),
         'open-cancel-item': () => openCancelOrderItemModal(orderId, itemId),
@@ -723,6 +726,7 @@ function renderOrders() {
                         ${getOrderDisplayBadge(order)}
                         ${getPaymentBadge(order.payment_status)}
                         ${getReturnBadge(order.return_status, order.status)}
+                        ${getReturnCaseBadge(order.return_case_status, order.status)}
                     </div>
 
                     <button class="btn btn-primary btn-sm"
@@ -848,7 +852,9 @@ function renderOrderDetails(order) {
                     ` : ''}
 
                     <strong>Zahlungsstatus:</strong> ${order.payment_status || '-'}<br>
-                    <strong>Zahlungsmethode:</strong> ${order.payment_method || '-'}
+                    <strong>Zahlungsmethode:</strong> ${order.payment_method || '-'}<br>
+                    <strong>Rückgabeabwicklung:</strong>
+                    ${getReturnCaseBadge(order.return_case_status, order.status) || '-'}
                 </p>
             </div>
 
@@ -882,6 +888,33 @@ function renderOrderPaymentActionPanel(order) {
 
     const actions = [];
     const orderIsClosed = ['cancelled', 'expired'].includes(orderStatus);
+
+    payments
+        .filter(payment =>
+            ['rental_adjustment', 'return_additional_charge'].includes(payment.paymentType) &&
+            payment.paymentMethod === 'online' &&
+            ['pending', 'open', 'authorized'].includes(payment.paymentStatus) &&
+            getSafeCheckoutUrl(payment.checkoutUrl)
+        )
+        .forEach(payment => {
+            const checkoutUrl = getSafeCheckoutUrl(payment.checkoutUrl);
+            actions.push(`
+                <div class="cash-action-row">
+                    <div>
+                        <div class="cash-action-title">${formatPaymentType(payment.paymentType)}</div>
+                        <div class="small text-muted">Der Mollie-Zahlungslink ist noch offen.</div>
+                    </div>
+
+                    <div class="cash-action-controls">
+                        <strong>${Number(payment.amount || 0).toFixed(2)} €</strong>
+                        <a class="btn btn-outline-primary btn-sm" href="${checkoutUrl}"
+                            target="_blank" rel="noopener noreferrer">
+                            Zahlungslink öffnen
+                        </a>
+                    </div>
+                </div>
+            `);
+        });
 
     const openInitialPayments = payments.filter(payment =>
         ['rental', 'deposit'].includes(payment.paymentType) &&
@@ -1218,6 +1251,12 @@ function renderOrderItemCard(order, item) {
     <img src="/${image.imagePath}" class="img-fluid rounded border"
         style="height: 120px; object-fit: cover; width: 100%;">
 </a>
+                                <button type="button" class="btn btn-outline-danger btn-sm w-100 mt-1"
+                                    data-backend-action="delete-return-image"
+                                    data-image-id="${image.id}"
+                                    data-order-id="${order.id}">
+                                    Foto löschen
+                                </button>
                             </div>
                         `).join('')}
                     </div>
@@ -1288,6 +1327,7 @@ function renderOrderItemCard(order, item) {
         <strong class="text-danger">${financials.depositRetained.toFixed(2)} €</strong>
     </div>
 </div>
+${renderItemPayments(order, item)}
             </div>
         </div>
     `;
@@ -1461,11 +1501,13 @@ function deriveOrderDisplayState(order) {
         return 'cancelled';
     }
 
-    if (returnedItems.length === items.length && damagedItems.length > 0) {
+    const terminalItemsCount = cancelledItems.length + returnedItems.length;
+
+    if (terminalItemsCount === items.length && returnedItems.length > 0 && damagedItems.length > 0) {
         return 'completed_with_issues';
     }
 
-    if (returnedItems.length === items.length) {
+    if (terminalItemsCount === items.length && returnedItems.length > 0) {
         return 'returned';
     }
 
@@ -1621,6 +1663,39 @@ function getReturnBadge(status, orderStatus = null) {
     </span>`;
 }
 
+function getReturnCaseBadge(status, orderStatus = null) {
+    const normalizedStatus = String(status || '').toLowerCase();
+    const normalizedOrderStatus = String(orderStatus || '').toLowerCase();
+
+    if (!normalizedStatus) return '';
+    if (normalizedStatus === 'open' && normalizedOrderStatus !== 'picked_up') return '';
+
+    const map = {
+        open: 'info',
+        partial: 'warning',
+        payment_pending: 'warning',
+        payment_failed: 'danger',
+        refund_pending: 'warning',
+        refund_failed: 'danger',
+        payment_dispute: 'danger',
+        closed: 'success'
+    };
+    const labels = {
+        open: 'Rückgabe offen',
+        partial: 'Teilrückgabe offen',
+        payment_pending: 'Nachzahlung offen',
+        payment_failed: 'Nachzahlung fehlgeschlagen',
+        refund_pending: 'Erstattung offen',
+        refund_failed: 'Erstattung fehlgeschlagen',
+        payment_dispute: 'Zahlung strittig',
+        closed: 'Abgeschlossen'
+    };
+
+    return `<span class="badge bg-${map[normalizedStatus] || 'secondary'} me-1">
+        Abwicklung: ${labels[normalizedStatus] || normalizedStatus}
+    </span>`;
+}
+
 async function deleteReturnImage(imageId, orderId) {
     const confirmed = await showConfirm(
         'Möchten Sie dieses Rückgabefoto wirklich löschen?',
@@ -1732,6 +1807,15 @@ function formatTextValue(value) {
     }
 
     return String(value);
+}
+
+function getSafeCheckoutUrl(value) {
+    try {
+        const checkoutUrl = new URL(String(value || ''));
+        return checkoutUrl.protocol === 'https:' ? checkoutUrl.href : null;
+    } catch (error) {
+        return null;
+    }
 }
 
 function renderItemPayments(order, item) {
@@ -2412,6 +2496,7 @@ function openOrderItemReturnModal(orderId, itemId) {
     document.getElementById('returnDepositDeductionReason').value = item.depositDeductionReason || '';
     document.getElementById('returnAdditionalChargeReason').value = item.additionalChargeReason || '';
     document.getElementById('returnAdditionalChargeAmount').value = item.additionalChargeAmount || '';
+    document.getElementById('returnAdditionalChargePaymentMethod').value = 'online';
     document.getElementById('returnNotes').value = item.returnNotes || '';
     document.getElementById('returnImageUpload').value = '';
     document.getElementById('returnExistingImages').innerHTML = (item.returnImages || []).map(image => `
@@ -2420,6 +2505,12 @@ function openOrderItemReturnModal(orderId, itemId) {
             <img src="/${image.imagePath}" class="img-fluid rounded border"
                 style="height: 120px; object-fit: cover; width: 100%;">
         </a>
+        <button type="button" class="btn btn-outline-danger btn-sm w-100 mt-1"
+            data-backend-action="delete-return-image"
+            data-image-id="${image.id}"
+            data-order-id="${orderId}">
+            Foto löschen
+        </button>
     </div>
 `).join('');
 
@@ -2443,6 +2534,10 @@ function applyOrderItemReturnModalRules(triggerSource = 'auto') {
     const refundAmountInput = document.getElementById('returnDepositRefundAmount');
     const deductionPercentInput = document.getElementById('returnDepositDeductionPercent');
     const deductionReasonInput = document.getElementById('returnDepositDeductionReason');
+    const damageDescriptionInput = document.getElementById('returnDamageDescription');
+    const damageDescriptionGroup = document.getElementById('returnDamageDescriptionGroup');
+    const paymentMethodGroup = document.getElementById('returnAdditionalChargePaymentMethodGroup');
+    const additionalChargeReasonInput = document.getElementById('returnAdditionalChargeReason');
 
     const lateDays = calculateLateDays(actualReturnDate, adjustedEnd);
     const pricePerDay = Number(item.adjustedPricePerDay || item.pricePerDay || 0);
@@ -2478,6 +2573,11 @@ function applyOrderItemReturnModalRules(triggerSource = 'auto') {
     const refundAmount = Math.max(deposit - totalObligations, 0);
     const retainedAmount = Math.max(deposit - refundAmount, 0);
     const customerAdditionalDue = Math.max(totalObligations - deposit, 0);
+
+    damageDescriptionGroup?.classList.toggle('d-none', !isDamaged);
+    if (damageDescriptionInput) damageDescriptionInput.required = isDamaged;
+    if (additionalChargeReasonInput) additionalChargeReasonInput.required = repairCosts > 0;
+    paymentMethodGroup?.classList.toggle('d-none', customerAdditionalDue <= 0);
 
     returnStatusInput.value = returnStatus;
     depositDecisionInput.value = refundAmount >= deposit && deposit > 0
@@ -2555,6 +2655,14 @@ function applyOrderItemReturnModalRules(triggerSource = 'auto') {
                 ${customerAdditionalDue.toFixed(2)} €
             </strong>
         </div>
+
+        ${customerAdditionalDue > 0 ? `
+            <div class="small text-muted mt-2">
+                Zahlungsweg: ${document.getElementById('returnAdditionalChargePaymentMethod').value === 'cash'
+                    ? 'Barzahlung vor Ort'
+                    : 'Mollie-Zahlungslink'}
+            </div>
+        ` : ''}
     </div>
 `;
 }
@@ -2643,7 +2751,7 @@ async function saveOrderItemReturn(itemId, orderId) {
         additionalChargeAmount: normalizeDecimalInput(
             document.getElementById('returnAdditionalChargeAmount').value
         ),
-        additionalChargePaymentMethod: 'online',
+        additionalChargePaymentMethod: document.getElementById('returnAdditionalChargePaymentMethod').value,
         returnNotes: document.getElementById('returnNotes').value.trim()
 
     };

@@ -34,12 +34,20 @@ test('keeps evolving lifecycle states out of restrictive ENUM columns', () => {
     assert.doesNotMatch(schema, /\bENUM\s*\(/i);
 });
 
+test('opens a return case only when pickup actually starts', () => {
+    assert.match(
+        schema,
+        /return_case_status\s+VARCHAR\(50\)\s+NULL\s+DEFAULT\s+NULL/i
+    );
+});
+
 test('matches the token and webhook columns used by the server', () => {
     assert.match(schema, /verification_token VARCHAR\(128\)/);
     assert.match(schema, /verification_expires DATETIME/);
     assert.match(schema, /reset_token VARCHAR\(255\)/);
     assert.match(schema, /reset_token_expires DATETIME/);
     assert.match(schema, /processed_at DATETIME/);
+    assert.match(schema, /checkout_url VARCHAR\(2048\)/);
     assert.match(schema, /guest_verifications[\s\S]*verified TINYINT\(1\)/);
 });
 
