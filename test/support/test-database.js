@@ -100,6 +100,7 @@ const schemaStatements = [
         order_no VARCHAR(50) NULL,
         customer_email VARCHAR(254) NULL,
         status VARCHAR(50) NOT NULL DEFAULT 'reserved',
+        payment_status VARCHAR(50) NULL,
         reserved_until DATETIME NULL,
         return_status VARCHAR(50) NULL,
         return_case_status VARCHAR(50) NULL,
