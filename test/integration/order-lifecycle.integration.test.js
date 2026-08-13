@@ -261,7 +261,11 @@ test('filtert Kunden- und Adminbestellungen nach konkretem Jahr und Monat', asyn
     );
 
     const customerResponse = await customer.request('/my-orders?year=2024&month=01');
-    assert.equal(customerResponse.status, 200, await customerResponse.text());
+    assert.equal(
+        customerResponse.status,
+        200,
+        `${await customerResponse.clone().text()}\n\nServerausgabe:\n${serverOutput}`
+    );
     const customerResult = await customerResponse.json();
 
     assert.deepEqual(customerResult.items.map(order => order.id), [januaryOrder.orderId]);
@@ -271,7 +275,11 @@ test('filtert Kunden- und Adminbestellungen nach konkretem Jahr und Monat', asyn
     assert.ok(customerResult.filterOptions.months.includes('11'));
 
     const adminResponse = await admin.request('/admin/orders?year=2025&month=11');
-    assert.equal(adminResponse.status, 200, await adminResponse.text());
+    assert.equal(
+        adminResponse.status,
+        200,
+        `${await adminResponse.clone().text()}\n\nServerausgabe:\n${serverOutput}`
+    );
     const adminResult = await adminResponse.json();
 
     assert.deepEqual(adminResult.items.map(order => order.id), [novemberOrder.orderId]);
