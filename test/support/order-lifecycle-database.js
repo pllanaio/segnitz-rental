@@ -185,6 +185,7 @@ const schemaStatements = [
         cancelled_at DATETIME NULL,
         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (id),
+        UNIQUE KEY uq_lifecycle_order_no (order_no),
         KEY idx_lifecycle_orders_payment (mollie_payment_id),
         CONSTRAINT fk_lifecycle_order_cart FOREIGN KEY (cart_id)
             REFERENCES rental_carts (id) ON DELETE SET NULL,
@@ -246,6 +247,9 @@ const schemaStatements = [
         amount DECIMAL(10,2) NOT NULL DEFAULT 0,
         mollie_payment_id VARCHAR(100) NULL,
         mollie_refund_id VARCHAR(100) NULL,
+        mollie_customer_id VARCHAR(100) NULL,
+        mollie_mandate_id VARCHAR(100) NULL,
+        sequence_type VARCHAR(50) NULL,
         note TEXT NULL,
         paid_at DATETIME NULL,
         recorded_by_user_id INT UNSIGNED NULL,
@@ -264,7 +268,8 @@ const schemaStatements = [
         order_id INT UNSIGNED NOT NULL,
         order_item_id INT UNSIGNED NOT NULL,
         image_path VARCHAR(500) NOT NULL,
-        uploaded_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        uploaded_by_user_id INT UNSIGNED NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (id),
         CONSTRAINT fk_lifecycle_return_image_order FOREIGN KEY (order_id)
             REFERENCES rental_orders (id) ON DELETE CASCADE,

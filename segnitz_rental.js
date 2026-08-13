@@ -64,7 +64,10 @@ const {
 } = require('./services/cartService');
 
 const cartRoutes = require('./routes/cartRoutes');
-const { checkProductAvailability } = require('./utils/availability');
+const {
+    checkProductAvailability,
+    lockRentalProducts
+} = require('./utils/availability');
 
 const {
     createMolliePaymentForOrder,
@@ -74,6 +77,17 @@ const {
     getMollieCheckoutUrl,
     cancelMolliePayment
 } = require('./services/mollieService');
+
+const {
+    calculateReturnSettlement,
+    deriveOrderStatusFromInitialPayment,
+    isDuplicateKeyError,
+    isOpenPaymentStatus,
+    isStrictIsoDate,
+    mapMolliePaymentStatus,
+    mapMollieRefundStatus,
+    roundMoney
+} = require('./services/paymentStateService');
 
 
 async function cleanupOnStartup() {
@@ -89,62 +103,6 @@ async function cleanupOnStartup() {
         if (connection) {
             await connection.end();
         }
-    }
-}
-
-async function expireOldReservations(connection) {
-    const [updatedItems] = await connection.execute(
-        `UPDATE rental_order_items roi
-     JOIN rental_orders ro ON ro.id = roi.order_id
-     SET roi.item_status = 'expired',
-         roi.return_status = 'not_required'
-     WHERE ro.status = 'reserved'
-     AND ro.reserved_until IS NOT NULL
-     AND ro.reserved_until < NOW()`
-    );
-
-    const [updatedOrders] = await connection.execute(
-        `UPDATE rental_orders
-     SET status = 'expired',
-         return_status = 'not_required',
-         return_case_status = 'closed'
-     WHERE status = 'reserved'
-     AND reserved_until IS NOT NULL
-     AND reserved_until < NOW()`
-    );
-
-    if (updatedOrders.affectedRows > 0 || updatedItems.affectedRows > 0) {
-        console.log(
-            `${new Date().toISOString()} - Cleanup: ${updatedOrders.affectedRows} Orders expired, ${updatedItems.affectedRows} Order-Items gelöscht`
-        );
-    }
-}
-
-async function deleteExpiredGuestVerifications(connection) {
-    const [result] = await connection.execute(
-        `DELETE FROM guest_verifications
-         WHERE expires_at IS NOT NULL
-         AND expires_at < NOW()`
-    );
-
-    if (result.affectedRows > 0) {
-        console.log(
-            `${new Date().toISOString()} - Cleanup: ${result.affectedRows} Guest-Verifications gelöscht`
-        );
-    }
-}
-
-async function deleteOldActiveCarts(connection) {
-    const [result] = await connection.execute(
-        `DELETE FROM rental_carts
-         WHERE status = 'active'
-         AND updated_at < NOW() - INTERVAL 24 HOUR`
-    );
-
-    if (result.affectedRows > 0) {
-        console.log(
-            `${new Date().toISOString()} - Cleanup: ${result.affectedRows} alte Carts gelöscht`
-        );
     }
 }
 
@@ -380,8 +338,12 @@ app.post('/logout', (req, res) => {
 });
 
 function getSignatureDataUrl(formData) {
+    if (!Array.isArray(formData)) return null;
+
     for (const step of formData) {
-        const signatureElement = step.elements.find(element => element.name === 'Signature');
+        const signatureElement = Array.isArray(step?.elements)
+            ? step.elements.find(element => element.name === 'Signature')
+            : null;
 
         if (signatureElement && signatureElement.value) {
             return signatureElement.value;
@@ -391,23 +353,79 @@ function getSignatureDataUrl(formData) {
     return null;
 }
 
+function isFormCheckboxChecked(formData, fieldName) {
+    if (!Array.isArray(formData)) return false;
+
+    const element = formData
+        .flatMap(step => Array.isArray(step?.elements) ? step.elements : [])
+        .find(field => field?.name === fieldName);
+    const normalizedValue = String(element?.value || '').toLowerCase();
+
+    return element?.checked === true || ['on', 'true', '1'].includes(normalizedValue);
+}
+
 app.post('/data', async (req, res) => {
     let connection;
 
     try {
         const formData = req.body.form;
 
-        const email =
+        if (!Array.isArray(formData)) {
+            return res.status(400).json({ error: 'Formulardaten fehlen oder sind ungültig.' });
+        }
+
+        if (!['cash', 'online'].includes(req.body.paymentMethod)) {
+            return res.status(400).json({ error: 'Ungültige Zahlungsmethode.' });
+        }
+
+        const paymentMethod = req.body.paymentMethod;
+
+        const submittedEmail =
             getFormValue(formData, 'CustomerEmail') ||
             getFormValue(formData, 'email');
 
-        const firstName = getFormValue(formData, 'FirstName');
-        const lastName = getFormValue(formData, 'LastName');
-        const company = getFormValue(formData, 'CustomerCompany');
-        const phone = getFormValue(formData, 'CustomerPhone');
-        const address = getFormValue(formData, 'CustomerAddress');
-        const zip = getFormValue(formData, 'CustomerZip');
-        const city = getFormValue(formData, 'CustomerCity');
+        const email = String(req.session.user || submittedEmail || '').trim().toLowerCase();
+
+        const firstName = String(getFormValue(formData, 'FirstName') || '').trim();
+        const lastName = String(getFormValue(formData, 'LastName') || '').trim();
+        const company = String(getFormValue(formData, 'CustomerCompany') || '').trim();
+        const phone = String(getFormValue(formData, 'CustomerPhone') || '').trim();
+        const address = String(getFormValue(formData, 'CustomerAddress') || '').trim();
+        const zip = String(getFormValue(formData, 'CustomerZip') || '').trim();
+        const city = String(getFormValue(formData, 'CustomerCity') || '').trim();
+        const signatureDataUrl = getSignatureDataUrl(formData);
+
+        if (
+            !email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ||
+            !firstName || !lastName || !phone || !address || !zip || !city ||
+            !/^[0-9]+$/.test(phone) ||
+            !/^[0-9]+$/.test(zip) ||
+            !/^[a-zA-Z0-9äöüÄÖÜß\s]+$/.test(address)
+        ) {
+            return res.status(400).json({
+                error: 'Bitte füllen Sie alle Pflichtfelder mit gültigen Kundendaten aus.'
+            });
+        }
+
+        if (!isFormCheckboxChecked(formData, 'agbs') || !isFormCheckboxChecked(formData, 'dsgvo')) {
+            return res.status(400).json({
+                error: 'AGB und Datenschutzerklärung müssen bestätigt werden.'
+            });
+        }
+
+        if (!/^data:image\/(?:png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(String(signatureDataUrl || ''))) {
+            return res.status(400).json({ error: 'Eine gültige Unterschrift ist erforderlich.' });
+        }
+
+        if (
+            req.session.user &&
+            submittedEmail &&
+            String(submittedEmail).trim().toLowerCase() !== String(req.session.user).toLowerCase()
+        ) {
+            return res.status(403).json({
+                error: 'Die Bestellung muss mit der E-Mail-Adresse des angemeldeten Kontos angelegt werden.'
+            });
+        }
 
         connection = await mysql.createConnection(dbConfig);
         await runDatabaseCleanup(connection);
@@ -438,12 +456,39 @@ app.post('/data', async (req, res) => {
             });
         }
 
+        const lockedProducts = await lockRentalProducts(
+            connection,
+            cartItems.map(item => item.productId)
+        );
+        const today = new Date().toLocaleDateString('sv-SE');
+
+        if (lockedProducts.some(product => Number(product.is_active) !== 1)) {
+            await connection.rollback();
+            return res.status(409).json({
+                error: 'Mindestens ein Produkt im Warenkorb ist nicht mehr aktiv.'
+            });
+        }
+
         for (const item of cartItems) {
+            if (
+                !isStrictIsoDate(item.rentalStart) ||
+                !isStrictIsoDate(item.rentalEnd) ||
+                item.rentalStart < today ||
+                item.rentalEnd < item.rentalStart
+            ) {
+                await connection.rollback();
+                return res.status(400).json({
+                    error: `Der Mietzeitraum für "${item.title}" ist nicht mehr gültig.`
+                });
+            }
+
             const available = await checkProductAvailability(
                 connection,
                 item.productId,
                 item.rentalStart,
-                item.rentalEnd
+                item.rentalEnd,
+                null,
+                true
             );
 
             if (!available) {
@@ -455,14 +500,16 @@ app.post('/data', async (req, res) => {
         }
 
         const orderNo = await generateOrderNo(connection);
-        const orderSummary = buildOrderSummary(orderNo, cartItems);
-        const signatureDataUrl = getSignatureDataUrl(formData);
+        const initialOrderStatus = paymentMethod === 'cash' ? 'confirmed' : 'reserved';
+        const orderSummary = buildOrderSummary(orderNo, cartItems, initialOrderStatus);
 
         const [orderResult] = await connection.execute(
             `INSERT INTO rental_orders
             (order_no, cart_id, user_id, customer_email, customer_first_name, customer_last_name,
             customer_company, customer_phone, customer_address, customer_zip, customer_city, signature_data_url, status, reserved_until, confirmation_json, total_amount)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'reserved', DATE_ADD(NOW(), INTERVAL 15 MINUTE), ?, ?)`,
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                CASE WHEN ? = 'reserved' THEN DATE_ADD(NOW(), INTERVAL 15 MINUTE) ELSE NULL END,
+                ?, ?)`,
             [
                 orderNo,
                 cartId,
@@ -476,6 +523,8 @@ app.post('/data', async (req, res) => {
                 zip,
                 city,
                 signatureDataUrl,
+                initialOrderStatus,
+                initialOrderStatus,
                 JSON.stringify(orderSummary),
                 orderSummary.totals.grandTotalBeforeDepositReturn
             ]
@@ -515,11 +564,6 @@ app.post('/data', async (req, res) => {
             );
         }
 
-        const paymentMethod =
-            req.body.paymentMethod === 'online'
-                ? 'online'
-                : 'cash';
-
         console.log('Payment-Methode Backend:', paymentMethod);
 
         if (paymentMethod === 'online') {
@@ -528,8 +572,14 @@ app.post('/data', async (req, res) => {
                 id: orderId,
                 orderNo,
                 totalAmount: orderSummary.totals.grandTotalBeforeDepositReturn,
-                type: 'order_payment'
+                type: 'order_payment',
+                idempotencyKey: `initial-order-payment-${orderId}`
             });
+            const checkoutUrl = getMollieCheckoutUrl(payment);
+
+            if (!checkoutUrl) {
+                throw new Error('Mollie Checkout-URL fehlt.');
+            }
 
             await connection.execute(
                 `INSERT INTO rental_order_payments
@@ -571,21 +621,26 @@ app.post('/data', async (req, res) => {
                 `UPDATE rental_orders
 SET payment_method = 'online',
     payment_status = 'pending',
-    mollie_payment_id = ?
+    mollie_payment_id = ?,
+    mollie_checkout_url = ?,
+    mollie_payment_status = ?
 WHERE id = ?`,
                 [
                     payment.id,
+                    checkoutUrl,
+                    payment.status || 'open',
                     orderId
                 ]
             );
 
+            await connection.execute(
+                `UPDATE rental_carts
+                 SET status = 'converted', updated_at = NOW()
+                 WHERE id = ?`,
+                [cartId]
+            );
+
             await connection.commit();
-
-            const checkoutUrl = getMollieCheckoutUrl(payment);
-
-            if (!checkoutUrl) {
-                throw new Error('Mollie Checkout-URL fehlt.');
-            }
 
             return res.status(200).json({
                 message: 'Online-Zahlung wurde vorbereitet.',
@@ -598,7 +653,9 @@ WHERE id = ?`,
         await connection.execute(
             `UPDATE rental_orders
      SET payment_method = 'cash',
-         payment_status = 'pending'
+         payment_status = 'pending',
+         status = 'confirmed',
+         reserved_until = NULL
      WHERE id = ?`,
             [orderId]
         );
@@ -627,11 +684,15 @@ WHERE id = ?`,
             );
         }
 
+        await connection.execute(
+            `DELETE FROM rental_carts
+             WHERE id = ?`,
+            [cartId]
+        );
+
         await connection.commit();
 
-        const customerOrderEmail =
-            getFormValue(formData, 'email') ||
-            email;
+        const customerOrderEmail = email;
 
         const internalOrderEmail = 'orders@segnitzbau.de';
 
@@ -671,19 +732,14 @@ WHERE id = ?`,
             console.error('Fehler beim E-Mail-Versand:', emailError);
         }
 
-        await connection.execute(
-            `DELETE FROM rental_carts
-             WHERE id = ?`,
-            [cartId]
-        );
-
         delete req.session.cartKey;
 
         return res.status(200).json({
-            message: 'Bestellung erfolgreich reserviert.',
+            message: 'Bestellung bestätigt. Miete und Kaution sind bei Abholung bar zu zahlen.',
             orderId,
             orderNo,
-            reservedUntil,
+            reservedUntil: null,
+            amountDue: orderSummary.totals.grandTotalBeforeDepositReturn,
             emailSent
         });
 
@@ -903,7 +959,7 @@ app.get('/my-profile', async (req, res) => {
         const connection = await mysql.createConnection(dbConfig);
 
         const [rows] = await connection.execute(
-            `SELECT 
+            `SELECT
                 username AS email,
                 first_name AS firstName,
                 last_name AS lastName,
@@ -1306,6 +1362,7 @@ app.get('/my-orders/:id', async (req, res) => {
                 roi.price_per_day AS pricePerDay,
                 roi.deposit AS deposit,
                 roi.item_status AS itemStatus,
+                DATE_FORMAT(roi.picked_up_at, '%Y-%m-%d %H:%i:%s') AS pickedUpAt,
                 DATE_FORMAT(roi.cancelled_at, '%Y-%m-%d %H:%i:%s') AS cancelledAt,
                 roi.cancel_reason AS cancelReason,
                 roi.cancelled_by_name AS cancelledByName,
@@ -1380,6 +1437,30 @@ ORDER BY id DESC`,
             [req.params.id, req.session.user]
         );
 
+        const [payments] = await connection.execute(
+            `SELECT
+                id,
+                order_item_id AS orderItemId,
+                payment_type AS paymentType,
+                payment_method AS paymentMethod,
+                payment_status AS paymentStatus,
+                amount,
+                note,
+                SHA2(CONCAT(
+                    payment_type,
+                    '|',
+                    COALESCE(CAST(order_item_id AS CHAR), 'order'),
+                    '|',
+                    COALESCE(mollie_payment_id, payment_method)
+                ), 256) AS refundGroupKey,
+                DATE_FORMAT(paid_at, '%Y-%m-%d %H:%i:%s') AS paidAt,
+                DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS createdAt
+             FROM rental_order_payments
+             WHERE order_id = ?
+             ORDER BY created_at DESC, id DESC`,
+            [req.params.id]
+        );
+
         const reviewsByProductId = reviews.reduce((map, review) => {
             map[Number(review.productId)] = review;
             return map;
@@ -1413,7 +1494,8 @@ ORDER BY id DESC`,
         res.json({
             ...safeOrder,
             items: finalItems,
-            returnImages: images
+            returnImages: images,
+            payments
         });
     } catch (error) {
         console.error('Fehler beim Laden der Kundenbestellung:', error);
@@ -1423,127 +1505,443 @@ ORDER BY id DESC`,
     }
 });
 
-async function refundFullOnlineOrderPaymentOnCancellation(connection, orderId, order) {
-    const [alreadyRefunded] = await connection.execute(
+async function syncMollieRefundsForPayment(connection, paymentId) {
+    const refunds = await listMollieRefundsForPayment(paymentId);
+    const refundList =
+        refunds?._embedded?.refunds ||
+        refunds?._embedded?.payment_refunds ||
+        (Array.isArray(refunds) ? refunds : []);
+
+    for (const refund of refundList) {
+        if (!refund?.id) continue;
+
+        const status = mapMollieRefundStatus(refund.status);
+        await connection.execute(
+            `UPDATE rental_order_payments
+             SET payment_status = ?,
+                 paid_at = CASE WHEN ? = 'paid' THEN COALESCE(paid_at, NOW()) ELSE NULL END
+             WHERE mollie_refund_id = ?`,
+            [status, status, refund.id]
+        );
+    }
+}
+
+async function refreshCancelledOrderPaymentStatus(connection, orderId) {
+    const [rows] = await connection.execute(
+        `SELECT
+            COUNT(*) AS refundCount,
+            SUM(effectiveStatus = 'paid') AS paidCount,
+            SUM(effectiveStatus = 'pending') AS pendingCount,
+            SUM(effectiveStatus = 'failed') AS failedCount
+         FROM (
+            SELECT
+                order_item_id,
+                mollie_payment_id,
+                CASE
+                    WHEN SUM(payment_status IN ('pending', 'open', 'authorized')) > 0 THEN 'pending'
+                    WHEN SUM(payment_status = 'paid') > 0 THEN 'paid'
+                    ELSE 'failed'
+                END AS effectiveStatus
+            FROM rental_order_payments
+            WHERE order_id = ?
+            AND payment_type = 'order_cancellation_refund'
+            GROUP BY order_item_id, mollie_payment_id
+         ) refundTargets`,
+        [orderId]
+    );
+
+    const summary = rows[0] || {};
+    let paymentStatus = 'cancelled';
+
+    if (Number(summary.pendingCount || 0) > 0) paymentStatus = 'refund_pending';
+    else if (Number(summary.refundCount || 0) > 0 && Number(summary.refundCount) === Number(summary.paidCount || 0)) {
+        paymentStatus = 'refunded';
+    } else if (Number(summary.failedCount || 0) > 0) paymentStatus = 'refund_failed';
+
+    await connection.execute(
+        `UPDATE rental_orders
+         SET payment_status = ?
+         WHERE id = ? AND status IN ('cancelled', 'expired')`,
+        [paymentStatus, orderId]
+    );
+
+    return paymentStatus;
+}
+
+async function refreshReturnCaseStatus(connection, orderId) {
+    const [orderRows] = await connection.execute(
+        `SELECT status FROM rental_orders WHERE id = ? LIMIT 1`,
+        [orderId]
+    );
+    if (orderRows.length === 0) return null;
+
+    const [paymentRows] = await connection.execute(
+        `SELECT COUNT(*) AS openCount
+         FROM rental_order_payments
+         WHERE order_id = ?
+         AND payment_type IN ('rental_adjustment', 'return_additional_charge')
+         AND payment_status IN (
+            'pending', 'open', 'authorized', 'failed', 'cancelled', 'expired'
+         )`,
+        [orderId]
+    );
+    const [itemRows] = await connection.execute(
+        `SELECT
+            SUM(COALESCE(item_status, 'active') = 'picked_up') AS pickedUpCount,
+            SUM(COALESCE(item_status, 'active') LIKE 'returned_%') AS returnedCount
+         FROM rental_order_items
+         WHERE order_id = ?`,
+        [orderId]
+    );
+
+    const orderStatus = String(orderRows[0].status || '');
+    const hasOpenPayment = Number(paymentRows[0]?.openCount || 0) > 0;
+    const pickedUpCount = Number(itemRows[0]?.pickedUpCount || 0);
+    const returnedCount = Number(itemRows[0]?.returnedCount || 0);
+    let returnCaseStatus = null;
+
+    if (orderStatus === 'returned') {
+        returnCaseStatus = hasOpenPayment ? 'payment_pending' : 'closed';
+    } else if (pickedUpCount > 0) {
+        returnCaseStatus = returnedCount > 0 ? 'partial' : 'open';
+    }
+
+    if (returnCaseStatus) {
+        await connection.execute(
+            `UPDATE rental_orders SET return_case_status = ? WHERE id = ?`,
+            [returnCaseStatus, orderId]
+        );
+    }
+
+    return returnCaseStatus;
+}
+
+async function cancelOpenMolliePayments(
+    connection,
+    orderId,
+    {
+        orderItemId = null,
+        reason = 'Offene Mollie-Zahlung beendet'
+    } = {}
+) {
+    const itemScopeSql = orderItemId === null ? '' : ' AND order_item_id = ?';
+    const itemScopeParams = orderItemId === null ? [] : [orderItemId];
+    const [paymentRows] = await connection.execute(
+        `SELECT DISTINCT mollie_payment_id
+         FROM rental_order_payments
+         WHERE order_id = ?
+         ${itemScopeSql}
+         AND payment_method = 'online'
+         AND payment_status IN ('pending', 'open', 'authorized')
+         AND mollie_payment_id IS NOT NULL`,
+        [orderId, ...itemScopeParams]
+    );
+
+    for (const row of paymentRows) {
+        const payment = await getMolliePayment(row.mollie_payment_id);
+        const mappedStatus = mapMolliePaymentStatus(payment.status);
+
+        if (mappedStatus === 'pending' || mappedStatus === 'authorized') {
+            await cancelMolliePayment(row.mollie_payment_id);
+            await connection.execute(
+                `UPDATE rental_order_payments
+                 SET payment_status = 'cancelled',
+                     note = CONCAT(COALESCE(note, ''),
+                        CASE WHEN note IS NULL OR note = '' THEN '' ELSE ' | ' END,
+                        ?)
+                 WHERE mollie_payment_id = ?
+                 AND payment_status IN ('pending', 'open', 'authorized')`,
+                [reason, row.mollie_payment_id]
+            );
+        } else {
+            await connection.execute(
+                `UPDATE rental_order_payments
+                 SET payment_status = ?,
+                     paid_at = CASE WHEN ? = 'paid' THEN COALESCE(paid_at, NOW()) ELSE paid_at END
+                 WHERE mollie_payment_id = ?`,
+                [mappedStatus, mappedStatus, row.mollie_payment_id]
+            );
+        }
+    }
+
+    await connection.execute(
+        `UPDATE rental_order_payments
+         SET payment_status = 'cancelled',
+             note = CONCAT(COALESCE(note, ''),
+                CASE WHEN note IS NULL OR note = '' THEN '' ELSE ' | ' END,
+                ?)
+         WHERE order_id = ?
+         ${itemScopeSql}
+         AND payment_type IN ('rental_adjustment', 'return_additional_charge')
+         AND payment_status IN ('pending', 'open', 'authorized', 'failed', 'expired')`,
+        [reason, orderId, ...itemScopeParams]
+    );
+}
+
+async function createOnlineCancellationRefund(connection, {
+    order,
+    itemId = null,
+    paymentId,
+    requestedAmount,
+    note
+}) {
+    const [existingForTarget] = await connection.execute(
         `SELECT id
          FROM rental_order_payments
          WHERE order_id = ?
+         AND order_item_id <=> ?
          AND payment_type = 'order_cancellation_refund'
-         AND note LIKE '%Stornierung%'
-         AND payment_status = 'paid'
+         AND mollie_payment_id = ?
+         ORDER BY id DESC
          LIMIT 1`,
-        [orderId]
+        [order.id, itemId, paymentId]
     );
 
-    if (alreadyRefunded.length > 0) {
-        return null;
-    }
+    if (existingForTarget.length > 0) return null;
 
-    const [paidPayments] = await connection.execute(
-        `SELECT
-        mollie_payment_id,
-        amount
-     FROM rental_order_payments
-     WHERE order_id = ?
-     AND payment_type = 'initial_payment'
-     AND payment_method = 'online'
-     AND payment_status = 'paid'
-     AND mollie_payment_id IS NOT NULL
-     ORDER BY id ASC
-     LIMIT 1`,
-        [orderId]
+    const [sourceRows] = await connection.execute(
+        `SELECT COALESCE(SUM(amount), 0) AS paidAmount
+         FROM rental_order_payments
+         WHERE order_id = ?
+         AND mollie_payment_id = ?
+         AND payment_status = 'paid'
+         AND payment_type IN ('initial_payment', 'rental_adjustment')`,
+        [order.id, paymentId]
+    );
+    const [refundRows] = await connection.execute(
+        `SELECT COALESCE(SUM(ABS(amount)), 0) AS refundedAmount
+         FROM rental_order_payments
+         WHERE order_id = ?
+         AND mollie_payment_id = ?
+         AND payment_type IN (
+            'deposit_refund',
+            'order_cancellation_refund',
+            'duplicate_payment_refund'
+         )
+         AND payment_status NOT IN ('failed', 'cancelled')`,
+        [order.id, paymentId]
     );
 
-    if (paidPayments.length === 0) {
-        return null;
-    }
-
-    const paymentId = paidPayments[0].mollie_payment_id;
-    const originalPaidAmount = Number(paidPayments[0].amount || 0);
-
-    if (originalPaidAmount <= 0) {
-        return null;
-    }
-
-    const existingRefunds = await listMollieRefundsForPayment(paymentId);
-
-    const refundList =
-        existingRefunds?._embedded?.refunds ||
-        existingRefunds?._embedded?.payment_refunds ||
-        existingRefunds ||
-        [];
-
-    const alreadyRefundedAmount = refundList
-        .filter(refund => !['failed', 'canceled', 'cancelled'].includes(String(refund.status || '').toLowerCase()))
-        .reduce((sum, refund) => {
-            return sum + Number(refund.amount?.value || 0);
-        }, 0);
-
-    const refundableAmount = Math.max(
-        Number((originalPaidAmount - alreadyRefundedAmount).toFixed(2)),
+    const remainingAmount = Math.max(
+        roundMoney(Number(sourceRows[0]?.paidAmount || 0) - Number(refundRows[0]?.refundedAmount || 0)),
         0
     );
+    const refundAmount = Math.min(roundMoney(requestedAmount), remainingAmount);
 
-    if (refundableAmount <= 0) {
-        await connection.execute(
-            `INSERT INTO rental_order_payments
-         (
-            order_id,
-            order_item_id,
-            payment_type,
-            payment_method,
-            payment_status,
-            amount,
-            mollie_payment_id,
-            note,
-            paid_at
-         )
-         VALUES (?, NULL, 'order_cancellation_refund', 'online', 'paid', 0, ?, ?, NOW())`,
-            [
-                orderId,
-                paymentId,
-                'Stornierung: Kein weiterer Mollie-Refund möglich, Zahlung war bereits vollständig erstattet'
-            ]
-        );
+    if (refundAmount <= 0) return null;
 
-        return null;
-    }
-
+    const targetKey = itemId ? `item-${itemId}` : 'order';
     const refund = await createMollieRefundForPayment({
         paymentId,
-        amount: refundableAmount,
-        description: `Storno Rückerstattung Bestellung ${order.order_no}`,
+        amount: refundAmount,
+        description: itemId
+            ? `Artikel-Storno ${order.order_no} (#${itemId})`
+            : `Storno Rückerstattung Bestellung ${order.order_no}`,
         metadata: {
-            orderId: String(orderId),
+            orderId: String(order.id),
+            itemId: itemId ? String(itemId) : null,
             type: 'order_cancellation_refund'
-        }
+        },
+        idempotencyKey: `cancellation-refund-${order.id}-${targetKey}-${paymentId}`
     });
+    const refundStatus = mapMollieRefundStatus(refund.status);
 
     await connection.execute(
         `INSERT INTO rental_order_payments
-         (
-            order_id,
-            order_item_id,
-            payment_type,
-            payment_method,
-            payment_status,
-            amount,
-            mollie_payment_id,
-            mollie_refund_id,
-            note,
-            paid_at
-         )
-         VALUES (?, NULL,'order_cancellation_refund', 'online', 'paid', ?, ?, ?, ?, NOW())`,
+         (order_id, order_item_id, payment_type, payment_method, payment_status,
+          amount, mollie_payment_id, mollie_refund_id, note, paid_at)
+         VALUES (?, ?, 'order_cancellation_refund', 'online', ?, ?, ?, ?, ?,
+            CASE WHEN ? = 'paid' THEN NOW() ELSE NULL END)`,
         [
-            orderId,
-            -Math.abs(refundableAmount),
+            order.id,
+            itemId,
+            refundStatus,
+            -Math.abs(refundAmount),
             paymentId,
             refund.id,
-            'Komplette Rückerstattung wegen Stornierung vor Abholung'
+            note,
+            refundStatus
         ]
     );
 
     return refund;
+}
+
+async function createCancellationRefunds(connection, order, item = null) {
+    const itemId = item?.id || null;
+    let baseRefundAmount = 0;
+
+    if (item) {
+        baseRefundAmount = roundMoney(
+            calculateRentalDays(item.rental_start, item.rental_end) * Number(item.price_per_day || 0) +
+            Number(item.deposit || 0)
+        );
+    }
+
+    const [paidSources] = await connection.execute(
+        item
+            ? `SELECT payment_method, mollie_payment_id, payment_type, amount
+               FROM rental_order_payments
+               WHERE order_id = ?
+               AND payment_status = 'paid'
+               AND (
+                    (payment_type = 'initial_payment' AND order_item_id IS NULL)
+                    OR (payment_type = 'rental_adjustment' AND order_item_id = ?)
+               )
+               ORDER BY id ASC`
+            : `SELECT payment_method, mollie_payment_id, payment_type, amount
+               FROM rental_order_payments
+               WHERE order_id = ?
+               AND payment_status = 'paid'
+               AND payment_type IN ('initial_payment', 'rental_adjustment')
+               ORDER BY id ASC`,
+        item ? [order.id, item.id] : [order.id]
+    );
+
+    if (paidSources.length === 0) return;
+
+    const cashSources = paidSources.filter(source =>
+        String(source.payment_method || '').toLowerCase() === 'cash'
+    );
+    const cashInitialWasPaid = cashSources.some(source => source.payment_type === 'initial_payment');
+    const cashExtensionAmount = cashSources
+        .filter(source => source.payment_type === 'rental_adjustment')
+        .reduce((sum, source) => sum + Number(source.amount || 0), 0);
+    const requestedCashRefund = item
+        ? roundMoney((cashInitialWasPaid ? baseRefundAmount : 0) + cashExtensionAmount)
+        : roundMoney(cashSources.reduce((sum, source) => sum + Number(source.amount || 0), 0));
+
+    if (requestedCashRefund > 0) {
+        const [cashCapacityRows] = await connection.execute(
+            `SELECT
+                COALESCE((
+                    SELECT SUM(amount)
+                    FROM rental_order_payments
+                    WHERE order_id = ?
+                    AND payment_method = 'cash'
+                    AND payment_status = 'paid'
+                    AND payment_type IN ('initial_payment', 'rental_adjustment')
+                ), 0) AS paidAmount,
+                COALESCE((
+                    SELECT SUM(ABS(amount))
+                    FROM rental_order_payments
+                    WHERE order_id = ?
+                    AND payment_method = 'cash'
+                    AND payment_type = 'order_cancellation_refund'
+                    AND payment_status NOT IN ('failed', 'cancelled')
+                ), 0) AS refundedAmount`,
+            [order.id, order.id]
+        );
+        const remainingCashCapacity = Math.max(
+            roundMoney(
+                Number(cashCapacityRows[0]?.paidAmount || 0) -
+                Number(cashCapacityRows[0]?.refundedAmount || 0)
+            ),
+            0
+        );
+        const cashRefundAmount = Math.min(requestedCashRefund, remainingCashCapacity);
+
+        const [existing] = await connection.execute(
+            `SELECT id FROM rental_order_payments
+             WHERE order_id = ? AND order_item_id <=> ?
+             AND payment_type = 'order_cancellation_refund'
+             AND payment_method = 'cash'
+             AND payment_status NOT IN ('failed', 'cancelled')
+             LIMIT 1`,
+            [order.id, itemId]
+        );
+
+        if (cashRefundAmount > 0 && existing.length === 0) {
+            await connection.execute(
+                `INSERT INTO rental_order_payments
+                 (order_id, order_item_id, payment_type, payment_method, payment_status, amount, note)
+                 VALUES (?, ?, 'order_cancellation_refund', 'cash', 'pending', ?, ?)`,
+                [
+                    order.id,
+                    itemId,
+                    -Math.abs(cashRefundAmount),
+                    item ? 'Barauszahlung wegen Artikel-Storno vorgemerkt' : 'Barauszahlung wegen vollständigem Storno vorgemerkt'
+                ]
+            );
+        }
+    }
+
+    for (const source of paidSources) {
+        if (
+            String(source.payment_method || '').toLowerCase() === 'cash' ||
+            !source.mollie_payment_id
+        ) {
+            continue;
+        }
+
+        const requestedAmount = item && source.payment_type === 'initial_payment'
+            ? baseRefundAmount
+            : Number(source.amount || 0);
+
+        await createOnlineCancellationRefund(connection, {
+            order,
+            itemId,
+            paymentId: source.mollie_payment_id,
+            requestedAmount,
+            note: item
+                ? 'Anteilig erstattet wegen Artikel-Storno vor Abholung'
+                : 'Komplette Rückerstattung wegen Stornierung vor Abholung'
+        });
+    }
+}
+
+async function refundDuplicateOnlinePayment(
+    connection,
+    paymentContext,
+    note = 'Onlinezahlung ging nach bereits verbuchter Barzahlung ein und wurde automatisch erstattet'
+) {
+    const [existingRows] = await connection.execute(
+        `SELECT id, payment_status FROM rental_order_payments
+         WHERE order_id = ?
+         AND order_item_id <=> ?
+         AND payment_type = 'duplicate_payment_refund'
+         AND mollie_payment_id = ?
+         ORDER BY id DESC
+         LIMIT 1`,
+        [paymentContext.order_id, paymentContext.order_item_id, paymentContext.mollie_payment_id]
+    );
+    if (existingRows.length > 0) return existingRows[0].payment_status;
+
+    const amount = Number(paymentContext.amount || 0);
+    if (amount <= 0) return null;
+
+    const refund = await createMollieRefundForPayment({
+        paymentId: paymentContext.mollie_payment_id,
+        amount,
+        description: `Rückerstattung Doppelzahlung ${paymentContext.order_no}`,
+        metadata: {
+            orderId: String(paymentContext.order_id),
+            itemId: paymentContext.order_item_id ? String(paymentContext.order_item_id) : null,
+            type: 'duplicate_payment_refund'
+        },
+        idempotencyKey: `duplicate-payment-refund-${paymentContext.mollie_payment_id}`
+    });
+    const refundStatus = mapMollieRefundStatus(refund.status);
+
+    await connection.execute(
+        `INSERT INTO rental_order_payments
+         (order_id, order_item_id, payment_type, payment_method, payment_status,
+          amount, mollie_payment_id, mollie_refund_id, note, paid_at)
+         VALUES (?, ?, 'duplicate_payment_refund', 'online', ?, ?, ?, ?, ?,
+            CASE WHEN ? = 'paid' THEN NOW() ELSE NULL END)`,
+        [
+            paymentContext.order_id,
+            paymentContext.order_item_id,
+            refundStatus,
+            -Math.abs(amount),
+            paymentContext.mollie_payment_id,
+            refund.id,
+            note,
+            refundStatus
+        ]
+    );
+
+    return refundStatus;
 }
 
 app.post('/my-orders/:id/cancel', async (req, res) => {
@@ -1611,7 +2009,6 @@ app.get('/admin/orders', checkAdmin, async (req, res) => {
                 ro.payment_status,
                 ro.return_status,
                 DATE_FORMAT(ro.created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
-                ro.deposit_decision,
                 DATE_FORMAT(ro.reserved_until, '%Y-%m-%d %H:%i:%s') AS reserved_until,
                 DATE_FORMAT(ro.returned_at, '%Y-%m-%d %H:%i:%s') AS returned_at,
                 ro.cancel_reason AS cancelReason,
@@ -1722,6 +2119,7 @@ app.get('/admin/orders/:id', checkAdmin, async (req, res) => {
                 roi.id,
                 roi.product_id AS productId,
                 roi.item_status AS itemStatus,
+                DATE_FORMAT(roi.picked_up_at, '%Y-%m-%d %H:%i:%s') AS pickedUpAt,
                 DATE_FORMAT(roi.cancelled_at, '%Y-%m-%d %H:%i:%s') AS cancelledAt,
                 roi.cancel_reason AS cancelReason,
                 roi.cancelled_by_name AS cancelledByName,
@@ -1801,7 +2199,7 @@ ORDER BY id DESC`,
         sequence_type AS sequenceType
      FROM rental_order_payments
      WHERE order_id = ?
-     ORDER BY created_at DESC`,
+     ORDER BY created_at DESC, id DESC`,
             [req.params.id]
         );
 
@@ -1863,7 +2261,8 @@ app.put('/admin/order-items/:itemId/pickup', checkAdmin, async (req, res) => {
              FROM rental_order_items roi
              JOIN rental_orders ro ON ro.id = roi.order_id
              WHERE roi.id = ?
-             LIMIT 1`,
+             LIMIT 1
+             FOR UPDATE`,
             [req.params.itemId]
         );
 
@@ -1874,13 +2273,10 @@ app.put('/admin/order-items/:itemId/pickup', checkAdmin, async (req, res) => {
 
         const item = items[0];
 
-        if (
-            String(item.payment_method || '').toLowerCase() === 'cash' &&
-            String(item.payment_status || '').toLowerCase() !== 'paid'
-        ) {
+        if (String(item.payment_status || '').toLowerCase() !== 'paid') {
             await connection.rollback();
             return res.status(409).json({
-                error: 'Der Artikel kann erst abgeholt werden, wenn Miete und Kaution bar kassiert wurden.'
+                error: 'Der Artikel kann erst abgeholt werden, wenn Miete und Kaution vollständig bezahlt wurden.'
             });
         }
 
@@ -1933,7 +2329,8 @@ app.put('/admin/orders/:id/pick-up', checkAdmin, async (req, res) => {
             `SELECT id, status, order_no, customer_email, payment_method, payment_status
              FROM rental_orders
              WHERE id = ?
-             LIMIT 1`,
+             LIMIT 1
+             FOR UPDATE`,
             [req.params.id]
         );
 
@@ -1944,13 +2341,10 @@ app.put('/admin/orders/:id/pick-up', checkAdmin, async (req, res) => {
 
         const order = orders[0];
 
-        if (
-            String(order.payment_method || '').toLowerCase() === 'cash' &&
-            String(order.payment_status || '').toLowerCase() !== 'paid'
-        ) {
+        if (String(order.payment_status || '').toLowerCase() !== 'paid') {
             await connection.rollback();
             return res.status(409).json({
-                error: 'Die Bestellung kann erst abgeholt werden, wenn Miete und Kaution bar kassiert wurden.'
+                error: 'Die Bestellung kann erst abgeholt werden, wenn Miete und Kaution vollständig bezahlt wurden.'
             });
         }
 
@@ -2006,15 +2400,16 @@ app.put('/admin/orders/:id/cancel', checkAdmin, async (req, res) => {
     let connection;
 
     try {
-        const cancelReason = null;
+        const cancelReason = String(req.body?.reason || '').trim().slice(0, 1000) || null;
         connection = await mysql.createConnection(dbConfig);
         await connection.beginTransaction();
 
         const [orders] = await connection.execute(
-            `SELECT id, status, order_no, customer_email, payment_method
+            `SELECT id, cart_id, status, order_no, customer_email, payment_method, payment_status
              FROM rental_orders
              WHERE id = ?
-             LIMIT 1`,
+             LIMIT 1
+             FOR UPDATE`,
             [req.params.id]
         );
 
@@ -2055,6 +2450,10 @@ app.put('/admin/orders/:id/cancel', checkAdmin, async (req, res) => {
 
         const cancelledByUserId = await getUserIdByEmail(connection, req.session.user);
 
+        await cancelOpenMolliePayments(connection, order.id, {
+            reason: 'Offene Nachzahlung wegen vollständiger Stornierung beendet'
+        });
+
         await connection.execute(
             `UPDATE rental_orders
              SET status = 'cancelled',
@@ -2080,26 +2479,24 @@ app.put('/admin/orders/:id/cancel', checkAdmin, async (req, res) => {
                  cancelled_by_name = ?
              WHERE order_id = ?
              AND COALESCE(item_status, 'active') = 'active'
-             AND picked_up_at IS NULL
-             AND item_status <> 'picked_up'`,
+             AND picked_up_at IS NULL`,
             [
                 req.session.user,
                 req.params.id
             ]
         );
 
-        if (String(order.payment_method || '').toLowerCase() === 'online') {
-            await refundFullOnlineOrderPaymentOnCancellation(
-                connection,
-                req.params.id,
-                order
-            );
+        await createCancellationRefunds(connection, order);
+        await refreshCancelledOrderPaymentStatus(connection, order.id);
+
+        if (order.cart_id) {
+            await connection.execute('DELETE FROM rental_carts WHERE id = ?', [order.cart_id]);
         }
 
         await connection.commit();
 
         try {
-            await sendOrderCancelledEmail(order);
+            await sendOrderCancelledEmail(order, cancelReason);
         } catch (mailError) {
             console.error('Storno gespeichert, aber Mailversand fehlgeschlagen:', mailError);
         }
@@ -2126,89 +2523,6 @@ app.put('/admin/orders/:id/cancel', checkAdmin, async (req, res) => {
     }
 });
 
-async function refundOnlineOrderItemOnCancellation(connection, item) {
-    const [alreadyRefunded] = await connection.execute(
-        `SELECT id
-         FROM rental_order_payments
-         WHERE order_item_id = ?
-         AND payment_type = 'order_cancellation_refund'
-         AND payment_status = 'paid'
-         LIMIT 1`,
-        [item.id]
-    );
-
-    if (alreadyRefunded.length > 0) {
-        return null;
-    }
-
-    const rentalDays = calculateRentalDays(item.rental_start, item.rental_end);
-    const refundAmount = Number((
-        rentalDays * Number(item.price_per_day || 0) +
-        Number(item.deposit || 0)
-    ).toFixed(2));
-
-    if (refundAmount <= 0) {
-        return null;
-    }
-
-    const [payments] = await connection.execute(
-        `SELECT mollie_payment_id
-         FROM rental_order_payments
-         WHERE order_id = ?
-         AND payment_type = 'initial_payment'
-         AND payment_method = 'online'
-         AND payment_status = 'paid'
-         AND mollie_payment_id IS NOT NULL
-         ORDER BY id ASC
-         LIMIT 1`,
-        [item.order_id]
-    );
-
-    if (payments.length === 0) {
-        return null;
-    }
-
-    const paymentId = payments[0].mollie_payment_id;
-
-    const refund = await createMollieRefundForPayment({
-        paymentId,
-        amount: refundAmount,
-        description: `Artikel-Storno ${item.order_no} - ${item.title} (#${item.id})`,
-        metadata: {
-            orderId: String(item.order_id),
-            itemId: String(item.id),
-            type: 'item_cancellation_refund'
-        }
-    });
-
-    await connection.execute(
-        `INSERT INTO rental_order_payments
-         (
-            order_id,
-            order_item_id,
-            payment_type,
-            payment_method,
-            payment_status,
-            amount,
-            mollie_payment_id,
-            mollie_refund_id,
-            note,
-            paid_at
-         )
-         VALUES (?, ?, 'order_cancellation_refund', 'online', 'paid', ?, ?, ?, ?, NOW())`,
-        [
-            item.order_id,
-            item.id,
-            -Math.abs(refundAmount),
-            paymentId,
-            refund.id,
-            'Anteilig erstattet wegen Artikel-Storno vor Abholung'
-        ]
-    );
-
-    return refund;
-}
-
 app.put('/admin/order-items/:itemId/cancel', checkAdmin, async (req, res) => {
     let connection;
 
@@ -2217,7 +2531,7 @@ app.put('/admin/order-items/:itemId/cancel', checkAdmin, async (req, res) => {
         await connection.beginTransaction();
 
         const [items] = await connection.execute(
-            `SELECT 
+            `SELECT
     roi.id,
     roi.order_id,
     roi.item_status,
@@ -2226,6 +2540,8 @@ app.put('/admin/order-items/:itemId/cancel', checkAdmin, async (req, res) => {
     roi.price_per_day,
     roi.deposit,
     ro.payment_method,
+    ro.payment_status,
+    ro.cart_id,
     roi.picked_up_at,
     p.title,
     ro.order_no,
@@ -2234,7 +2550,8 @@ FROM rental_order_items roi
 JOIN rental_orders ro ON ro.id = roi.order_id
 JOIN rental_products p ON p.id = roi.product_id
 WHERE roi.id = ?
-LIMIT 1`,
+LIMIT 1
+FOR UPDATE`,
             [req.params.itemId]
         );
 
@@ -2254,14 +2571,87 @@ LIMIT 1`,
             });
         }
 
-        if (!['active'].includes(item.item_status)) {
+        if (String(item.item_status || 'active') !== 'active') {
             await connection.rollback();
             return res.status(409).json({
                 error: 'Nur aktive Artikel können storniert werden.'
             });
         }
 
+        if (
+            String(item.payment_method || '').toLowerCase() === 'online' &&
+            String(item.payment_status || '').toLowerCase() !== 'paid'
+        ) {
+            await connection.rollback();
+            return res.status(409).json({
+                error: 'Eine einzelne Position kann erst nach erfolgreicher Online-Gesamtzahlung storniert werden. Bitte stattdessen die gesamte unbezahlte Bestellung stornieren.'
+            });
+        }
+
         const cancelledByUserId = await getUserIdByEmail(connection, req.session.user);
+
+        await cancelOpenMolliePayments(connection, item.order_id, {
+            orderItemId: item.id,
+            reason: 'Offene Nachzahlung wegen Artikel-Storno beendet'
+        });
+
+        const cancelledBaseRentalAmount = roundMoney(
+            calculateRentalDays(item.rental_start, item.rental_end) *
+            Number(item.price_per_day || 0)
+        );
+        const cancelledBaseAmount = roundMoney(
+            cancelledBaseRentalAmount + Number(item.deposit || 0)
+        );
+
+        await connection.execute(
+            `UPDATE rental_orders
+             SET total_amount = GREATEST(COALESCE(total_amount, 0) - ?, 0)
+             WHERE id = ?`,
+            [cancelledBaseAmount, item.order_id]
+        );
+
+        if (
+            String(item.payment_method || '').toLowerCase() === 'cash' &&
+            String(item.payment_status || '').toLowerCase() !== 'paid'
+        ) {
+            await connection.execute(
+                `UPDATE rental_order_payments
+                 SET amount = GREATEST(amount - ?, 0),
+                     note = CONCAT(COALESCE(note, ''),
+                        CASE WHEN note IS NULL OR note = '' THEN '' ELSE ' | ' END,
+                        'Betrag nach Artikel-Storno angepasst')
+                 WHERE order_id = ?
+                 AND order_item_id IS NULL
+                 AND payment_type = 'rental'
+                 AND payment_method = 'cash'
+                 AND payment_status IN ('pending', 'open')`,
+                [cancelledBaseRentalAmount, item.order_id]
+            );
+            await connection.execute(
+                `UPDATE rental_order_payments
+                 SET amount = GREATEST(amount - ?, 0),
+                     note = CONCAT(COALESCE(note, ''),
+                        CASE WHEN note IS NULL OR note = '' THEN '' ELSE ' | ' END,
+                        'Betrag nach Artikel-Storno angepasst')
+                 WHERE order_id = ?
+                 AND order_item_id IS NULL
+                 AND payment_type = 'deposit'
+                 AND payment_method = 'cash'
+                 AND payment_status IN ('pending', 'open')`,
+                [Number(item.deposit || 0), item.order_id]
+            );
+            await connection.execute(
+                `UPDATE rental_order_payments
+                 SET payment_status = 'cancelled'
+                 WHERE order_id = ?
+                 AND order_item_id IS NULL
+                 AND payment_type IN ('rental', 'deposit')
+                 AND payment_method = 'cash'
+                 AND payment_status IN ('pending', 'open')
+                 AND amount = 0`,
+                [item.order_id]
+            );
+        }
 
         await connection.execute(
             `UPDATE rental_order_items
@@ -2277,19 +2667,33 @@ LIMIT 1`,
                 req.params.itemId
             ]
         );
-        if (String(item.payment_method || '').toLowerCase() === 'online') {
-            await refundOnlineOrderItemOnCancellation(connection, item);
-        }
+        await createCancellationRefunds(
+            connection,
+            {
+                id: item.order_id,
+                order_no: item.order_no,
+                payment_method: item.payment_method
+            },
+            item
+        );
 
-        const [openItems] = await connection.execute(
-            `SELECT COUNT(*) AS count
+        const [itemStateRows] = await connection.execute(
+            `SELECT
+                SUM(COALESCE(item_status, 'active') = 'active') AS activeCount,
+                SUM(COALESCE(item_status, 'active') = 'picked_up') AS pickedUpCount,
+                SUM(COALESCE(item_status, 'active') LIKE 'returned_%') AS returnedCount
              FROM rental_order_items
-             WHERE order_id = ?
-             AND COALESCE(item_status, 'active') = 'active'`,
+             WHERE order_id = ?`,
             [item.order_id]
         );
 
-        if (openItems[0].count === 0) {
+        const itemStates = itemStateRows[0] || {};
+
+        if (
+            Number(itemStates.activeCount || 0) === 0 &&
+            Number(itemStates.pickedUpCount || 0) === 0 &&
+            Number(itemStates.returnedCount || 0) === 0
+        ) {
             await connection.execute(
                 `UPDATE rental_orders
          SET status = 'cancelled',
@@ -2306,10 +2710,29 @@ LIMIT 1`,
                     item.order_id
                 ]
             );
-        } else {
+            await refreshCancelledOrderPaymentStatus(connection, item.order_id);
+
+            if (item.cart_id) {
+                await connection.execute('DELETE FROM rental_carts WHERE id = ?', [item.cart_id]);
+            }
+        } else if (Number(itemStates.pickedUpCount || 0) > 0) {
+            await connection.execute(
+                `UPDATE rental_orders
+                 SET status = 'picked_up', return_case_status = 'partial'
+                 WHERE id = ?`,
+                [item.order_id]
+            );
+        } else if (Number(itemStates.returnedCount || 0) > 0) {
             await connection.execute(
                 `UPDATE rental_orders
                  SET return_case_status = 'partial'
+                 WHERE id = ?`,
+                [item.order_id]
+            );
+        } else {
+            await connection.execute(
+                `UPDATE rental_orders
+                 SET return_case_status = NULL
                  WHERE id = ?`,
                 [item.order_id]
             );
@@ -2407,14 +2830,22 @@ app.post('/admin/order-items/:itemId/send-return-summary', checkAdmin, async (re
                 p.title,
                 DATE_FORMAT(roi.rental_start, '%Y-%m-%d') AS rentalStart,
                 DATE_FORMAT(roi.rental_end, '%Y-%m-%d') AS rentalEnd,
+                DATE_FORMAT(roi.adjusted_rental_start, '%Y-%m-%d') AS adjustedRentalStart,
+                DATE_FORMAT(roi.adjusted_rental_end, '%Y-%m-%d') AS adjustedRentalEnd,
                 DATE_FORMAT(roi.actual_return_date, '%Y-%m-%d') AS actualReturnDate,
+                roi.adjusted_price_per_day AS adjustedPricePerDay,
+                roi.price_per_day AS pricePerDay,
                 roi.return_status AS returnStatus,
                 roi.is_damaged AS isDamaged,
                 roi.is_late AS isLate,
+                roi.damage_description AS damageDescription,
+                roi.late_description AS lateDescription,
                 roi.deposit,
                 roi.deposit_decision AS depositDecision,
                 roi.deposit_refund_amount AS depositRefundAmount,
                 roi.deposit_deduction_amount AS depositDeductionAmount,
+                roi.deposit_deduction_reason AS depositDeductionReason,
+                roi.additional_charge_reason AS additionalChargeReason,
                 roi.additional_charge_amount AS additionalChargeAmount,
                 roi.return_notes AS returnNotes,
                 ro.order_no AS order_no,
@@ -2451,7 +2882,9 @@ app.post('/admin/order-items/:itemId/send-return-summary', checkAdmin, async (re
              FROM rental_order_payments
              WHERE order_id = ?
              AND order_item_id = ?
-             AND payment_type IN ('deposit_refund', 'return_additional_charge')
+             AND payment_type IN (
+                'rental_adjustment', 'deposit_refund', 'return_additional_charge'
+             )
              ORDER BY id DESC`,
             [
                 item.orderId,
@@ -2489,11 +2922,34 @@ app.put('/admin/order-items/:itemId/rental-adjustment', checkAdmin, async (req, 
         const {
             adjustedRentalStart,
             adjustedRentalEnd,
-            adjustedPricePerDay,
-            paymentMethod
+            adjustedPricePerDay
         } = req.body;
 
         connection = await mysql.createConnection(dbConfig);
+        await connection.beginTransaction();
+
+        const [itemReferences] = await connection.execute(
+            `SELECT order_id, product_id
+             FROM rental_order_items
+             WHERE id = ?
+             LIMIT 1`,
+            [req.params.itemId]
+        );
+
+        if (itemReferences.length === 0) {
+            await connection.rollback();
+            return res.status(404).json({ error: 'Bestellposition nicht gefunden.' });
+        }
+
+        await connection.execute(
+            `SELECT id
+             FROM rental_orders
+             WHERE id = ?
+             LIMIT 1
+             FOR UPDATE`,
+            [itemReferences[0].order_id]
+        );
+        await lockRentalProducts(connection, [itemReferences[0].product_id]);
 
         const [items] = await connection.execute(
             `SELECT 
@@ -2501,10 +2957,10 @@ app.put('/admin/order-items/:itemId/rental-adjustment', checkAdmin, async (req, 
     roi.order_id,
     roi.product_id,
     roi.price_per_day,
-    roi.rental_start,
-    roi.rental_end,
-    roi.adjusted_rental_start,
-    roi.adjusted_rental_end,
+    DATE_FORMAT(roi.rental_start, '%Y-%m-%d') AS rental_start,
+    DATE_FORMAT(roi.rental_end, '%Y-%m-%d') AS rental_end,
+    DATE_FORMAT(roi.adjusted_rental_start, '%Y-%m-%d') AS adjusted_rental_start,
+    DATE_FORMAT(roi.adjusted_rental_end, '%Y-%m-%d') AS adjusted_rental_end,
     roi.adjusted_price_per_day,
     roi.adjusted_rental_total,
     roi.item_status,
@@ -2512,24 +2968,35 @@ app.put('/admin/order-items/:itemId/rental-adjustment', checkAdmin, async (req, 
     ro.order_no,
 ro.customer_email,
 ro.payment_method,
+ro.payment_status,
 ro.mollie_customer_id,
 ro.mollie_mandate_id
 FROM rental_order_items roi
 JOIN rental_orders ro ON ro.id = roi.order_id
 JOIN rental_products p ON p.id = roi.product_id
 WHERE roi.id = ?
-LIMIT 1`,
+LIMIT 1
+FOR UPDATE`,
             [req.params.itemId]
         );
 
         if (items.length === 0) {
+            await connection.rollback();
             return res.status(404).json({ error: 'Bestellposition nicht gefunden.' });
         }
 
         const item = items[0];
-        if (!['active', 'picked_up'].includes(item.item_status)) {
+        if (!['active', 'picked_up'].includes(String(item.item_status || 'active'))) {
+            await connection.rollback();
             return res.status(409).json({
                 error: 'Nur aktive Artikel können geändert werden.'
+            });
+        }
+
+        if (String(item.payment_status || '').toLowerCase() !== 'paid') {
+            await connection.rollback();
+            return res.status(409).json({
+                error: 'Eine Mietverlängerung ist erst nach vollständiger Bezahlung der ursprünglichen Miete möglich.'
             });
         }
 
@@ -2538,20 +3005,52 @@ LIMIT 1`,
 
         const finalStart = adjustedRentalStart || currentStart;
         const finalEnd = adjustedRentalEnd || currentEnd;
-        const finalPricePerDay = Number(
-            adjustedPricePerDay ||
-            item.adjusted_price_per_day ||
-            item.price_per_day ||
-            0
+        const currentPricePerDay = Number(
+            item.adjusted_price_per_day || item.price_per_day || 0
         );
+        const submittedPricePerDay = adjustedPricePerDay === null || adjustedPricePerDay === undefined || adjustedPricePerDay === ''
+            ? currentPricePerDay
+            : Number(adjustedPricePerDay);
+        const finalPricePerDay = currentPricePerDay;
 
-        if (new Date(finalEnd) < new Date(finalStart)) {
+        if (!isStrictIsoDate(String(finalStart).slice(0, 10)) || !isStrictIsoDate(String(finalEnd).slice(0, 10))) {
+            await connection.rollback();
+            return res.status(400).json({
+                error: 'Der angepasste Mietzeitraum enthält ein ungültiges Datum.'
+            });
+        }
+
+        if (!Number.isFinite(finalPricePerDay) || finalPricePerDay <= 0) {
+            await connection.rollback();
+            return res.status(400).json({ error: 'Der Tagespreis muss größer als 0 sein.' });
+        }
+
+        if (String(finalStart).slice(0, 10) !== String(currentStart).slice(0, 10)) {
+            await connection.rollback();
+            return res.status(400).json({
+                error: 'Der Mietbeginn darf bei einer Verlängerung nicht verändert werden.'
+            });
+        }
+
+        if (
+            !Number.isFinite(submittedPricePerDay) ||
+            Math.abs(submittedPricePerDay - currentPricePerDay) > 0.001
+        ) {
+            await connection.rollback();
+            return res.status(400).json({
+                error: 'Der vereinbarte Tagespreis darf bei einer Verlängerung nicht verändert werden.'
+            });
+        }
+
+        if (String(finalEnd).slice(0, 10) < String(finalStart).slice(0, 10)) {
+            await connection.rollback();
             return res.status(400).json({
                 error: 'Das angepasste Mietende darf nicht vor dem angepassten Mietbeginn liegen.'
             });
         }
 
-        if (new Date(finalEnd) <= new Date(currentEnd)) {
+        if (String(finalEnd).slice(0, 10) <= String(currentEnd).slice(0, 10)) {
+            await connection.rollback();
             return res.status(400).json({
                 error: 'Es sind nur Verlängerungen möglich. Verkürzungen werden über die Rückgabe abgewickelt.'
             });
@@ -2565,13 +3064,45 @@ LIMIT 1`,
             item.product_id,
             finalStart,
             finalEnd,
-            req.params.itemId
+            req.params.itemId,
+            true
         );
 
         if (!available) {
+            await connection.rollback();
             return res.status(409).json({
                 error: 'Das Produkt ist im gewählten Zeitraum nicht verfügbar.'
             });
+        }
+
+        const extensionStartDate = new Date(currentEnd);
+        extensionStartDate.setUTCDate(extensionStartDate.getUTCDate() + 1);
+
+        const extensionStart = extensionStartDate.toISOString().slice(0, 10);
+
+        const extensionDays = calculateRentalDays(extensionStart, finalEnd);
+
+        const amountDue = roundMoney(Math.max(extensionDays * finalPricePerDay, 0));
+        if (amountDue > 0) {
+            const [existingOpenRentalAdjustments] = await connection.execute(
+                `SELECT id
+         FROM rental_order_payments
+         WHERE order_id = ?
+         AND order_item_id = ?
+         AND payment_type = 'rental_adjustment'
+         AND payment_status IN (
+            'pending', 'open', 'authorized', 'failed', 'cancelled', 'expired'
+         )
+         LIMIT 1`,
+                [item.order_id, req.params.itemId]
+            );
+
+            if (existingOpenRentalAdjustments.length > 0) {
+                await connection.rollback();
+                return res.status(409).json({
+                    error: 'Es existiert bereits eine offene Mietzeitraum-Nachzahlung für diesen Artikel. Bitte diese zuerst begleichen oder stornieren.'
+                });
+            }
         }
 
         await connection.execute(
@@ -2582,8 +3113,8 @@ LIMIT 1`,
                  adjusted_rental_total = ?
              WHERE id = ?`,
             [
-                adjustedRentalStart || null,
-                adjustedRentalEnd || null,
+                String(finalStart).slice(0, 10),
+                String(finalEnd).slice(0, 10),
                 finalPricePerDay,
                 adjustedRentalTotal,
                 req.params.itemId
@@ -2598,32 +3129,6 @@ LIMIT 1`,
             [item.order_id]
         );
 
-        const extensionStartDate = new Date(currentEnd);
-        extensionStartDate.setDate(extensionStartDate.getDate() + 1);
-
-        const extensionStart = extensionStartDate.toISOString().slice(0, 10);
-
-        const extensionDays = calculateRentalDays(extensionStart, finalEnd);
-
-        const amountDue = Math.max(extensionDays * finalPricePerDay, 0);
-        if (amountDue > 0) {
-            const [existingOpenRentalAdjustments] = await connection.execute(
-                `SELECT id
-         FROM rental_order_payments
-         WHERE order_id = ?
-         AND order_item_id = ?
-         AND payment_type = 'rental_adjustment'
-         AND payment_status IN ('pending', 'open', 'authorized')
-         LIMIT 1`,
-                [item.order_id, req.params.itemId]
-            );
-
-            if (existingOpenRentalAdjustments.length > 0) {
-                return res.status(409).json({
-                    error: 'Es existiert bereits eine offene Mietzeitraum-Nachzahlung für diesen Artikel. Bitte diese zuerst begleichen oder stornieren.'
-                });
-            }
-        }
         const baseUrl = process.env.BASE_URL.replace(/\/$/, '');
         let paymentUrl = null;
 
@@ -2657,6 +3162,7 @@ LIMIT 1`,
                 description: `Nachzahlung Mietzeitraum ${item.order_no} - ${item.title} (#${req.params.itemId})`,
                 type: 'rental_adjustment',
                 itemId: req.params.itemId,
+                idempotencyKey: `rental-adjustment-${item.order_id}-${req.params.itemId}-${String(finalEnd).slice(0, 10)}-${amountDue.toFixed(2)}`,
                 redirectUrl: `${baseUrl}/index.html?payment=extension&orderId=${encodeURIComponent(item.order_id)}&paymentType=rental_adjustment&itemId=${encodeURIComponent(req.params.itemId)}`
             });
 
@@ -2681,7 +3187,13 @@ LIMIT 1`,
             );
 
             paymentUrl = getMollieCheckoutUrl(payment);
+
+            if (!paymentUrl) {
+                throw new Error('Mollie Checkout-URL für die Verlängerung fehlt.');
+            }
         }
+
+        await connection.commit();
 
         try {
             await sendRentalAdjustmentEmailWithPayment(
@@ -2706,6 +3218,13 @@ LIMIT 1`,
         });
 
     } catch (error) {
+        if (connection) {
+            try {
+                await connection.rollback();
+            } catch (rollbackError) {
+                console.error('Rollback der Mietverlängerung fehlgeschlagen:', rollbackError);
+            }
+        }
         console.error('Fehler beim Speichern des angepassten Mietzeitraums:', error);
         res.status(500).json({
             error: 'Mietzeitraum konnte nicht gespeichert werden.'
@@ -2752,6 +3271,7 @@ app.put('/admin/order-items/:itemId/return', checkAdmin, async (req, res) => {
         } = req.body;
 
         connection = await mysql.createConnection(dbConfig);
+        await connection.beginTransaction();
 
         const processedByUserId = await getUserIdByEmail(connection, req.session.user);
 
@@ -2760,8 +3280,12 @@ app.put('/admin/order-items/:itemId/return', checkAdmin, async (req, res) => {
     roi.id,
     roi.order_id,
     roi.price_per_day,
-    roi.rental_start,
-    roi.rental_end,
+    DATE_FORMAT(roi.rental_start, '%Y-%m-%d') AS rental_start,
+    DATE_FORMAT(roi.rental_end, '%Y-%m-%d') AS rental_end,
+    DATE_FORMAT(roi.adjusted_rental_start, '%Y-%m-%d') AS current_adjusted_rental_start,
+    DATE_FORMAT(roi.adjusted_rental_end, '%Y-%m-%d') AS current_adjusted_rental_end,
+    roi.adjusted_price_per_day AS current_adjusted_price_per_day,
+    DATE_FORMAT(roi.picked_up_at, '%Y-%m-%d') AS picked_up_date,
     roi.deposit,
     roi.item_status,
     p.title,
@@ -2775,84 +3299,152 @@ FROM rental_order_items roi
 JOIN rental_orders ro ON ro.id = roi.order_id
 JOIN rental_products p ON p.id = roi.product_id
 WHERE roi.id = ?
-LIMIT 1`,
+LIMIT 1
+FOR UPDATE`,
             [req.params.itemId]
         );
 
         if (items.length === 0) {
+            await connection.rollback();
             return res.status(404).json({ error: 'Bestellposition nicht gefunden.' });
         }
 
         const item = items[0];
 
         if (item.item_status !== 'picked_up') {
+            await connection.rollback();
             return res.status(409).json({
                 error: 'Nur abgeholte Artikel können zurückgegeben werden.'
             });
         }
 
-        if (item.item_status === 'cancelled') {
-            return res.status(409).json({
-                error: 'Stornierte Artikel können nicht zurückgegeben werden.'
+        const agreedStart = item.current_adjusted_rental_start || item.rental_start;
+        const agreedEnd = item.current_adjusted_rental_end || item.rental_end;
+        const agreedPricePerDay = Number(
+            item.current_adjusted_price_per_day || item.price_per_day || 0
+        );
+        const submittedStart = adjustedRentalStart || agreedStart;
+        const submittedEnd = adjustedRentalEnd || agreedEnd;
+        const submittedPricePerDay = adjustedPricePerDay === null || adjustedPricePerDay === undefined || adjustedPricePerDay === ''
+            ? agreedPricePerDay
+            : Number(adjustedPricePerDay);
+        const finalStart = agreedStart;
+        const finalEnd = agreedEnd;
+        const finalPricePerDay = agreedPricePerDay;
+
+        if (
+            !isStrictIsoDate(actualReturnDate) ||
+            !isStrictIsoDate(String(finalStart).slice(0, 10)) ||
+            !isStrictIsoDate(String(finalEnd).slice(0, 10))
+        ) {
+            await connection.rollback();
+            return res.status(400).json({ error: 'Die Rückgabe enthält ein ungültiges Datum.' });
+        }
+
+        if (actualReturnDate < String(item.picked_up_date || finalStart).slice(0, 10)) {
+            await connection.rollback();
+            return res.status(400).json({
+                error: 'Das Rückgabedatum darf nicht vor der Abholung liegen.'
             });
         }
 
-        if (String(item.item_status || '').startsWith('returned_')) {
-            return res.status(409).json({
-                error: 'Diese Rückgabe wurde bereits festgeschrieben und kann nicht erneut geändert werden.'
-            });
+        if (String(finalEnd).slice(0, 10) < String(finalStart).slice(0, 10)) {
+            await connection.rollback();
+            return res.status(400).json({ error: 'Das Mietende darf nicht vor dem Mietbeginn liegen.' });
         }
 
-        const finalStart = adjustedRentalStart || item.rental_start;
-        const finalEnd = adjustedRentalEnd || actualReturnDate || item.rental_end;
-        const finalPricePerDay = Number(adjustedPricePerDay || item.price_per_day || 0);
+        if (!Number.isFinite(finalPricePerDay) || finalPricePerDay <= 0) {
+            await connection.rollback();
+            return res.status(400).json({ error: 'Der Tagespreis muss größer als 0 sein.' });
+        }
+
+        if (
+            String(submittedStart).slice(0, 10) !== String(agreedStart).slice(0, 10) ||
+            String(submittedEnd).slice(0, 10) !== String(agreedEnd).slice(0, 10) ||
+            !Number.isFinite(submittedPricePerDay) ||
+            Math.abs(submittedPricePerDay - agreedPricePerDay) > 0.001
+        ) {
+            await connection.rollback();
+            return res.status(400).json({
+                error: 'Der vereinbarte Mietzeitraum und Tagespreis können bei der Rückgabe nicht verändert werden.'
+            });
+        }
 
         const days = calculateRentalDays(finalStart, finalEnd);
         const adjustedRentalTotal = days * finalPricePerDay;
         const deposit = Number(item.deposit || 0);
-        const plannedReturnDate = adjustedRentalEnd || item.rental_end;
+        const plannedReturnDate = agreedEnd;
         const lateDays = calculateLateDays(actualReturnDate, plannedReturnDate);
-        const lateFee = lateDays * finalPricePerDay;
+        const lateFee = roundMoney(lateDays * finalPricePerDay);
+        const normalizedIsDamaged = isDamaged === true || Number(isDamaged) === 1;
+        const normalizedIsLate = lateDays > 0;
 
         const normalizedAdditionalChargeAmount =
             additionalChargeAmount === null || additionalChargeAmount === undefined || additionalChargeAmount === ''
                 ? 0
                 : Number(additionalChargeAmount);
 
-        if (Number.isNaN(normalizedAdditionalChargeAmount) || normalizedAdditionalChargeAmount < 0) {
+        if (!Number.isFinite(normalizedAdditionalChargeAmount) || normalizedAdditionalChargeAmount < 0) {
+            await connection.rollback();
             return res.status(400).json({
                 error: 'Zusätzlicher Betrag ist ungültig.'
             });
         }
 
         const finalReturnStatus =
-            isDamaged && isLate
+            normalizedIsDamaged && normalizedIsLate
                 ? 'returned_late_damaged'
-                : isDamaged
+                : normalizedIsDamaged
                     ? 'returned_damaged'
-                    : isLate
+                    : normalizedIsLate
                         ? 'returned_late'
                         : 'returned_ok';
 
-        const [openRentalAdjustmentRows] = await connection.execute(
-            `SELECT COALESCE(SUM(amount), 0) AS amount
-     FROM rental_order_payments
-     WHERE order_id = ?
-     AND order_item_id = ?
-     AND payment_type = 'rental_adjustment'
-     AND payment_status IN ('pending', 'open', 'authorized')`,
+        const [openAdjustmentRows] = await connection.execute(
+            `SELECT id, payment_method, mollie_payment_id, amount
+             FROM rental_order_payments
+             WHERE order_id = ?
+             AND order_item_id = ?
+             AND payment_type = 'rental_adjustment'
+             AND payment_status IN (
+                'pending', 'open', 'authorized', 'failed', 'cancelled', 'expired'
+             )`,
             [item.order_id, req.params.itemId]
         );
 
-        const openRentalAdjustmentAmount = Number(openRentalAdjustmentRows[0]?.amount || 0);
-        const totalOffsetAgainstDeposit =
-            normalizedAdditionalChargeAmount +
-            openRentalAdjustmentAmount;
+        let openRentalAdjustmentAmount = 0;
+
+        for (const adjustment of openAdjustmentRows) {
+            if (adjustment.payment_method !== 'online' || !adjustment.mollie_payment_id) {
+                openRentalAdjustmentAmount += Number(adjustment.amount || 0);
+                continue;
+            }
+
+            const molliePayment = await getMolliePayment(adjustment.mollie_payment_id);
+            const mollieStatus = mapMolliePaymentStatus(molliePayment.status);
+
+            if (isOpenPaymentStatus(mollieStatus)) {
+                await cancelMolliePayment(adjustment.mollie_payment_id);
+                openRentalAdjustmentAmount += Number(adjustment.amount || 0);
+            } else if (mollieStatus !== 'paid') {
+                openRentalAdjustmentAmount += Number(adjustment.amount || 0);
+            } else {
+                await connection.execute(
+                    `UPDATE rental_order_payments
+                     SET payment_status = ?,
+                         paid_at = CASE WHEN ? = 'paid' THEN COALESCE(paid_at, NOW()) ELSE paid_at END
+                     WHERE mollie_payment_id = ? AND mollie_refund_id IS NULL`,
+                    [mollieStatus, mollieStatus, adjustment.mollie_payment_id]
+                );
+            }
+        }
+
+        openRentalAdjustmentAmount = roundMoney(openRentalAdjustmentAmount);
 
         if (openRentalAdjustmentAmount > 0) {
             await connection.execute(
                 `UPDATE rental_order_payments
-         SET payment_status = 'cancelled',
+         SET payment_status = 'offset',
              note = CONCAT(
                  COALESCE(note, ''),
                  CASE WHEN note IS NULL OR note = '' THEN '' ELSE ' | ' END,
@@ -2861,31 +3453,30 @@ LIMIT 1`,
          WHERE order_id = ?
          AND order_item_id = ?
          AND payment_type = 'rental_adjustment'
-         AND payment_status IN ('pending', 'open', 'authorized')`,
+         AND payment_status IN (
+            'pending', 'open', 'authorized', 'failed', 'cancelled', 'expired'
+         )`,
                 [item.order_id, req.params.itemId]
             );
         }
 
-        const calculatedDepositRefundAmount = Math.max(
-            deposit - totalOffsetAgainstDeposit,
-            0
-        );
-
-        const depositDeductionAmount = Math.max(deposit - calculatedDepositRefundAmount, 0);
-
-        const deductionPercent = deposit > 0
-            ? (depositDeductionAmount / deposit) * 100
-            : 0;
-
-        const finalDepositDecision =
-            calculatedDepositRefundAmount >= deposit
-                ? 'full_refund'
-                : calculatedDepositRefundAmount > 0
-                    ? 'partial_refund'
-                    : 'no_refund';
-
-        const customerAdditionalDue =
-            Math.max(totalOffsetAgainstDeposit - deposit, 0) + lateFee;
+        const settlement = calculateReturnSettlement({
+            deposit,
+            additionalChargeAmount: normalizedAdditionalChargeAmount,
+            openRentalAdjustmentAmount,
+            lateFee
+        });
+        const calculatedDepositRefundAmount = settlement.depositRefundAmount;
+        const depositDeductionAmount = settlement.depositDeductionAmount;
+        const deductionPercent = settlement.depositDeductionPercent;
+        const finalDepositDecision = settlement.depositDecision;
+        const customerAdditionalDue = settlement.customerAdditionalDue;
+        const settlementReasons = [
+            String(depositDeductionReason || '').trim(),
+            normalizedAdditionalChargeAmount > 0 ? String(additionalChargeReason || 'Zusatzkosten aus Rückgabe').trim() : '',
+            openRentalAdjustmentAmount > 0 ? `Offene Mietverlängerung: ${openRentalAdjustmentAmount.toFixed(2)} €` : '',
+            lateFee > 0 ? `Verspätung (${lateDays} Tag${lateDays === 1 ? '' : 'e'}): ${lateFee.toFixed(2)} €` : ''
+        ].filter(Boolean);
 
         await connection.execute(
             `UPDATE rental_order_items
@@ -2914,21 +3505,21 @@ LIMIT 1`,
              WHERE id = ?`,
             [
                 actualReturnDate || null,
-                adjustedRentalStart || null,
-                adjustedRentalEnd || null,
+                String(finalStart).slice(0, 10),
+                String(finalEnd).slice(0, 10),
                 finalPricePerDay,
                 adjustedRentalTotal,
                 finalReturnStatus,
                 finalReturnStatus,
-                isDamaged ? 1 : 0,
-                isDamaged ? 'Beschädigt' : null,
-                isLate ? 1 : 0,
-                isLate ? 'Verspätet' : null,
+                normalizedIsDamaged ? 1 : 0,
+                normalizedIsDamaged ? String(damageDescription || '').trim() || 'Beschädigung bei Rückgabe festgestellt' : null,
+                normalizedIsLate ? 1 : 0,
+                normalizedIsLate ? String(lateDescription || '').trim() || `${lateDays} Tag${lateDays === 1 ? '' : 'e'} verspätet` : null,
                 finalDepositDecision,
                 deductionPercent,
                 depositDeductionAmount,
                 calculatedDepositRefundAmount,
-                isDamaged ? 'Reparaturkosten mit Kaution verrechnet' : null,
+                settlementReasons.join(' | ') || null,
                 additionalChargeReason || null,
                 normalizedAdditionalChargeAmount,
                 returnNotes || null,
@@ -2951,7 +3542,9 @@ LIMIT 1`,
      WHERE order_id = ?
      AND order_item_id = ?
      AND payment_type IN ('rental_adjustment', 'return_additional_charge')
-     AND payment_status IN ('pending', 'open', 'authorized')
+     AND payment_status IN (
+        'pending', 'open', 'authorized', 'failed', 'cancelled', 'expired'
+     )
      LIMIT 1`,
             [item.order_id, req.params.itemId]
         );
@@ -3014,7 +3607,9 @@ END
      WHERE order_id = ?
      AND order_item_id = ?
      AND payment_type IN ('rental_adjustment', 'return_additional_charge')
-     AND payment_status IN ('pending', 'open', 'authorized')
+     AND payment_status IN (
+        'pending', 'open', 'authorized', 'failed', 'cancelled', 'expired'
+     )
      LIMIT 1`,
             [item.order_id, req.params.itemId]
         );
@@ -3035,7 +3630,6 @@ END
      FROM rental_order_payments
      WHERE order_item_id = ?
      AND payment_type = 'deposit_refund'
-     AND payment_status = 'paid'
      LIMIT 1`,
                 [req.params.itemId]
             );
@@ -3054,9 +3648,11 @@ END
          AND payment_type IN ('initial_payment', 'rental', 'deposit')
          AND payment_status = 'paid'
          AND mollie_payment_id IS NOT NULL
-         ORDER BY id ASC
+         ORDER BY (mollie_payment_id = ?) DESC,
+                  CASE WHEN payment_type = 'initial_payment' THEN 0 ELSE 1 END,
+                  id ASC
          LIMIT 1`,
-                    [item.order_id]
+                    [item.order_id, item.mollie_payment_id]
                 );
 
                 if (payments.length > 0) {
@@ -3071,8 +3667,10 @@ END
                                 orderId: String(item.order_id),
                                 itemId: String(req.params.itemId),
                                 type: 'deposit_refund'
-                            }
+                            },
+                            idempotencyKey: `deposit-refund-${item.order_id}-${req.params.itemId}`
                         });
+                        const refundStatus = mapMollieRefundStatus(refund.status);
 
                         await connection.execute(
                             `INSERT INTO rental_order_payments
@@ -3088,38 +3686,24 @@ END
                     note,
                     paid_at
                  )
-                 VALUES (?, ?, 'deposit_refund', 'online', 'paid', ?, ?, ?, ?, NOW())`,
+                 VALUES (?, ?, 'deposit_refund', 'online', ?, ?, ?, ?, ?,
+                    CASE WHEN ? = 'paid' THEN NOW() ELSE NULL END)`,
                             [
                                 item.order_id,
                                 req.params.itemId,
+                                refundStatus,
                                 -Math.abs(calculatedDepositRefundAmount),
                                 originalPaymentId,
                                 refund.id,
-                                'Kaution automatisch per Mollie erstattet'
+                                refundStatus === 'paid'
+                                    ? 'Kaution automatisch per Mollie erstattet'
+                                    : 'Kautionsrückerstattung bei Mollie beauftragt',
+                                refundStatus
                             ]
                         );
                     } catch (refundError) {
                         console.error('Mollie-Refund fehlgeschlagen:', refundError);
-
-                        await connection.execute(
-                            `INSERT INTO rental_order_payments
-                 (
-                    order_id,
-                    order_item_id,
-                    payment_type,
-                    payment_method,
-                    payment_status,
-                    amount,
-                    note
-                 )
-                 VALUES (?, ?, 'deposit_refund', 'online', 'failed', ?, ?)`,
-                            [
-                                item.order_id,
-                                req.params.itemId,
-                                -Math.abs(calculatedDepositRefundAmount),
-                                `Refund fehlgeschlagen: ${refundError.message}`
-                            ]
-                        );
+                        throw refundError;
                     }
                 }
             } else if (initialPaymentMethod === 'cash') {
@@ -3152,10 +3736,11 @@ END
      WHERE order_id = ?
      AND order_item_id = ?
      AND payment_type = 'return_additional_charge'
-     AND payment_status IN ('pending', 'open')
+     AND payment_status IN ('pending', 'open', 'authorized')
      LIMIT 1`,
             [item.order_id, req.params.itemId]
         );
+        let returnChargeEmail = null;
 
         if (
             customerAdditionalDue > 0 &&
@@ -3185,21 +3770,25 @@ END
             customerAdditionalDue > 0 &&
             existingOpenReturnCharges.length === 0
         ) {
-            try {
-                const payment = await createMolliePaymentForOrder({
-                    id: item.order_id,
-                    orderNo: item.order_no,
-                    totalAmount: customerAdditionalDue,
-                    description: `Nachzahlung Rückgabe ${item.order_no} - ${item.title} (#${req.params.itemId})`,
-                    type: 'return_additional_charge',
-                    redirectUrl: `${process.env.BASE_URL.replace(/\/$/, '')}/index.html?payment=return_charge&orderId=${encodeURIComponent(item.order_id)}&paymentType=return_additional_charge&itemId=${encodeURIComponent(req.params.itemId)}`,
-                    itemId: req.params.itemId
-                });
+            const payment = await createMolliePaymentForOrder({
+                id: item.order_id,
+                orderNo: item.order_no,
+                totalAmount: customerAdditionalDue,
+                description: `Nachzahlung Rückgabe ${item.order_no} - ${item.title} (#${req.params.itemId})`,
+                type: 'return_additional_charge',
+                redirectUrl: `${process.env.BASE_URL.replace(/\/$/, '')}/index.html?payment=return_charge&orderId=${encodeURIComponent(item.order_id)}&paymentType=return_additional_charge&itemId=${encodeURIComponent(req.params.itemId)}`,
+                itemId: req.params.itemId,
+                idempotencyKey: `return-charge-${item.order_id}-${req.params.itemId}-${customerAdditionalDue.toFixed(2)}`
+            });
 
-                const checkoutUrl = getMollieCheckoutUrl(payment);
+            const checkoutUrl = getMollieCheckoutUrl(payment);
 
-                await connection.execute(
-                    `INSERT INTO rental_order_payments
+            if (!checkoutUrl) {
+                throw new Error('Mollie Checkout-URL für die Rückgabe-Nachzahlung fehlt.');
+            }
+
+            await connection.execute(
+                `INSERT INTO rental_order_payments
              (
                 order_id,
                 order_item_id,
@@ -3215,26 +3804,29 @@ END
                         req.params.itemId,
                         customerAdditionalDue,
                         payment.id
-                    ]
-                );
+                ]
+            );
 
-                if (checkoutUrl) {
-                    await sendReturnAdditionalChargeEmail(
-                        {
-                            order_no: item.order_no,
-                            customer_email: item.customer_email
-                        },
-                        item,
-                        checkoutUrl,
-                        customerAdditionalDue,
-                        additionalChargeReason
-                    );
-                }
-            } catch (mailError) {
-                console.error(
-                    'Rückgabe gespeichert, aber Nachzahlungs-Mail fehlgeschlagen:',
-                    mailError
+            returnChargeEmail = { checkoutUrl };
+        }
+
+        await refreshReturnCaseStatus(connection, item.order_id);
+        await connection.commit();
+
+        if (returnChargeEmail) {
+            try {
+                await sendReturnAdditionalChargeEmail(
+                    {
+                        order_no: item.order_no,
+                        customer_email: item.customer_email
+                    },
+                    item,
+                    returnChargeEmail.checkoutUrl,
+                    customerAdditionalDue,
+                    additionalChargeReason
                 );
+            } catch (mailError) {
+                console.error('Rückgabe gespeichert, aber Nachzahlungs-Mail fehlgeschlagen:', mailError);
             }
         }
 
@@ -3244,6 +3836,13 @@ END
         });
 
     } catch (error) {
+        if (connection) {
+            try {
+                await connection.rollback();
+            } catch (rollbackError) {
+                console.error('Rollback der Positionsrückgabe fehlgeschlagen:', rollbackError);
+            }
+        }
         console.error('Fehler bei Positionsrückgabe:', error);
         res.status(500).json({ error: 'Positionsrückgabe konnte nicht gespeichert werden.' });
     } finally {
@@ -3525,20 +4124,30 @@ app.post('/orders/:id/mollie-checkout', async (req, res) => {
 
     try {
         connection = await mysql.createConnection(dbConfig);
+        await connection.beginTransaction();
 
         const [orders] = await connection.execute(
             `SELECT
-                id,
-                order_no AS orderNo,
-                total_amount AS totalAmount,
-                status
-             FROM rental_orders
-             WHERE id = ?
-             LIMIT 1`,
+                ro.id,
+                ro.order_no AS orderNo,
+                ro.total_amount AS totalAmount,
+                ro.status,
+                ro.payment_method AS paymentMethod,
+                ro.payment_status AS paymentStatus,
+                ro.cart_id AS cartId,
+                ro.customer_email AS customerEmail,
+                rc.session_id AS cartSessionId,
+                rc.user_email AS cartUserEmail
+             FROM rental_orders ro
+             LEFT JOIN rental_carts rc ON rc.id = ro.cart_id
+             WHERE ro.id = ?
+             LIMIT 1
+             FOR UPDATE`,
             [req.params.id]
         );
 
         if (orders.length === 0) {
+            await connection.rollback();
             return res.status(404).json({
                 error: 'Bestellung nicht gefunden.'
             });
@@ -3546,15 +4155,197 @@ app.post('/orders/:id/mollie-checkout', async (req, res) => {
 
         const order = orders[0];
 
-        if (!['reserved', 'pending_payment'].includes(order.status)) {
+        const isAdmin = req.session.role === 'global_admin';
+        const isCustomer = req.session.user &&
+            String(req.session.user).toLowerCase() === String(order.customerEmail || '').toLowerCase();
+        const isGuestOwner = !req.session.user && req.session.cartKey &&
+            req.session.cartKey === order.cartSessionId && !order.cartUserEmail;
+
+        if (!isAdmin && !isCustomer && !isGuestOwner) {
+            await connection.rollback();
+            return res.status(403).json({ error: 'Kein Zugriff auf diese Bestellung.' });
+        }
+
+        if (order.paymentMethod !== 'online') {
+            await connection.rollback();
+            return res.status(409).json({
+                error: 'Für eine Barzahlungs-Bestellung kann kein Online-Checkout erzeugt werden.'
+            });
+        }
+
+        if (!['reserved', 'pending_payment', 'payment_failed', 'expired'].includes(order.status) || order.paymentStatus === 'paid') {
+            await connection.rollback();
             return res.status(400).json({
                 error: 'Für diese Bestellung kann kein Checkout mehr erstellt werden.'
             });
         }
 
-        const payment = await createMolliePaymentForOrder(order);
+        const [items] = await connection.execute(
+            `SELECT id, product_id,
+                    DATE_FORMAT(rental_start, '%Y-%m-%d') AS rentalStart,
+                    DATE_FORMAT(rental_end, '%Y-%m-%d') AS rentalEnd,
+                    price_per_day AS pricePerDay,
+                    deposit
+             FROM rental_order_items
+             WHERE order_id = ?
+             AND COALESCE(item_status, 'active') IN ('active', 'expired')`,
+            [order.id]
+        );
 
-        const checkoutUrl = payment.getCheckoutUrl();
+        if (items.length === 0) {
+            await connection.rollback();
+            return res.status(409).json({ error: 'Die Bestellung enthält keine aktive Mietposition.' });
+        }
+
+        await lockRentalProducts(
+            connection,
+            items.map(item => item.product_id)
+        );
+
+        await cancelOpenMolliePayments(connection, order.id, {
+            reason: 'Offene Zahlung wegen neuem Checkout beendet'
+        });
+
+        const [paidInitialPayments] = await connection.execute(
+            `SELECT initialPayment.mollie_payment_id
+             FROM rental_order_payments initialPayment
+             WHERE initialPayment.order_id = ?
+             AND initialPayment.payment_type = 'initial_payment'
+             AND initialPayment.payment_status = 'paid'
+             AND initialPayment.amount > (
+                SELECT COALESCE(SUM(ABS(refund.amount)), 0)
+                FROM rental_order_payments refund
+                WHERE refund.order_id = initialPayment.order_id
+                AND refund.mollie_payment_id = initialPayment.mollie_payment_id
+                AND refund.payment_type IN (
+                    'deposit_refund',
+                    'order_cancellation_refund',
+                    'duplicate_payment_refund'
+                )
+                AND refund.payment_status NOT IN ('failed', 'cancelled')
+             )
+             ORDER BY initialPayment.id DESC
+             LIMIT 1`,
+            [order.id]
+        );
+
+        let allItemsAvailable = true;
+
+        for (const item of items) {
+            const available = await checkProductAvailability(
+                connection,
+                item.product_id,
+                item.rentalStart,
+                item.rentalEnd,
+                item.id,
+                true
+            );
+            if (!available) {
+                allItemsAvailable = false;
+                break;
+            }
+        }
+
+        if (!allItemsAvailable && paidInitialPayments.length === 0) {
+            await connection.rollback();
+            return res.status(409).json({
+                error: 'Mindestens ein Produkt ist inzwischen nicht mehr verfügbar.'
+            });
+        }
+
+        if (!allItemsAvailable && paidInitialPayments.length > 0) {
+            await connection.execute(
+                `UPDATE rental_orders
+                 SET status = 'expired', return_status = 'not_required',
+                     return_case_status = 'closed'
+                 WHERE id = ?`,
+                [order.id]
+            );
+            await connection.execute(
+                `UPDATE rental_order_items
+                 SET item_status = 'expired', return_status = 'not_required'
+                 WHERE order_id = ?
+                 AND COALESCE(item_status, 'active') IN ('active', 'expired')`,
+                [order.id]
+            );
+            await createCancellationRefunds(connection, {
+                id: order.id,
+                order_no: order.orderNo,
+                payment_method: 'online'
+            });
+            await refreshCancelledOrderPaymentStatus(connection, order.id);
+            await connection.commit();
+
+            return res.status(409).json({
+                error: 'Die Zahlung ist eingegangen, aber die Mietartikel sind nicht mehr verfügbar. Die automatische Rückerstattung wurde gestartet.'
+            });
+        }
+
+        if (paidInitialPayments.length > 0) {
+            await connection.execute(
+                `UPDATE rental_orders
+                 SET status = 'confirmed', payment_status = 'paid',
+                     mollie_payment_id = ?, paid_at = COALESCE(paid_at, NOW())
+                 WHERE id = ?`,
+                [paidInitialPayments[0].mollie_payment_id, order.id]
+            );
+            await connection.execute(
+                `UPDATE rental_order_items
+                 SET item_status = 'active', return_status = NULL
+                 WHERE order_id = ?
+                 AND COALESCE(item_status, 'active') = 'expired'`,
+                [order.id]
+            );
+            if (order.cartId) {
+                await connection.execute('DELETE FROM rental_carts WHERE id = ?', [order.cartId]);
+            }
+            await connection.commit();
+            return res.json({
+                success: true,
+                alreadyPaid: true,
+                message: 'Die ursprüngliche Online-Zahlung ist bereits eingegangen.'
+            });
+        }
+
+        const [checkoutAttemptRows] = await connection.execute(
+            `SELECT COUNT(DISTINCT mollie_payment_id) AS attemptCount
+             FROM rental_order_payments
+             WHERE order_id = ?
+             AND payment_type = 'initial_payment'
+             AND mollie_payment_id IS NOT NULL`,
+            [order.id]
+        );
+        const checkoutAttempt = Number(checkoutAttemptRows[0]?.attemptCount || 0) + 1;
+
+        const payment = await createMolliePaymentForOrder({
+            ...order,
+            idempotencyKey: `checkout-retry-${order.id}-${checkoutAttempt}`
+        });
+
+        const checkoutUrl = getMollieCheckoutUrl(payment);
+
+        if (!checkoutUrl) {
+            throw new Error('Mollie Checkout-URL fehlt.');
+        }
+
+        const rentalTotal = roundMoney(items.reduce((sum, item) => {
+            return sum + calculateRentalDays(item.rentalStart, item.rentalEnd) * Number(item.pricePerDay || 0);
+        }, 0));
+        const depositTotal = roundMoney(items.reduce((sum, item) => sum + Number(item.deposit || 0), 0));
+
+        await connection.execute(
+            `INSERT INTO rental_order_payments
+             (order_id, order_item_id, payment_type, payment_method, payment_status, amount, mollie_payment_id, note)
+             VALUES
+                (?, NULL, 'initial_payment', 'online', 'pending', ?, ?, 'Erneuter Online-Checkout: Gesamtzahlung'),
+                (?, NULL, 'rental', 'online', 'pending', ?, ?, 'Erneuter Online-Checkout: Mietanteil'),
+                (?, NULL, 'deposit', 'online', 'pending', ?, ?, 'Erneuter Online-Checkout: Kautionsanteil')`,
+            [
+                order.id, Number(order.totalAmount), payment.id,
+                order.id, rentalTotal, payment.id,
+                order.id, depositTotal, payment.id
+            ]
+        );
 
         await connection.execute(
             `UPDATE rental_orders
@@ -3562,7 +4353,9 @@ app.post('/orders/:id/mollie-checkout', async (req, res) => {
      mollie_checkout_url = ?,
      mollie_payment_status = ?,
      payment_method = 'online',
-     payment_status = 'pending'
+     payment_status = 'pending',
+     status = 'reserved',
+     reserved_until = DATE_ADD(NOW(), INTERVAL 15 MINUTE)
  WHERE id = ?`,
             [
                 payment.id,
@@ -3572,12 +4365,30 @@ app.post('/orders/:id/mollie-checkout', async (req, res) => {
             ]
         );
 
+        await connection.execute(
+            `UPDATE rental_order_items
+             SET item_status = 'active',
+                 return_status = NULL
+             WHERE order_id = ?
+             AND COALESCE(item_status, 'active') = 'expired'`,
+            [order.id]
+        );
+
+        await connection.commit();
+
         return res.json({
             success: true,
             checkoutUrl
         });
 
     } catch (error) {
+        if (connection) {
+            try {
+                await connection.rollback();
+            } catch (rollbackError) {
+                console.error('Rollback des Mollie-Checkouts fehlgeschlagen:', rollbackError);
+            }
+        }
         console.error('Fehler beim Erstellen des Mollie-Checkouts:', error);
 
         return res.status(500).json({
@@ -3593,62 +4404,219 @@ app.get('/orders/:id/payment-status', async (req, res) => {
     let connection;
     const paymentType = req.query.paymentType || null;
     const itemId = req.query.itemId || null;
+    const additionalPaymentTypes = ['rental_adjustment', 'return_additional_charge'];
+
+    if (paymentType && !additionalPaymentTypes.includes(paymentType)) {
+        return res.status(400).json({ error: 'Ungültige Zahlungsart.' });
+    }
+
+    if (paymentType && (!itemId || !Number.isInteger(Number(itemId)) || Number(itemId) < 1)) {
+        return res.status(400).json({ error: 'Für diese Zahlung ist eine gültige Bestellposition erforderlich.' });
+    }
 
     try {
         connection = await mysql.createConnection(dbConfig);
+        await connection.beginTransaction();
 
         const [orders] = await connection.execute(
-            `SELECT id, cart_id, order_no AS orderNo, status, payment_status, mollie_payment_id, mollie_payment_status,
-       order_confirmation_sent_at, confirmation_json, customer_email, customer_first_name,
-       customer_last_name, customer_company, customer_phone, customer_address,
-       customer_zip, customer_city, signature_data_url
+            `SELECT id, cart_id, order_no AS orderNo, order_no, status, payment_method,
+                    payment_status, mollie_payment_id, mollie_payment_status
              FROM rental_orders
              WHERE id = ?
-             LIMIT 1`,
+             LIMIT 1
+             FOR UPDATE`,
             [req.params.id]
         );
 
         if (orders.length === 0) {
+            await connection.rollback();
             return res.status(404).json({ error: 'Bestellung nicht gefunden.' });
         }
 
         if (paymentType) {
             const [paymentRows] = await connection.execute(
                 `SELECT
+            rop.id AS paymentRecordId,
+            rop.order_id,
+            rop.order_item_id,
+            rop.amount,
             rop.mollie_payment_id,
             rop.payment_status,
             rop.payment_type,
+            rop.note,
             ro.order_no AS orderNo
          FROM rental_order_payments rop
          JOIN rental_orders ro ON ro.id = rop.order_id
-         WHERE rop.order_id = ?
+        WHERE rop.order_id = ?
         AND rop.payment_type = ?
+        AND rop.payment_method = 'online'
         AND (? IS NULL OR rop.order_item_id = ?)
+        AND rop.mollie_payment_id IS NOT NULL
         ORDER BY rop.id DESC
-        LIMIT 1`,
+        LIMIT 1
+        FOR UPDATE`,
                 [req.params.id, paymentType, itemId, itemId]
             );
 
             if (paymentRows.length === 0 || !paymentRows[0].mollie_payment_id) {
+                await connection.rollback();
                 return res.status(404).json({
                     error: 'Zahlung nicht gefunden.'
                 });
             }
 
             const molliePayment = await getMolliePayment(paymentRows[0].mollie_payment_id);
+            const mappedPaymentStatus = mapMolliePaymentStatus(molliePayment.status);
+            const wasOffsetAgainstDeposit =
+                paymentRows[0].payment_status === 'offset' ||
+                String(paymentRows[0].note || '').includes('Kaution verrechnet');
 
-            const mappedPaymentStatus =
-                molliePayment.status === 'paid'
-                    ? 'paid'
-                    : molliePayment.status === 'failed'
-                        ? 'failed'
-                        : molliePayment.status === 'canceled'
-                            ? 'cancelled'
-                            : molliePayment.status === 'expired'
-                                ? 'expired'
-                                : molliePayment.status === 'authorized'
-                                    ? 'authorized'
-                                    : 'pending';
+            if (wasOffsetAgainstDeposit) {
+                let duplicateRefundStatus = null;
+
+                if (mappedPaymentStatus === 'paid') {
+                    await connection.execute(
+                        `UPDATE rental_order_payments
+                         SET payment_status = 'paid', paid_at = COALESCE(paid_at, NOW())
+                         WHERE mollie_payment_id = ? AND mollie_refund_id IS NULL`,
+                        [molliePayment.id]
+                    );
+                    duplicateRefundStatus = await refundDuplicateOnlinePayment(
+                        connection,
+                        {
+                            ...paymentRows[0],
+                            order_no: paymentRows[0].orderNo
+                        },
+                        'Onlinezahlung ging nach Verrechnung mit der Kaution ein und wurde automatisch erstattet'
+                    );
+                    await syncMollieRefundsForPayment(connection, molliePayment.id);
+                } else {
+                    if (isOpenPaymentStatus(mappedPaymentStatus)) {
+                        await cancelMolliePayment(molliePayment.id);
+                    }
+
+                    await connection.execute(
+                        `UPDATE rental_order_payments
+                         SET payment_status = 'offset'
+                         WHERE mollie_payment_id = ?
+                         AND mollie_refund_id IS NULL`,
+                        [molliePayment.id]
+                    );
+                }
+
+                if (!duplicateRefundStatus) {
+                    const [refundRows] = await connection.execute(
+                        `SELECT payment_status
+                         FROM rental_order_payments
+                         WHERE mollie_payment_id = ?
+                         AND payment_type = 'duplicate_payment_refund'
+                         ORDER BY id DESC
+                         LIMIT 1`,
+                        [molliePayment.id]
+                    );
+                    duplicateRefundStatus = refundRows[0]?.payment_status || null;
+                }
+
+                await refreshReturnCaseStatus(connection, req.params.id);
+                await connection.commit();
+
+                return res.json({
+                    id: req.params.id,
+                    orderNo: paymentRows[0].orderNo,
+                    payment_status: 'paid',
+                    payment_type: paymentType,
+                    payment_method: 'deposit_offset',
+                    settled_by_offset: true,
+                    mollie_payment_status: molliePayment.status,
+                    duplicate_refund_status: duplicateRefundStatus
+                });
+            }
+
+            const [cashPaidRows] = await connection.execute(
+                `SELECT id
+                 FROM rental_order_payments
+                 WHERE order_id = ?
+                 AND order_item_id <=> ?
+                 AND payment_type = ?
+                 AND payment_method = 'cash'
+                 AND payment_status = 'paid'
+                 AND id > ?
+                 LIMIT 1
+                 FOR UPDATE`,
+                [
+                    paymentRows[0].order_id,
+                    paymentRows[0].order_item_id,
+                    paymentRows[0].payment_type,
+                    paymentRows[0].paymentRecordId
+                ]
+            );
+
+            if (cashPaidRows.length > 0) {
+                let duplicateRefundStatus = null;
+
+                if (mappedPaymentStatus === 'paid') {
+                    await connection.execute(
+                        `UPDATE rental_order_payments
+                         SET payment_status = 'paid', paid_at = COALESCE(paid_at, NOW())
+                         WHERE mollie_payment_id = ? AND mollie_refund_id IS NULL`,
+                        [molliePayment.id]
+                    );
+
+                    duplicateRefundStatus = await refundDuplicateOnlinePayment(
+                        connection,
+                        {
+                            ...paymentRows[0],
+                            order_no: paymentRows[0].orderNo
+                        }
+                    );
+                    await syncMollieRefundsForPayment(connection, molliePayment.id);
+
+                    if (!duplicateRefundStatus) {
+                        const [refundRows] = await connection.execute(
+                            `SELECT payment_status
+                             FROM rental_order_payments
+                             WHERE mollie_payment_id = ?
+                             AND payment_type = 'duplicate_payment_refund'
+                             ORDER BY id DESC
+                             LIMIT 1`,
+                            [molliePayment.id]
+                        );
+                        duplicateRefundStatus = refundRows[0]?.payment_status || null;
+                    }
+                } else {
+                    if (isOpenPaymentStatus(mappedPaymentStatus)) {
+                        await cancelMolliePayment(molliePayment.id);
+                    }
+
+                    await connection.execute(
+                        `UPDATE rental_order_payments
+                         SET payment_status = 'replaced',
+                             note = CONCAT(
+                                COALESCE(note, ''),
+                                CASE WHEN note IS NULL OR note = '' THEN '' ELSE ' | ' END,
+                                'Online-Link nach Barzahlung geschlossen'
+                             )
+                         WHERE mollie_payment_id = ?
+                         AND mollie_refund_id IS NULL`,
+                        [molliePayment.id]
+                    );
+                }
+
+                await refundEligibleDepositsAfterPaymentsSettled(connection, req.params.id);
+                await refreshReturnCaseStatus(connection, req.params.id);
+                await connection.commit();
+
+                return res.json({
+                    id: req.params.id,
+                    orderNo: paymentRows[0].orderNo,
+                    payment_status: 'paid',
+                    payment_type: paymentType,
+                    payment_method: 'cash',
+                    settled_by_cash: true,
+                    mollie_payment_status: molliePayment.status,
+                    duplicate_refund_status: duplicateRefundStatus
+                });
+            }
 
             await connection.execute(
                 `UPDATE rental_order_payments
@@ -3657,7 +4625,8 @@ app.get('/orders/:id/payment-status', async (req, res) => {
                 WHEN ? = 'paid' THEN COALESCE(paid_at, NOW())
                 ELSE paid_at
              END
-         WHERE mollie_payment_id = ?`,
+         WHERE mollie_payment_id = ?
+         AND mollie_refund_id IS NULL`,
                 [
                     mappedPaymentStatus,
                     mappedPaymentStatus,
@@ -3665,15 +4634,14 @@ app.get('/orders/:id/payment-status', async (req, res) => {
                 ]
             );
 
-            if (paymentType === 'return_additional_charge' && mappedPaymentStatus === 'paid') {
-                await connection.execute(
-                    `UPDATE rental_orders
-             SET return_case_status = 'closed'
-             WHERE id = ?
-             AND return_case_status = 'payment_pending'`,
-                    [req.params.id]
-                );
+            await syncMollieRefundsForPayment(connection, molliePayment.id);
+
+            if (mappedPaymentStatus === 'paid') {
+                await refundEligibleDepositsAfterPaymentsSettled(connection, req.params.id);
             }
+
+            await refreshReturnCaseStatus(connection, req.params.id);
+            await connection.commit();
 
             return res.json({
                 id: req.params.id,
@@ -3688,45 +4656,47 @@ app.get('/orders/:id/payment-status', async (req, res) => {
         const order = orders[0];
 
         if (!order.mollie_payment_id) {
-            return res.json(order);
+            await connection.rollback();
+            return res.json({
+                id: order.id,
+                orderNo: order.orderNo,
+                status: order.status,
+                payment_status: order.payment_status,
+                mollie_payment_status: null,
+                mollie_payment_method: null
+            });
         }
 
         const payment = await getMolliePayment(order.mollie_payment_id);
+        const publicPaymentStatus = mapMolliePaymentStatus(payment.status);
 
-        let newOrderStatus = order.status;
+        const [lockedOrders] = await connection.execute(
+            `SELECT id, cart_id, order_no, status, payment_method, payment_status
+             FROM rental_orders
+             WHERE id = ?
+             LIMIT 1
+             FOR UPDATE`,
+            [order.id]
+        );
+        const lockedOrder = lockedOrders[0];
+        const newOrderStatus = deriveOrderStatusFromInitialPayment(lockedOrder.status, payment.status);
+        const mayFollowInitialPayment = ['reserved', 'pending_payment', 'payment_failed'].includes(
+            String(lockedOrder.status || '').toLowerCase()
+        );
+        let effectivePaymentStatus = publicPaymentStatus;
+        let ledgerPaymentStatus = publicPaymentStatus;
 
-        if (payment.status === 'paid') {
-            newOrderStatus = 'confirmed';
-
-            if (order.cart_id) {
-                await connection.execute(
-                    `DELETE FROM rental_carts
-             WHERE id = ?`,
-                    [order.cart_id]
-                );
-
-                delete req.session.cartKey;
-            }
-        } else if (payment.status === 'canceled') {
-            newOrderStatus = 'cancelled';
-        } else if (payment.status === 'expired') {
-            newOrderStatus = 'expired';
-        } else if (payment.status === 'failed') {
-            newOrderStatus = 'payment_failed';
+        if (!mayFollowInitialPayment && publicPaymentStatus !== 'charged_back') {
+            effectivePaymentStatus = lockedOrder.payment_status;
         }
 
-        const publicPaymentStatus =
-            payment.status === 'paid'
-                ? 'paid'
-                : payment.status === 'failed'
-                    ? 'failed'
-                    : payment.status === 'canceled'
-                        ? 'cancelled'
-                        : payment.status === 'expired'
-                            ? 'expired'
-                            : payment.status === 'authorized'
-                                ? 'authorized'
-                                : 'pending';
+        if (
+            ['cancelled', 'expired'].includes(String(lockedOrder.status || '').toLowerCase()) &&
+            isOpenPaymentStatus(publicPaymentStatus)
+        ) {
+            await cancelMolliePayment(payment.id);
+            ledgerPaymentStatus = 'cancelled';
+        }
 
         await connection.execute(
             `UPDATE rental_orders
@@ -3742,9 +4712,9 @@ app.get('/orders/:id/payment-status', async (req, res) => {
             [
                 payment.status,
                 payment.method || null,
-                publicPaymentStatus,
+                effectivePaymentStatus,
                 newOrderStatus,
-                payment.status,
+                publicPaymentStatus,
                 order.id
             ]
         );
@@ -3760,22 +4730,51 @@ app.get('/orders/:id/payment-status', async (req, res) => {
      AND mollie_payment_id = ?
      AND payment_type IN ('initial_payment', 'rental', 'deposit')`,
             [
-                publicPaymentStatus,
-                publicPaymentStatus,
+                ledgerPaymentStatus,
+                ledgerPaymentStatus,
                 order.id,
                 payment.id
             ]
         );
 
+        await syncMollieRefundsForPayment(connection, payment.id);
+
+        if (
+            publicPaymentStatus === 'paid' &&
+            ['cancelled', 'expired'].includes(String(lockedOrder.status || '').toLowerCase())
+        ) {
+            await createCancellationRefunds(connection, {
+                id: lockedOrder.id,
+                order_no: lockedOrder.order_no,
+                payment_method: lockedOrder.payment_method
+            });
+            effectivePaymentStatus = await refreshCancelledOrderPaymentStatus(connection, lockedOrder.id);
+        }
+
+        if (publicPaymentStatus === 'paid' && newOrderStatus === 'confirmed' && lockedOrder.cart_id) {
+            await connection.execute('DELETE FROM rental_carts WHERE id = ?', [lockedOrder.cart_id]);
+            delete req.session.cartKey;
+        }
+
+        await connection.commit();
+
         return res.json({
-            ...order,
+            id: order.id,
+            orderNo: order.orderNo,
             status: newOrderStatus,
-            payment_status: publicPaymentStatus,
+            payment_status: effectivePaymentStatus,
             mollie_payment_status: payment.status,
             mollie_payment_method: payment.method || null
         });
 
     } catch (error) {
+        if (connection) {
+            try {
+                await connection.rollback();
+            } catch (rollbackError) {
+                console.error('Rollback beim Synchronisieren des Zahlungsstatus fehlgeschlagen:', rollbackError);
+            }
+        }
         console.error('Fehler beim Laden des Zahlungsstatus:', error);
         return res.status(500).json({ error: 'Zahlungsstatus konnte nicht geladen werden.' });
     } finally {
@@ -3796,10 +4795,19 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
         return res.status(400).json({ error: 'Ungültige Zahlungsdaten.' });
     }
 
+    if (!['initial_payment', 'rental_adjustment', 'return_additional_charge'].includes(paymentType)) {
+        return res.status(400).json({ error: 'Diese Zahlungsart kann nicht manuell kassiert werden.' });
+    }
+
+    if (paymentType !== 'initial_payment' && !orderItemId) {
+        return res.status(400).json({ error: 'Für eine Nachzahlung ist die Bestellposition erforderlich.' });
+    }
+
     let connection;
 
     try {
         connection = await mysql.createConnection(dbConfig);
+        await connection.beginTransaction();
 
         const recordedByUserId = await getUserIdByEmail(connection, req.session.user);
 
@@ -3807,7 +4815,8 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
             `SELECT id, order_no, customer_email, payment_method, status
              FROM rental_orders
              WHERE id = ?
-             LIMIT 1`,
+             LIMIT 1
+             FOR UPDATE`,
             [orderId]
         );
 
@@ -3830,15 +4839,6 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
             });
         }
 
-        if (
-            ['rental_adjustment', 'return_additional_charge'].includes(paymentType) &&
-            initialPaymentMethod !== 'cash'
-        ) {
-            return res.status(409).json({
-                error: 'Barzahlung ist für diese Bestellung nicht erlaubt, da die Bestellung nicht bar bezahlt wurde.'
-            });
-        }
-
         if (paymentType === 'initial_payment') {
             if (orderItemId) {
                 return res.status(400).json({
@@ -3853,7 +4853,8 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
          AND order_item_id IS NULL
          AND payment_type IN ('rental', 'deposit')
          AND payment_method = 'cash'
-         AND payment_status IN ('pending', 'open')`,
+         AND payment_status IN ('pending', 'open')
+         FOR UPDATE`,
                 [orderId]
             );
 
@@ -3923,55 +4924,37 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
                 [orderId]
             );
 
-            await sendPaymentReceiptEmail(order, {
-                amount: Number(amount),
-                payment_type: 'initial_payment',
-                payment_method: 'cash',
-                note: note || 'Miete und Kaution bar bei Abholung kassiert'
-            });
+            await connection.commit();
+
+            try {
+                await sendPaymentReceiptEmail(order, {
+                    amount: Number(amount),
+                    payment_type: 'initial_payment',
+                    payment_method: 'cash',
+                    note: note || 'Miete und Kaution bar bei Abholung kassiert'
+                });
+            } catch (mailError) {
+                console.error('Barzahlung gespeichert, aber Quittungsversand fehlgeschlagen:', mailError);
+            }
 
             return res.json({
-                message: 'Barzahlung für Miete und Kaution wurde erfasst und Quittung versendet.'
+                message: 'Barzahlung für Miete und Kaution wurde erfasst.'
             });
         }
 
-        if (
-            ['rental_adjustment', 'return_additional_charge'].includes(paymentType) &&
-            orderItemId
-        ) {
-            const [alreadyPaidOnlinePayments] = await connection.execute(
-                `SELECT id
-         FROM rental_order_payments
-         WHERE order_id = ?
-         AND order_item_id = ?
-         AND payment_type = ?
-         AND payment_method = 'online'
-         AND payment_status = 'paid'
-         LIMIT 1`,
-                [
-                    orderId,
-                    orderItemId,
-                    paymentType
-                ]
-            );
-
-            if (alreadyPaidOnlinePayments.length > 0) {
-                return res.status(409).json({
-                    error: 'Diese Nachzahlung wurde bereits online bezahlt und darf nicht mehr bar verbucht werden.'
-                });
-            }
-        }
+        let openAdditionalPayment = null;
 
         if (['rental_adjustment', 'return_additional_charge'].includes(paymentType) && orderItemId) {
             const [openPayments] = await connection.execute(
-                `SELECT id
+                `SELECT id, amount, payment_method, mollie_payment_id
          FROM rental_order_payments
          WHERE order_id = ?
          AND order_item_id = ?
          AND payment_type = ?
-         AND payment_status IN ('pending', 'open')
+         AND payment_status IN ('pending', 'open', 'authorized', 'failed', 'cancelled', 'expired')
          ORDER BY id DESC
-         LIMIT 1`,
+         LIMIT 1
+         FOR UPDATE`,
                 [orderId, orderItemId, paymentType]
             );
 
@@ -3980,40 +4963,73 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
                     error: 'Für diese Nachzahlung ist kein offener Zahlungsdatensatz vorhanden.'
                 });
             }
+
+            openAdditionalPayment = openPayments[0];
+            const expectedAmount = Number(openAdditionalPayment.amount || 0);
+
+            if (Number(amount).toFixed(2) !== expectedAmount.toFixed(2)) {
+                return res.status(400).json({
+                    error: `Der Barzahlungsbetrag muss exakt ${expectedAmount.toFixed(2)} € betragen.`
+                });
+            }
+
+            if (openAdditionalPayment.payment_method === 'online' && openAdditionalPayment.mollie_payment_id) {
+                const molliePayment = await getMolliePayment(openAdditionalPayment.mollie_payment_id);
+                const mollieStatus = mapMolliePaymentStatus(molliePayment.status);
+
+                if (mollieStatus === 'paid') {
+                    await connection.execute(
+                        `UPDATE rental_order_payments
+                         SET payment_status = 'paid', paid_at = COALESCE(paid_at, NOW())
+                         WHERE mollie_payment_id = ? AND mollie_refund_id IS NULL`,
+                        [openAdditionalPayment.mollie_payment_id]
+                    );
+                    await refundEligibleDepositsAfterPaymentsSettled(connection, orderId);
+                    await refreshReturnCaseStatus(connection, orderId);
+                    await connection.commit();
+                    return res.status(409).json({
+                        error: 'Diese Nachzahlung ist inzwischen online bezahlt worden und darf nicht zusätzlich bar verbucht werden.'
+                    });
+                }
+
+                if (isOpenPaymentStatus(mollieStatus)) {
+                    await cancelMolliePayment(openAdditionalPayment.mollie_payment_id);
+                }
+            }
         }
 
         if (['rental_adjustment', 'return_additional_charge'].includes(paymentType) && orderItemId) {
-            await connection.execute(
-                `UPDATE rental_order_payments
-         SET payment_status = 'paid',
-             payment_method = 'cash',
-             amount = ?,
-             paid_at = NOW(),
-             recorded_by_user_id = ?,
-             note = COALESCE(?, note)
-         WHERE order_id = ?
-         AND order_item_id = ?
-         AND payment_type = ?
-         AND payment_status IN ('pending', 'open')
-         ORDER BY id DESC
-         LIMIT 1`,
-                [
-                    Number(amount),
-                    recordedByUserId,
-                    note || null,
-                    orderId,
-                    orderItemId,
-                    paymentType
-                ]
-            );
-
-            if (paymentType === 'return_additional_charge') {
+            if (openAdditionalPayment.payment_method === 'cash') {
                 await connection.execute(
-                    `UPDATE rental_orders
-         SET return_case_status = 'closed'
-         WHERE id = ?
-         AND return_case_status = 'payment_pending'`,
-                    [orderId]
+                    `UPDATE rental_order_payments
+                     SET payment_status = 'paid', paid_at = NOW(),
+                         recorded_by_user_id = ?, note = COALESCE(?, note)
+                     WHERE id = ?`,
+                    [recordedByUserId, note || null, openAdditionalPayment.id]
+                );
+            } else {
+                await connection.execute(
+                    `UPDATE rental_order_payments
+                     SET payment_status = 'replaced',
+                         note = CONCAT(COALESCE(note, ''),
+                            CASE WHEN note IS NULL OR note = '' THEN '' ELSE ' | ' END,
+                            'Online-Nachzahlung durch Barzahlung ersetzt')
+                     WHERE id = ?`,
+                    [openAdditionalPayment.id]
+                );
+                await connection.execute(
+                    `INSERT INTO rental_order_payments
+                     (order_id, order_item_id, payment_type, payment_method, payment_status,
+                      amount, paid_at, recorded_by_user_id, note)
+                     VALUES (?, ?, ?, 'cash', 'paid', ?, NOW(), ?, ?)`,
+                    [
+                        orderId,
+                        orderItemId,
+                        paymentType,
+                        Number(amount),
+                        recordedByUserId,
+                        note || 'Online-Nachzahlung bar vor Ort beglichen'
+                    ]
                 );
             }
 
@@ -4037,60 +5053,8 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
             ['rental_adjustment', 'return_additional_charge'].includes(paymentType) &&
             orderItemId
         ) {
-            const [pendingOnlinePayments] = await connection.execute(
-                `SELECT id, mollie_payment_id
-         FROM rental_order_payments
-         WHERE order_id = ?
-         AND order_item_id = ?
-         AND payment_type = ?
-         AND payment_method = 'online'
-         AND payment_status = 'pending'`,
-                [
-                    orderId,
-                    orderItemId,
-                    paymentType
-                ]
-            );
-
-            for (const pendingPayment of pendingOnlinePayments) {
-                if (!pendingPayment.mollie_payment_id) continue;
-
-                try {
-                    const molliePayment = await getMolliePayment(pendingPayment.mollie_payment_id);
-
-                    if (!['paid', 'canceled', 'expired', 'failed'].includes(molliePayment.status)) {
-                        await cancelMolliePayment(pendingPayment.mollie_payment_id);
-                    }
-                } catch (error) {
-                    console.error(
-                        'Mollie-Nachzahlung konnte nicht storniert werden:',
-                        pendingPayment.mollie_payment_id,
-                        error
-                    );
-                }
-            }
-
-            await connection.execute(
-                `UPDATE rental_order_payments
-         SET payment_status = 'cancelled',
-             note = CONCAT(
-                COALESCE(note, ''),
-                CASE WHEN note IS NULL OR note = '' THEN '' ELSE ' | ' END,
-                'Online-Nachzahlung durch Barzahlung ersetzt'
-             )
-         WHERE order_id = ?
-         AND order_item_id = ?
-         AND payment_type = ?
-         AND payment_method = 'online'
-         AND payment_status = 'pending'`,
-                [
-                    orderId,
-                    orderItemId,
-                    paymentType
-                ]
-            );
-
             await refundEligibleDepositsAfterPaymentsSettled(connection, orderId);
+            await refreshReturnCaseStatus(connection, orderId);
         }
 
         if (paymentType === 'rental') {
@@ -4104,18 +5068,193 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
             );
         }
 
-        await sendPaymentReceiptEmail(orders[0], {
-            amount: Number(amount),
-            payment_type: paymentType,
-            payment_method: 'cash',
-            note
-        });
+        await connection.commit();
 
-        res.json({ message: 'Barzahlung wurde erfasst und Quittung versendet.' });
+        try {
+            await sendPaymentReceiptEmail(orders[0], {
+                amount: Number(amount),
+                payment_type: paymentType,
+                payment_method: 'cash',
+                note
+            });
+        } catch (mailError) {
+            console.error('Barzahlung gespeichert, aber Quittungsversand fehlgeschlagen:', mailError);
+        }
+
+        res.json({ message: 'Barzahlung wurde erfasst.' });
 
     } catch (error) {
+        if (connection) {
+            try {
+                await connection.rollback();
+            } catch (rollbackError) {
+                console.error('Rollback der manuellen Zahlung fehlgeschlagen:', rollbackError);
+            }
+        }
         console.error('Fehler beim Erfassen der Barzahlung:', error);
         res.status(500).json({ error: 'Zahlung konnte nicht erfasst werden.' });
+    } finally {
+        if (connection) await connection.end();
+    }
+});
+
+app.post('/admin/order-payments/:id/retry-refund', checkAdmin, async (req, res) => {
+    let connection;
+
+    try {
+        connection = await mysql.createConnection(dbConfig);
+        await connection.beginTransaction();
+
+        const [refundRows] = await connection.execute(
+            `SELECT
+                rop.id,
+                rop.order_id,
+                rop.order_item_id,
+                rop.payment_type,
+                rop.payment_method,
+                rop.payment_status,
+                rop.amount,
+                rop.mollie_payment_id,
+                ro.order_no
+             FROM rental_order_payments rop
+             JOIN rental_orders ro ON ro.id = rop.order_id
+             WHERE rop.id = ?
+             LIMIT 1
+             FOR UPDATE`,
+            [req.params.id]
+        );
+
+        if (refundRows.length === 0) {
+            await connection.rollback();
+            return res.status(404).json({ error: 'Rückerstattung wurde nicht gefunden.' });
+        }
+
+        const failedRefund = refundRows[0];
+        const retryableTypes = [
+            'deposit_refund',
+            'order_cancellation_refund',
+            'duplicate_payment_refund'
+        ];
+
+        if (
+            !retryableTypes.includes(failedRefund.payment_type) ||
+            failedRefund.payment_method !== 'online' ||
+            !['failed', 'cancelled'].includes(failedRefund.payment_status) ||
+            !failedRefund.mollie_payment_id
+        ) {
+            await connection.rollback();
+            return res.status(409).json({
+                error: 'Nur fehlgeschlagene Online-Rückerstattungen können erneut gestartet werden.'
+            });
+        }
+
+        const [sourceRows] = await connection.execute(
+            `SELECT amount
+             FROM rental_order_payments
+             WHERE order_id = ?
+             AND mollie_payment_id = ?
+             AND payment_status = 'paid'
+             AND payment_type IN ('initial_payment', 'rental_adjustment', 'return_additional_charge')
+             FOR UPDATE`,
+            [failedRefund.order_id, failedRefund.mollie_payment_id]
+        );
+        const [settledRefundRows] = await connection.execute(
+            `SELECT amount
+             FROM rental_order_payments
+             WHERE order_id = ?
+             AND mollie_payment_id = ?
+             AND payment_type IN ('deposit_refund', 'order_cancellation_refund', 'duplicate_payment_refund')
+             AND payment_status NOT IN ('failed', 'cancelled')
+             FOR UPDATE`,
+            [failedRefund.order_id, failedRefund.mollie_payment_id]
+        );
+
+        const remainingAmount = roundMoney(
+            sourceRows.reduce((sum, row) => sum + Number(row.amount || 0), 0) -
+            settledRefundRows.reduce((sum, row) => sum + Math.abs(Number(row.amount || 0)), 0)
+        );
+        const retryAmount = Math.min(
+            Math.abs(roundMoney(failedRefund.amount)),
+            Math.max(remainingAmount, 0)
+        );
+
+        if (retryAmount <= 0) {
+            await connection.rollback();
+            return res.status(409).json({
+                error: 'Für diese Zahlung ist kein erstattungsfähiger Restbetrag mehr vorhanden.'
+            });
+        }
+
+        const refund = await createMollieRefundForPayment({
+            paymentId: failedRefund.mollie_payment_id,
+            amount: retryAmount,
+            description: `Erneuter Erstattungsversuch ${failedRefund.order_no}`,
+            metadata: {
+                orderId: String(failedRefund.order_id),
+                itemId: failedRefund.order_item_id ? String(failedRefund.order_item_id) : null,
+                type: failedRefund.payment_type,
+                retryOfPaymentRecordId: String(failedRefund.id)
+            },
+            idempotencyKey: `retry-refund-${failedRefund.id}`
+        });
+        const refundStatus = mapMollieRefundStatus(refund.status);
+
+        const [existingRetryRows] = await connection.execute(
+            `SELECT id, payment_status
+             FROM rental_order_payments
+             WHERE mollie_refund_id = ?
+             LIMIT 1
+             FOR UPDATE`,
+            [refund.id]
+        );
+
+        if (existingRetryRows.length === 0) {
+            await connection.execute(
+                `INSERT INTO rental_order_payments
+                 (order_id, order_item_id, payment_type, payment_method, payment_status,
+                  amount, mollie_payment_id, mollie_refund_id, note, paid_at)
+                 VALUES (?, ?, ?, 'online', ?, ?, ?, ?, ?,
+                    CASE WHEN ? = 'paid' THEN NOW() ELSE NULL END)`,
+                [
+                    failedRefund.order_id,
+                    failedRefund.order_item_id,
+                    failedRefund.payment_type,
+                    refundStatus,
+                    -Math.abs(retryAmount),
+                    failedRefund.mollie_payment_id,
+                    refund.id,
+                    `Erneuter Erstattungsversuch für Zahlungsdatensatz #${failedRefund.id}`,
+                    refundStatus
+                ]
+            );
+        }
+
+        await syncMollieRefundsForPayment(connection, failedRefund.mollie_payment_id);
+
+        if (failedRefund.payment_type === 'order_cancellation_refund') {
+            await refreshCancelledOrderPaymentStatus(connection, failedRefund.order_id);
+        }
+
+        await connection.commit();
+
+        return res.json({
+            message: refundStatus === 'paid'
+                ? 'Rückerstattung wurde erfolgreich ausgeführt.'
+                : refundStatus === 'pending'
+                    ? 'Rückerstattung wurde erneut bei Mollie beauftragt.'
+                    : 'Der erneute Erstattungsversuch ist fehlgeschlagen.',
+            paymentStatus: refundStatus
+        });
+    } catch (error) {
+        if (connection) {
+            try {
+                await connection.rollback();
+            } catch (rollbackError) {
+                console.error('Rollback des Erstattungs-Retry fehlgeschlagen:', rollbackError);
+            }
+        }
+        console.error('Fehler beim erneuten Starten der Rückerstattung:', error);
+        return res.status(500).json({ error: 'Rückerstattung konnte nicht erneut gestartet werden.' });
     } finally {
         if (connection) await connection.end();
     }
@@ -4144,6 +5283,7 @@ app.post('/admin/order-payments/manual-refund', checkAdmin, async (req, res) => 
 
     try {
         connection = await mysql.createConnection(dbConfig);
+        await connection.beginTransaction();
 
         const recordedByUserId = await getUserIdByEmail(connection, req.session.user);
 
@@ -4151,7 +5291,8 @@ app.post('/admin/order-payments/manual-refund', checkAdmin, async (req, res) => 
             `SELECT id, order_no, customer_email, payment_method
              FROM rental_orders
              WHERE id = ?
-             LIMIT 1`,
+             LIMIT 1
+             FOR UPDATE`,
             [orderId]
         );
 
@@ -4163,14 +5304,14 @@ app.post('/admin/order-payments/manual-refund', checkAdmin, async (req, res) => 
             `SELECT id
              FROM rental_order_payments
              WHERE order_id = ?
-             AND (? IS NULL OR order_item_id = ?)
+             AND order_item_id <=> ?
              AND payment_type = ?
              AND payment_method = 'cash'
              AND payment_status = 'paid'
-             LIMIT 1`,
+             LIMIT 1
+             FOR UPDATE`,
             [
                 orderId,
-                orderItemId || null,
                 orderItemId || null,
                 paymentType
             ]
@@ -4183,84 +5324,80 @@ app.post('/admin/order-payments/manual-refund', checkAdmin, async (req, res) => 
         }
 
         const [openRefunds] = await connection.execute(
-            `SELECT id
+            `SELECT id, amount
      FROM rental_order_payments
      WHERE order_id = ?
-     AND (? IS NULL OR order_item_id = ?)
+     AND order_item_id <=> ?
      AND payment_type = ?
      AND payment_method = 'cash'
      AND payment_status IN ('pending', 'open')
      ORDER BY id DESC
-     LIMIT 1`,
+     LIMIT 1
+     FOR UPDATE`,
             [
                 orderId,
-                orderItemId || null,
                 orderItemId || null,
                 paymentType
             ]
         );
 
         if (openRefunds.length > 0) {
+            const expectedAmount = Math.abs(Number(openRefunds[0].amount || 0));
+
+            if (Number(amount).toFixed(2) !== expectedAmount.toFixed(2)) {
+                await connection.rollback();
+                return res.status(400).json({
+                    error: `Der Auszahlungsbetrag muss exakt ${expectedAmount.toFixed(2)} € betragen.`
+                });
+            }
+
             await connection.execute(
                 `UPDATE rental_order_payments
          SET payment_status = 'paid',
-             amount = ?,
              paid_at = NOW(),
              recorded_by_user_id = ?,
              note = COALESCE(?, note)
          WHERE id = ?`,
                 [
-                    -Math.abs(Number(amount)),
                     recordedByUserId,
                     note || null,
                     openRefunds[0].id
                 ]
             );
 
-            await sendPaymentReceiptEmail(orders[0], {
-                amount: -Math.abs(Number(amount)),
-                payment_type: paymentType,
-                payment_method: 'cash',
-                note: note || 'Kaution bar an Kunden ausgezahlt'
-            });
+            if (paymentType === 'order_cancellation_refund') {
+                await refreshCancelledOrderPaymentStatus(connection, orderId);
+            }
+
+            await connection.commit();
+
+            try {
+                await sendPaymentReceiptEmail(orders[0], {
+                    amount: -Math.abs(Number(amount)),
+                    payment_type: paymentType,
+                    payment_method: 'cash',
+                    note: note || 'Betrag bar an Kunden ausgezahlt'
+                });
+            } catch (mailError) {
+                console.error('Bar-Rückerstattung gespeichert, aber Belegversand fehlgeschlagen:', mailError);
+            }
 
             return res.json({ message: 'Bar-Rückerstattung wurde erfasst.' });
         }
 
-        await connection.execute(
-            `INSERT INTO rental_order_payments
-             (
-                order_id,
-                order_item_id,
-                payment_type,
-                payment_method,
-                payment_status,
-                amount,
-                paid_at,
-                recorded_by_user_id,
-                note
-             )
-             VALUES (?, ?, ?, 'cash', 'paid', ?, NOW(), ?, ?)`,
-            [
-                orderId,
-                orderItemId || null,
-                paymentType,
-                -Math.abs(Number(amount)),
-                recordedByUserId,
-                note || null
-            ]
-        );
-
-        await sendPaymentReceiptEmail(orders[0], {
-            amount: -Math.abs(Number(amount)),
-            payment_type: paymentType,
-            payment_method: 'cash',
-            note: note || 'Kaution bar an Kunden ausgezahlt'
+        await connection.rollback();
+        return res.status(409).json({
+            error: 'Für diese Bestellung ist keine offene Bar-Rückerstattung vorgemerkt.'
         });
 
-        res.json({ message: 'Bar-Rückerstattung wurde erfasst.' });
-
     } catch (error) {
+        if (connection) {
+            try {
+                await connection.rollback();
+            } catch (rollbackError) {
+                console.error('Rollback der manuellen Rückerstattung fehlgeschlagen:', rollbackError);
+            }
+        }
         console.error('Fehler beim Erfassen der Bar-Rückerstattung:', error);
         res.status(500).json({ error: 'Rückerstattung konnte nicht erfasst werden.' });
     } finally {
@@ -4278,13 +5415,15 @@ async function refundEligibleDepositsAfterPaymentsSettled(connection, orderId) {
             p.title,
             ro.order_no,
             ro.customer_email,
-            ro.payment_method
+            ro.payment_method,
+            ro.mollie_payment_id AS order_mollie_payment_id
          FROM rental_order_items roi
          JOIN rental_orders ro ON ro.id = roi.order_id
          JOIN rental_products p ON p.id = roi.product_id
          WHERE roi.order_id = ?
          AND roi.item_status LIKE 'returned_%'
-         AND COALESCE(roi.deposit_refund_amount, 0) > 0`,
+         AND COALESCE(roi.deposit_refund_amount, 0) > 0
+         FOR UPDATE`,
         [orderId]
     );
 
@@ -4295,8 +5434,11 @@ async function refundEligibleDepositsAfterPaymentsSettled(connection, orderId) {
              WHERE order_id = ?
              AND order_item_id = ?
              AND payment_type IN ('rental_adjustment', 'return_additional_charge')
-             AND payment_status IN ('pending', 'open', 'authorized')
-             LIMIT 1`,
+             AND payment_status IN (
+                'pending', 'open', 'authorized', 'failed', 'cancelled', 'expired'
+             )
+             LIMIT 1
+             FOR UPDATE`,
             [orderId, item.id]
         );
 
@@ -4310,8 +5452,8 @@ async function refundEligibleDepositsAfterPaymentsSettled(connection, orderId) {
              WHERE order_id = ?
              AND order_item_id = ?
              AND payment_type = 'deposit_refund'
-             AND payment_status IN ('pending', 'open', 'paid')
-             LIMIT 1`,
+             LIMIT 1
+             FOR UPDATE`,
             [orderId, item.id]
         );
 
@@ -4333,9 +5475,11 @@ async function refundEligibleDepositsAfterPaymentsSettled(connection, orderId) {
                  AND payment_type IN ('initial_payment', 'rental', 'deposit')
                  AND payment_status = 'paid'
                  AND mollie_payment_id IS NOT NULL
-                 ORDER BY id ASC
+                 ORDER BY (mollie_payment_id = ?) DESC,
+                          CASE WHEN payment_type = 'initial_payment' THEN 0 ELSE 1 END,
+                          id ASC
                  LIMIT 1`,
-                [orderId]
+                [orderId, item.order_mollie_payment_id]
             );
 
             if (payments.length === 0) {
@@ -4352,8 +5496,10 @@ async function refundEligibleDepositsAfterPaymentsSettled(connection, orderId) {
                     orderId: String(orderId),
                     itemId: String(item.id),
                     type: 'deposit_refund'
-                }
+                },
+                idempotencyKey: `deposit-refund-${orderId}-${item.id}`
             });
+            const refundStatus = mapMollieRefundStatus(refund.status);
 
             await connection.execute(
                 `INSERT INTO rental_order_payments
@@ -4369,14 +5515,19 @@ async function refundEligibleDepositsAfterPaymentsSettled(connection, orderId) {
                     note,
                     paid_at
                  )
-                 VALUES (?, ?, 'deposit_refund', 'online', 'paid', ?, ?, ?, ?, NOW())`,
+                 VALUES (?, ?, 'deposit_refund', 'online', ?, ?, ?, ?, ?,
+                    CASE WHEN ? = 'paid' THEN NOW() ELSE NULL END)`,
                 [
                     orderId,
                     item.id,
+                    refundStatus,
                     -Math.abs(refundAmount),
                     originalPaymentId,
                     refund.id,
-                    'Kaution automatisch nach Zahlung aller Ausstände erstattet'
+                    refundStatus === 'paid'
+                        ? 'Kaution automatisch nach Zahlung aller Ausstände erstattet'
+                        : 'Kautionsrückerstattung nach Zahlung aller Ausstände bei Mollie beauftragt',
+                    refundStatus
                 ]
             );
         } else if (item.payment_method === 'cash') {
@@ -4419,22 +5570,10 @@ app.post('/webhooks/mollie', async (req, res) => {
         connection = await mysql.createConnection(dbConfig);
         await connection.beginTransaction();
 
-        const mappedPaymentStatus =
-            payment.status === 'paid'
-                ? 'paid'
-                : payment.status === 'failed'
-                    ? 'failed'
-                    : payment.status === 'canceled'
-                        ? 'cancelled'
-                        : payment.status === 'expired'
-                            ? 'expired'
-                            : payment.status === 'charged_back'
-                                ? 'charged_back'
-                                : payment.status === 'authorized'
-                                    ? 'authorized'
-                                    : 'pending';
+        const mappedPaymentStatus = mapMolliePaymentStatus(payment.status);
+        await syncMollieRefundsForPayment(connection, payment.id);
 
-
+        let isDuplicateEvent = false;
         try {
             await connection.execute(
                 `INSERT INTO mollie_webhook_events
@@ -4443,34 +5582,182 @@ app.post('/webhooks/mollie', async (req, res) => {
                 [payment.id, payment.status]
             );
         } catch (duplicateEventError) {
-            await connection.rollback();
-            return res.sendStatus(200);
+            if (!isDuplicateKeyError(duplicateEventError)) {
+                throw duplicateEventError;
+            }
+            isDuplicateEvent = true;
         }
 
         const [cashPaidRows] = await connection.execute(
-            `SELECT cashPaid.id
+            `SELECT cashPaid.id,
+                    onlinePayment.order_id,
+                    onlinePayment.order_item_id,
+                    onlinePayment.amount,
+                    onlinePayment.mollie_payment_id,
+                    ro.order_no
      FROM rental_order_payments onlinePayment
      JOIN rental_order_payments cashPaid
        ON cashPaid.order_id = onlinePayment.order_id
       AND cashPaid.order_item_id = onlinePayment.order_item_id
       AND cashPaid.payment_type = onlinePayment.payment_type
+     JOIN rental_orders ro ON ro.id = onlinePayment.order_id
      WHERE onlinePayment.mollie_payment_id = ?
      AND onlinePayment.payment_type IN ('rental_adjustment', 'return_additional_charge')
      AND cashPaid.payment_method = 'cash'
      AND cashPaid.payment_status = 'paid'
+     AND cashPaid.id > onlinePayment.id
      LIMIT 1`,
             [payment.id]
         );
 
         if (cashPaidRows.length > 0) {
+            if (mappedPaymentStatus === 'paid') {
+                await connection.execute(
+                    `UPDATE rental_order_payments
+                     SET payment_status = 'paid', paid_at = COALESCE(paid_at, NOW())
+                     WHERE mollie_payment_id = ? AND mollie_refund_id IS NULL`,
+                    [payment.id]
+                );
+                await refundDuplicateOnlinePayment(connection, cashPaidRows[0]);
+                await refundEligibleDepositsAfterPaymentsSettled(
+                    connection,
+                    cashPaidRows[0].order_id
+                );
+                await refreshReturnCaseStatus(connection, cashPaidRows[0].order_id);
+                await connection.commit();
+                return res.sendStatus(200);
+            }
+
             await connection.execute(
                 `UPDATE rental_order_payments
-         SET payment_status = 'cancelled',
+         SET payment_status = 'replaced',
              note = CONCAT(COALESCE(note, ''), ' | Online-Link nach Barzahlung ignoriert')
          WHERE mollie_payment_id = ?
-         AND payment_status = 'pending'`,
+         AND payment_status IN (
+            'pending', 'open', 'authorized', 'failed', 'cancelled', 'expired'
+         )`,
                 [payment.id]
             );
+
+            await connection.commit();
+            return res.sendStatus(200);
+        }
+
+        const [paymentContextRows] = await connection.execute(
+            `SELECT
+                rop.order_id,
+                rop.order_item_id,
+                rop.payment_type,
+                rop.payment_status,
+                rop.amount,
+                rop.mollie_payment_id,
+                ro.order_no,
+                ro.status AS order_status,
+                ro.payment_method AS order_payment_method,
+                roi.item_status,
+                DATE_FORMAT(roi.rental_start, '%Y-%m-%d') AS rental_start,
+                DATE_FORMAT(roi.rental_end, '%Y-%m-%d') AS rental_end,
+                roi.price_per_day,
+                roi.deposit
+             FROM rental_order_payments rop
+             JOIN rental_orders ro ON ro.id = rop.order_id
+             LEFT JOIN rental_order_items roi ON roi.id = rop.order_item_id
+             WHERE rop.mollie_payment_id = ?
+             AND rop.mollie_refund_id IS NULL
+             ORDER BY CASE WHEN rop.payment_type = 'initial_payment' THEN 0 ELSE 1 END,
+                      rop.id DESC
+             LIMIT 1
+             FOR UPDATE`,
+            [payment.id]
+        );
+
+        const paymentContext = paymentContextRows[0] || null;
+        const isAdditionalPayment = ['rental_adjustment', 'return_additional_charge'].includes(
+            paymentContext?.payment_type
+        );
+        const wasAlreadySettled = ['offset', 'replaced'].includes(
+            String(paymentContext?.payment_status || '').toLowerCase()
+        );
+        const additionalPaymentWasCancelled = isAdditionalPayment && (
+            ['cancelled', 'expired'].includes(String(paymentContext?.order_status || '').toLowerCase()) ||
+            ['cancelled', 'expired'].includes(String(paymentContext?.item_status || '').toLowerCase())
+        );
+
+        if (isAdditionalPayment && wasAlreadySettled) {
+            if (mappedPaymentStatus === 'paid') {
+                await connection.execute(
+                    `UPDATE rental_order_payments
+                     SET payment_status = 'paid', paid_at = COALESCE(paid_at, NOW())
+                     WHERE mollie_payment_id = ? AND mollie_refund_id IS NULL`,
+                    [payment.id]
+                );
+                await refundDuplicateOnlinePayment(
+                    connection,
+                    paymentContext,
+                    paymentContext.payment_status === 'offset'
+                        ? 'Onlinezahlung ging nach Verrechnung mit der Kaution ein und wurde automatisch erstattet'
+                        : 'Onlinezahlung ging nach anderweitiger Begleichung ein und wurde automatisch erstattet'
+                );
+                await syncMollieRefundsForPayment(connection, payment.id);
+            } else if (isOpenPaymentStatus(mappedPaymentStatus)) {
+                await cancelMolliePayment(payment.id);
+            }
+
+            await connection.execute(
+                `UPDATE rental_order_payments
+                 SET payment_status = ?
+                 WHERE mollie_payment_id = ?
+                 AND mollie_refund_id IS NULL
+                 AND payment_status != 'paid'`,
+                [paymentContext.payment_status, payment.id]
+            );
+            await refreshReturnCaseStatus(connection, paymentContext.order_id);
+            await connection.commit();
+            return res.sendStatus(200);
+        }
+
+        if (additionalPaymentWasCancelled) {
+            if (mappedPaymentStatus === 'paid') {
+                await connection.execute(
+                    `UPDATE rental_order_payments
+                     SET payment_status = 'paid', paid_at = COALESCE(paid_at, NOW())
+                     WHERE mollie_payment_id = ? AND mollie_refund_id IS NULL`,
+                    [payment.id]
+                );
+
+                const cancellationOrder = {
+                    id: paymentContext.order_id,
+                    order_no: paymentContext.order_no,
+                    payment_method: paymentContext.order_payment_method
+                };
+                const cancelledItem = String(paymentContext.item_status || '').toLowerCase() === 'cancelled'
+                    ? {
+                        id: paymentContext.order_item_id,
+                        rental_start: paymentContext.rental_start,
+                        rental_end: paymentContext.rental_end,
+                        price_per_day: paymentContext.price_per_day,
+                        deposit: paymentContext.deposit
+                    }
+                    : null;
+
+                await createCancellationRefunds(
+                    connection,
+                    cancellationOrder,
+                    cancelledItem
+                );
+
+                if (['cancelled', 'expired'].includes(String(paymentContext.order_status || '').toLowerCase())) {
+                    await refreshCancelledOrderPaymentStatus(connection, paymentContext.order_id);
+                }
+            } else if (isOpenPaymentStatus(mappedPaymentStatus)) {
+                await cancelMolliePayment(payment.id);
+                await connection.execute(
+                    `UPDATE rental_order_payments
+                     SET payment_status = 'cancelled'
+                     WHERE mollie_payment_id = ? AND mollie_refund_id IS NULL`,
+                    [payment.id]
+                );
+            }
 
             await connection.commit();
             return res.sendStatus(200);
@@ -4483,38 +5770,14 @@ app.post('/webhooks/mollie', async (req, res) => {
                     WHEN ? = 'paid' THEN COALESCE(paid_at, NOW())
                     ELSE paid_at
                  END
-             WHERE mollie_payment_id = ?`,
+             WHERE mollie_payment_id = ?
+             AND mollie_refund_id IS NULL`,
             [
                 mappedPaymentStatus,
                 mappedPaymentStatus,
                 payment.id
             ]
         );
-
-        const [paymentContextRows] = await connection.execute(
-            `SELECT order_id, order_item_id, payment_type
-     FROM rental_order_payments
-     WHERE mollie_payment_id = ?
-     ORDER BY id DESC
-     LIMIT 1`,
-            [payment.id]
-        );
-
-        const paymentContext = paymentContextRows[0] || null;
-
-        if (
-            paymentContext &&
-            mappedPaymentStatus === 'paid' &&
-            paymentContext.payment_type === 'return_additional_charge'
-        ) {
-            await connection.execute(
-                `UPDATE rental_orders
-         SET return_case_status = 'closed'
-         WHERE id = ?
-         AND return_case_status = 'payment_pending'`,
-                [paymentContext.order_id]
-            );
-        }
 
         if (paymentContext && mappedPaymentStatus === 'paid') {
             await refundEligibleDepositsAfterPaymentsSettled(
@@ -4523,7 +5786,11 @@ app.post('/webhooks/mollie', async (req, res) => {
             );
         }
 
-        if (mappedPaymentStatus === 'charged_back') {
+        if (paymentContext) {
+            await refreshReturnCaseStatus(connection, paymentContext.order_id);
+        }
+
+        if (mappedPaymentStatus === 'charged_back' && !isDuplicateEvent) {
             await connection.execute(
                 `UPDATE rental_orders ro
          JOIN rental_order_payments rop ON rop.order_id = ro.id
@@ -4562,13 +5829,17 @@ app.post('/webhooks/mollie', async (req, res) => {
             );
         }
 
+        const initialPaymentOrderId = paymentContext?.payment_type === 'initial_payment'
+            ? paymentContext.order_id
+            : null;
         const [orders] = await connection.execute(
-            `SELECT id, status, cart_id, order_confirmation_sent_at
+            `SELECT id, order_no, status, payment_method, payment_status, cart_id,
+                    mollie_payment_id, order_confirmation_sent_at
              FROM rental_orders
-             WHERE mollie_payment_id = ?
+             WHERE ((? IS NOT NULL AND id = ?) OR mollie_payment_id = ?)
              LIMIT 1
              FOR UPDATE`,
-            [payment.id]
+            [initialPaymentOrderId, initialPaymentOrderId, payment.id]
         );
 
         if (orders.length === 0) {
@@ -4578,18 +5849,56 @@ app.post('/webhooks/mollie', async (req, res) => {
 
         const order = orders[0];
 
-        let newOrderStatus = order.status;
+        const isDuplicateInitialPayment =
+            mappedPaymentStatus === 'paid' &&
+            paymentContext?.payment_type === 'initial_payment' &&
+            String(order.payment_status || '').toLowerCase() === 'paid' &&
+            order.mollie_payment_id &&
+            order.mollie_payment_id !== payment.id;
 
-        if (payment.status === 'paid') {
-            newOrderStatus = 'confirmed';
-        } else if (payment.status === 'canceled') {
-            newOrderStatus = 'cancelled';
-        } else if (payment.status === 'expired') {
-            newOrderStatus = 'expired';
-        } else if (payment.status === 'failed') {
-            newOrderStatus = 'payment_failed';
-        } else if (payment.status === 'charged_back') {
-            newOrderStatus = 'payment_dispute';
+        if (isDuplicateInitialPayment) {
+            await refundDuplicateOnlinePayment(
+                connection,
+                {
+                    ...paymentContext,
+                    order_no: order.order_no
+                },
+                'Zusätzliche Initialzahlung nach bereits bezahlter Bestellung wurde automatisch erstattet'
+            );
+            await connection.commit();
+            return res.sendStatus(200);
+        }
+
+        const newOrderStatus = deriveOrderStatusFromInitialPayment(order.status, payment.status);
+        const mayFollowInitialPayment = ['reserved', 'pending_payment', 'payment_failed'].includes(
+            String(order.status || '').toLowerCase()
+        );
+        let effectivePaymentStatus = mayFollowInitialPayment || mappedPaymentStatus === 'charged_back'
+            ? mappedPaymentStatus
+            : order.payment_status;
+
+        if (
+            mappedPaymentStatus === 'paid' &&
+            paymentContext?.payment_type === 'initial_payment' &&
+            mayFollowInitialPayment
+        ) {
+            await cancelOpenMolliePayments(connection, order.id, {
+                reason: 'Andere offene Zahlung nach erfolgreicher Initialzahlung beendet'
+            });
+        }
+
+        if (
+            ['cancelled', 'expired'].includes(String(order.status || '').toLowerCase()) &&
+            isOpenPaymentStatus(mappedPaymentStatus) &&
+            paymentContext?.payment_type === 'initial_payment'
+        ) {
+            await cancelMolliePayment(payment.id);
+            await connection.execute(
+                `UPDATE rental_order_payments
+                 SET payment_status = 'cancelled'
+                 WHERE mollie_payment_id = ? AND mollie_refund_id IS NULL`,
+                [payment.id]
+            );
         }
 
         await connection.execute(
@@ -4598,6 +5907,10 @@ app.post('/webhooks/mollie', async (req, res) => {
                  mollie_payment_method = ?,
                  payment_status = ?,
                  status = ?,
+                 mollie_payment_id = CASE
+                    WHEN ? = 'paid' AND ? = 'initial_payment' AND ? = 'confirmed' THEN ?
+                    ELSE mollie_payment_id
+                 END,
                  paid_at = CASE
                     WHEN ? = 'paid' THEN COALESCE(paid_at, NOW())
                     ELSE paid_at
@@ -4606,14 +5919,26 @@ app.post('/webhooks/mollie', async (req, res) => {
             [
                 payment.status,
                 payment.method || null,
-                mappedPaymentStatus,
+                effectivePaymentStatus,
                 newOrderStatus,
+                mappedPaymentStatus,
+                paymentContext?.payment_type || null,
+                newOrderStatus,
+                payment.id,
                 mappedPaymentStatus,
                 order.id
             ]
         );
 
-        if (mappedPaymentStatus === 'paid' && order.cart_id) {
+        if (
+            mappedPaymentStatus === 'paid' &&
+            ['cancelled', 'expired'].includes(String(order.status || '').toLowerCase())
+        ) {
+            await createCancellationRefunds(connection, order);
+            effectivePaymentStatus = await refreshCancelledOrderPaymentStatus(connection, order.id);
+        }
+
+        if (mappedPaymentStatus === 'paid' && newOrderStatus === 'confirmed' && order.cart_id) {
             await connection.execute(
                 `DELETE FROM rental_carts
                  WHERE id = ?`,
@@ -4625,17 +5950,10 @@ app.post('/webhooks/mollie', async (req, res) => {
 
         if (
             mappedPaymentStatus === 'paid' &&
+            newOrderStatus === 'confirmed' &&
             !order.order_confirmation_sent_at
         ) {
             shouldSendConfirmation = true;
-
-            await connection.execute(
-                `UPDATE rental_orders
-                 SET order_confirmation_sent_at = NOW()
-                 WHERE id = ?
-                 AND order_confirmation_sent_at IS NULL`,
-                [order.id]
-            );
         }
 
         await connection.commit();
@@ -4689,6 +6007,13 @@ app.post('/webhooks/mollie', async (req, res) => {
                         },
                         paidOrder.signature_data_url,
                         'Erfolgreich online gezahlt'
+                    );
+
+                    await mailConnection.execute(
+                        `UPDATE rental_orders
+                         SET order_confirmation_sent_at = NOW()
+                         WHERE id = ? AND order_confirmation_sent_at IS NULL`,
+                        [order.id]
                     );
                 }
             } finally {
