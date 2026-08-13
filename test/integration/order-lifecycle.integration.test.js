@@ -231,6 +231,54 @@ test('schließt eine Barzahlungs-Bestellung ab und persistiert Miete sowie Kauti
     assert.equal(activeCarts.length, 0);
 });
 
+test('filtert Kunden- und Adminbestellungen nach konkretem Jahr und Monat', async () => {
+    const customer = new SessionClient();
+    const admin = new SessionClient();
+    await login(customer, TEST_CUSTOMER);
+    await login(admin, TEST_ADMIN);
+
+    const januaryOrder = await createOrder(
+        customer,
+        'cash',
+        futureDate(130),
+        futureDate(131)
+    );
+    const novemberOrder = await createOrder(
+        customer,
+        'cash',
+        futureDate(133),
+        futureDate(134)
+    );
+
+    await execute(
+        `UPDATE rental_orders
+         SET created_at = CASE id
+             WHEN ? THEN '2024-01-15 10:00:00'
+             WHEN ? THEN '2025-11-20 10:00:00'
+         END
+         WHERE id IN (?, ?)`,
+        [januaryOrder.orderId, novemberOrder.orderId, januaryOrder.orderId, novemberOrder.orderId]
+    );
+
+    const customerResponse = await customer.request('/my-orders?year=2024&month=01');
+    assert.equal(customerResponse.status, 200, await customerResponse.text());
+    const customerResult = await customerResponse.json();
+
+    assert.deepEqual(customerResult.items.map(order => order.id), [januaryOrder.orderId]);
+    assert.ok(customerResult.filterOptions.years.includes('2024'));
+    assert.ok(customerResult.filterOptions.years.includes('2025'));
+    assert.ok(customerResult.filterOptions.months.includes('01'));
+    assert.ok(customerResult.filterOptions.months.includes('11'));
+
+    const adminResponse = await admin.request('/admin/orders?year=2025&month=11');
+    assert.equal(adminResponse.status, 200, await adminResponse.text());
+    const adminResult = await adminResponse.json();
+
+    assert.deepEqual(adminResult.items.map(order => order.id), [novemberOrder.orderId]);
+    assert.ok(adminResult.filterOptions.years.includes('2024'));
+    assert.ok(adminResult.filterOptions.years.includes('2025'));
+});
+
 test('verarbeitet Online-Zahlung, Mollie-Webhook und vollständigen Storno-Refund idempotent', async () => {
     const customer = new SessionClient();
     await login(customer, TEST_CUSTOMER);

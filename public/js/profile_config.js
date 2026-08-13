@@ -1,5 +1,4 @@
 let myOrders = [];
-let orderIdToCancel = null;
 let currentMyOrderPage = 1;
 const myOrdersPerPage = 10;
 let myOrderPagination = {
@@ -16,7 +15,33 @@ let myOrderFilterOptions = {
     paymentStatuses: []
 };
 
+function handleProfileActionClick(event) {
+    const button = event.target.closest('[data-profile-action]');
+
+    if (!button || button.disabled) return;
+
+    const action = button.dataset.profileAction;
+    const orderId = Number(button.dataset.orderId);
+    const productId = Number(button.dataset.productId);
+
+    const actions = {
+        'open-order-details': () => openMyOrderDetails(orderId),
+        'change-order-page': () => changeMyOrderPage(Number(button.dataset.direction)),
+        'submit-review': () => submitProductReview(productId, orderId)
+    };
+
+    actions[action]?.();
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
+    document.addEventListener('click', handleProfileActionClick);
+
+    document.querySelectorAll('[data-profile-view]').forEach(button => {
+        button.addEventListener('click', () => switchProfileView(button.dataset.profileView));
+    });
+
+    document.getElementById('profileLogoutButton')?.addEventListener('click', logout);
+
     try {
         const response = await fetch('/my-profile');
 
@@ -181,17 +206,6 @@ async function loadMyOrders() {
     }
 }
 
-function canCancelOrder(order) {
-    const status = String(order.status || '').trim().toLowerCase();
-    const items = order.items || [];
-
-    const hasRentalStartingTodayOrPast = items.some(item =>
-        isRentalStartTodayOrPast(item.rentalStart)
-    );
-
-    return ['reserved', 'confirmed'].includes(status) && !hasRentalStartingTodayOrPast;
-}
-
 function renderMyOrders() {
     const container = document.getElementById('myOrdersList');
 
@@ -222,7 +236,7 @@ function renderMyOrders() {
 
                 <div class="d-flex gap-2 flex-wrap justify-content-end">
                     <button type="button" class="btn btn-outline-primary btn-sm"
-                        onclick="openMyOrderDetails(${order.id})">
+                        data-profile-action="open-order-details" data-order-id="${order.id}">
                         Details anzeigen
                     </button>
                 </div>
@@ -242,13 +256,13 @@ function renderMyOrders() {
         <div class="btn-group">
             <button type="button" class="btn btn-outline-primary btn-sm"
                 ${currentMyOrderPage <= 1 ? 'disabled' : ''}
-                onclick="changeMyOrderPage(-1)">
+                data-profile-action="change-order-page" data-direction="-1">
                 Zurück
             </button>
 
             <button type="button" class="btn btn-outline-primary btn-sm"
                 ${currentMyOrderPage >= totalPages ? 'disabled' : ''}
-                onclick="changeMyOrderPage(1)">
+                data-profile-action="change-order-page" data-direction="1">
                 Weiter
             </button>
         </div>
@@ -280,13 +294,6 @@ async function openMyOrderDetails(orderId) {
         console.error('Fehler beim Laden der Bestellung:', error);
         showAlert('Bestellung konnte nicht geladen werden.', 'danger');
     }
-}
-
-function cancelMyOrder(orderId) {
-    orderIdToCancel = orderId;
-
-    const modal = new bootstrap.Modal(document.getElementById('cancelOrderModal'));
-    modal.show();
 }
 
 function renderMyOrderDetails(order) {
@@ -433,19 +440,14 @@ function renderReviewCard(item, orderId) {
 
                 <button type="button"
                     class="btn btn-outline-success btn-sm"
-                    onclick="submitProductReview(${item.productId}, ${orderId})">
+                    data-profile-action="submit-review"
+                    data-product-id="${item.productId}"
+                    data-order-id="${orderId}">
                     Bewertung speichern
                 </button>
             </div>
         </div>
     `;
-}
-
-function isRentalStartTodayOrPast(rentalStart) {
-    if (!rentalStart) return false;
-
-    const today = new Date().toISOString().slice(0, 10);
-    return String(rentalStart).slice(0, 10) <= today;
 }
 
 function renderMyOrderItemCard(item, order) {
@@ -1193,37 +1195,6 @@ function initProfileInputValidation() {
 
 document.addEventListener('DOMContentLoaded', initProfileInputValidation);
 
-document.getElementById('confirmCancelOrderBtn')?.addEventListener('click', async () => {
-    if (!orderIdToCancel) return;
-
-    const modalEl = document.getElementById('cancelOrderModal');
-    const modal = bootstrap.Modal.getInstance(modalEl);
-
-    try {
-        const response = await fetch(`/my-orders/${orderIdToCancel}/cancel`, {
-            method: 'POST'
-        });
-
-        const result = await response.json();
-
-        if (!response.ok) {
-            showAlert(result.error || 'Bestellung konnte nicht storniert werden.', 'danger');
-            return;
-        }
-
-        showAlert(result.message || 'Bestellung wurde storniert.', 'success');
-
-        modal.hide();
-        orderIdToCancel = null;
-
-        await loadMyOrders();
-
-    } catch (error) {
-        console.error('Fehler beim Stornieren der Bestellung:', error);
-        showAlert('Bestellung konnte nicht storniert werden.', 'danger');
-    }
-});
-
 async function submitProductReview(productId, orderId) {
     const ratingInput = document.getElementById(`rating-${productId}`);
     const reviewTextInput = document.getElementById(`reviewText-${productId}`);
@@ -1237,7 +1208,7 @@ async function submitProductReview(productId, orderId) {
     }
 
     const submitButton = document.querySelector(
-        `button[onclick="submitProductReview(${productId}, ${orderId})"]`
+        `button[data-profile-action="submit-review"][data-product-id="${productId}"][data-order-id="${orderId}"]`
     );
 
     if (submitButton) {
@@ -1323,36 +1294,6 @@ document.addEventListener('DOMContentLoaded', () => {
         cleanupBootstrapModalState();
     });
 });
-
-async function cancelMyOrderItem(orderId, itemId) {
-    const confirmed = window.confirm(
-        'Möchten Sie diesen Artikel wirklich stornieren?'
-    );
-
-    if (!confirmed) return;
-
-    try {
-        const response = await fetch(`/my-orders/${orderId}/items/${itemId}/cancel`, {
-            method: 'POST'
-        });
-
-        const result = await response.json();
-
-        if (!response.ok) {
-            showAlert(result.error || 'Artikel konnte nicht storniert werden.', 'danger');
-            return;
-        }
-
-        showAlert(result.message || 'Artikel wurde storniert.', 'success');
-
-        await loadMyOrders();
-        await refreshMyOrderDetails(orderId);
-
-    } catch (error) {
-        console.error('Fehler beim Stornieren des Artikels:', error);
-        showAlert('Artikel konnte nicht storniert werden.', 'danger');
-    }
-}
 
 function logout() {
     fetch('/logout', {

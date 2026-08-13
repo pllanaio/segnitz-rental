@@ -1,7 +1,7 @@
 'use strict';
 
 const { expect, test } = require('@playwright/test');
-const { TEST_PRODUCT, TEST_USER } = require('../support/test-database');
+const { TEST_ADMIN, TEST_PRODUCT, TEST_USER } = require('../support/test-database');
 
 function futureDate(offsetDays) {
     const date = new Date();
@@ -52,6 +52,10 @@ test('zeigt den Katalog und legt ein Produkt über die Oberfläche in den Warenk
     await expect(page.locator('#cartModal')).toBeVisible();
     await expect(page.locator('#cartItems')).toContainText(TEST_PRODUCT.title);
     await expect(page.locator('#cartItems')).toContainText(`${rentalStart} bis ${rentalEnd}`);
+
+    await page.getByRole('button', { name: 'Zeitraum ändern' }).click();
+    await expect(page.locator('#cartItemEditModal')).toBeVisible();
+    await expect(page.locator('#editCartItemTitle')).toHaveText(TEST_PRODUCT.title);
 });
 
 test('zeigt Loginfehler und meldet einen Testkunden erfolgreich an', async ({ page }) => {
@@ -69,6 +73,29 @@ test('zeigt Loginfehler und meldet einen Testkunden erfolgreich an', async ({ pa
     await expect(page).toHaveURL(/\/index\.html$/);
     await expect(page.locator('#login-status')).toHaveText(`Angemeldet als: ${TEST_USER.email}`);
     await expect(page.locator('#profile-button')).toBeVisible();
+});
+
+test('führt Admin-Navigation und dynamische Produktaktionen ohne Inline-Handler aus', async ({ page }) => {
+    const response = await page.goto('/login.html');
+    const csp = response.headers()['content-security-policy'];
+
+    expect(csp).toContain("script-src-attr 'none'");
+    expect(csp).toContain("script-src 'self' https://cdn.jsdelivr.net");
+    expect(csp).not.toContain("script-src 'self' 'unsafe-inline'");
+
+    await page.locator('#username').fill(TEST_ADMIN.email);
+    await page.locator('#password').fill(TEST_ADMIN.password);
+    await page.getByRole('button', { name: 'Einloggen' }).click();
+
+    await page.goto('/backend.html');
+    await expect(page.locator('#productList')).toContainText(TEST_PRODUCT.title);
+
+    await page.getByRole('button', { name: 'Bearbeiten' }).click();
+    await expect(page.locator('#title')).toHaveValue(TEST_PRODUCT.title);
+
+    await page.getByRole('button', { name: 'Öffnungszeiten' }).click();
+    await expect(page.locator('#openingHoursView')).toBeVisible();
+    await expect(page.locator('#openingHoursAdmin')).toContainText('Montag');
 });
 
 test('verarbeitet den paginierten Kundenauftrags-Vertrag und zeigt vor Rückgabe keine fiktive Kautionserstattung', async ({ page }) => {
