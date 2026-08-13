@@ -23,13 +23,23 @@ let serverOutput = '';
 class SessionClient {
     constructor() {
         this.cookie = '';
+        this.csrfToken = '';
     }
 
     async request(pathname, options = {}) {
         const headers = new Headers(options.headers || {});
+        const method = String(options.method || 'GET').toUpperCase();
 
         if (this.cookie) {
             headers.set('cookie', this.cookie);
+        }
+
+        if (
+            this.csrfToken &&
+            pathname.startsWith('/admin/') &&
+            !['GET', 'HEAD'].includes(method)
+        ) {
+            headers.set('x-csrf-token', this.csrfToken);
         }
 
         const response = await fetch(`${BASE_URL}${pathname}`, {
@@ -105,7 +115,11 @@ async function login(client, account) {
         })
     });
 
-    assert.equal(response.status, 200, await response.text());
+    const responseText = await response.text();
+    assert.equal(response.status, 200, responseText);
+
+    const result = JSON.parse(responseText);
+    client.csrfToken = String(result.csrfToken || '');
 }
 
 async function addCartItem(client, rentalStart, rentalEnd) {
@@ -285,6 +299,37 @@ test('filtert Kunden- und Adminbestellungen nach konkretem Jahr und Monat', asyn
     assert.deepEqual(adminResult.items.map(order => order.id), [novemberOrder.orderId]);
     assert.ok(adminResult.filterOptions.years.includes('2024'));
     assert.ok(adminResult.filterOptions.years.includes('2025'));
+});
+
+test('blockiert geänderte Rückgabe-Mutationen ohne gültiges Admin-CSRF-Token', async () => {
+    const admin = new SessionClient();
+    await login(admin, TEST_ADMIN);
+
+    const validCsrfToken = admin.csrfToken;
+    assert.match(validCsrfToken, /^[a-f0-9]{64}$/);
+
+    admin.csrfToken = '';
+
+    const protectedRequests = [
+        ['/admin/order-items/0/cancel', 'PUT'],
+        ['/admin/order-items/0/return-images', 'POST'],
+        ['/admin/order-items/0/return', 'PUT'],
+        ['/admin/order-payments/0/retry-refund', 'POST'],
+        ['/admin/order-payments/manual-refund', 'POST']
+    ];
+
+    for (const [pathname, method] of protectedRequests) {
+        const response = await admin.request(pathname, { method });
+        assert.equal(response.status, 403, `${method} ${pathname}: ${await response.text()}`);
+    }
+
+    admin.csrfToken = '0'.repeat(64);
+    const invalidTokenResponse = await admin.request('/admin/order-items/0/return', {
+        method: 'PUT'
+    });
+    assert.equal(invalidTokenResponse.status, 403, await invalidTokenResponse.text());
+
+    admin.csrfToken = validCsrfToken;
 });
 
 test('verarbeitet Online-Zahlung, Mollie-Webhook und vollständigen Storno-Refund idempotent', async () => {
