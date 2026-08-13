@@ -152,6 +152,162 @@ test('führt Admin-Navigation und dynamische Produktaktionen ohne Inline-Handler
     await expect(page.locator('#openingHoursAdmin')).toContainText('Montag');
 });
 
+test('rendert gespeicherte Kundendaten im Adminbereich ohne HTML- oder Aktionsinjektion', async ({ page }) => {
+    const payload = '<button class="xss-probe" data-backend-action="mark-item-picked-up" data-item-id="999">Adminaktion</button>';
+    let injectedPickupRequests = 0;
+
+    page.on('request', request => {
+        if (request.method() === 'PUT' && request.url().endsWith('/admin/order-items/999/pickup')) {
+            injectedPickupRequests += 1;
+        }
+    });
+
+    await page.route('**/admin/orders?*', route => route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+            items: [{
+                id: 9001,
+                order_no: 'R-XSS-9001',
+                status: 'confirmed',
+                payment_status: 'pending',
+                payment_method: 'cash',
+                customer_first_name: payload,
+                customer_last_name: payload,
+                customer_company: payload,
+                customer_email: `customer+${payload}@example.com`,
+                items: []
+            }],
+            pagination: { page: 1, limit: 10, total: 1, totalPages: 1 },
+            filterOptions: {
+                years: [], months: [], statuses: [], returnStatuses: [], paymentStatuses: []
+            }
+        })
+    }));
+    await page.route('**/admin/orders/9001', route => route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+            id: 9001,
+            order_no: 'R-XSS-9001',
+            status: 'confirmed',
+            payment_status: 'pending',
+            payment_method: 'cash',
+            customer_first_name: payload,
+            customer_last_name: payload,
+            customer_company: payload,
+            customer_email: `customer+${payload}@example.com`,
+            customer_phone: payload,
+            customer_address: payload,
+            customer_zip: payload,
+            customer_city: payload,
+            items: [],
+            payments: []
+        })
+    }));
+
+    await page.goto('/login.html');
+    await page.locator('#username').fill(TEST_ADMIN.email);
+    await page.locator('#password').fill(TEST_ADMIN.password);
+    await Promise.all([
+        page.waitForURL(/\/backend\.html$/),
+        page.getByRole('button', { name: 'Einloggen' }).click()
+    ]);
+    await page.getByRole('button', { name: 'Bestellungen' }).click();
+
+    await expect(page.locator('#ordersList')).toContainText(payload);
+    await expect(page.locator('#ordersList .xss-probe')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Details' }).click();
+    await expect(page.locator('#orderDetailsBody')).toContainText(payload);
+    await expect(page.locator('#orderDetailsBody .xss-probe')).toHaveCount(0);
+    await expect(page.locator('[data-backend-action="mark-item-picked-up"][data-item-id="999"]')).toHaveCount(0);
+    expect(injectedPickupRequests).toBe(0);
+});
+
+test('rendert öffentliche und eigene Bewertungen als Text statt als HTML', async ({ page }) => {
+    const payload = '<button class="xss-probe" data-backend-action="mark-item-picked-up">Nicht ausführen</button>';
+
+    await page.route(`**/products/${TEST_PRODUCT.id}/reviews`, route => route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([{
+            rating: 5,
+            reviewText: payload,
+            createdAt: payload,
+            firstName: payload,
+            lastName: payload
+        }])
+    }));
+
+    await page.goto('/');
+    const productCard = page.locator('#productGrid .product-card', { hasText: TEST_PRODUCT.title });
+    await productCard.getByRole('button', { name: 'Details' }).click();
+
+    await expect(page.locator('#modalProductReviews')).toContainText(payload);
+    await expect(page.locator('#modalProductReviews .xss-probe')).toHaveCount(0);
+
+    await page.route('**/my-profile', route => route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+            customerNo: 'TEST-XSS',
+            email: TEST_USER.email,
+            firstName: 'Test',
+            lastName: 'Kunde',
+            emailVerified: 1
+        })
+    }));
+    await page.route('**/my-orders?*', route => route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+            items: [{
+                id: 9101,
+                order_no: 'R-REVIEW-XSS',
+                status: 'returned',
+                payment_status: 'paid',
+                items: [{ id: 9102, itemStatus: 'returned_ok', returnStatus: 'returned_ok' }]
+            }],
+            pagination: { page: 1, limit: 10, total: 1, totalPages: 1 },
+            filterOptions: {
+                years: [], months: [], statuses: [], returnStatuses: [], paymentStatuses: []
+            }
+        })
+    }));
+    await page.route('**/my-orders/9101', route => route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+            id: 9101,
+            order_no: 'R-REVIEW-XSS',
+            status: 'returned',
+            payment_status: 'paid',
+            customer_first_name: 'Test',
+            customer_last_name: 'Kunde',
+            items: [{
+                id: 9102,
+                productId: TEST_PRODUCT.id,
+                title: TEST_PRODUCT.title,
+                rentalStart: '2026-09-01',
+                rentalEnd: '2026-09-02',
+                pricePerDay: 49.90,
+                deposit: 150,
+                itemStatus: 'returned_ok',
+                returnStatus: 'returned_ok',
+                review: { rating: 5, reviewText: payload, createdAt: payload },
+                returnImages: []
+            }],
+            payments: []
+        })
+    }));
+
+    await page.goto('/profile.html');
+    await page.locator('#nav-orders').click();
+    await page.getByRole('button', { name: 'Details anzeigen' }).click();
+    await expect(page.locator('#myOrderDetailsBody')).toContainText(payload);
+    await expect(page.locator('#myOrderDetailsBody .xss-probe')).toHaveCount(0);
+});
+
 test('führt die Rückgabemaske mit Schadensdokumentation und wählbarem Zahlungsweg aus', async ({ page }) => {
     const rentalStart = futureDate(20);
     const rentalEnd = futureDate(21);
@@ -421,7 +577,7 @@ test('verarbeitet den paginierten Kundenauftrags-Vertrag und zeigt vor Rückgabe
 });
 
 test('erklärt nach Bar-Fallback die automatisch erstattete Online-Doppelzahlung verständlich', async ({ page }) => {
-    await page.route('**/orders/1/payment-status?*', route => route.fulfill({
+    await page.route('**/orders/1/payment-status/sync?*', route => route.fulfill({
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
@@ -436,9 +592,15 @@ test('erklärt nach Bar-Fallback die automatisch erstattete Online-Doppelzahlung
         })
     }));
 
+    const syncRequestPromise = page.waitForRequest(request =>
+        request.method() === 'POST' && request.url().includes('/orders/1/payment-status/sync?')
+    );
+
     await page.goto('/index.html?payment=extension&orderId=1&paymentType=rental_adjustment&itemId=11');
+    const syncRequest = await syncRequestPromise;
 
     await expect(page.locator('#paymentResultTitle')).toHaveText('Nachzahlung bereits bar beglichen');
     await expect(page.locator('#paymentResultText')).toContainText('automatisch zurückerstattet');
     await expect(page.locator('#final')).toContainText('doppelte Onlinezahlung wurde erstattet');
+    expect(syncRequest.headers()['x-csrf-token']).toMatch(/^[a-f0-9]{64}$/);
 });

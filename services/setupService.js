@@ -48,11 +48,16 @@ function validateAdminInput(input) {
         throw createSetupError('Bitte eine gültige E-Mail-Adresse eingeben.', 400, 'INVALID_EMAIL');
     }
 
-    const passwordPolicy = /^(?=.*[a-z])(?=.*[A-Z])(?=.*[0-9])(?=.*[^A-Za-z0-9]).{12,128}$/;
+    const passwordIsValid = password.length >= 12 &&
+        Buffer.byteLength(password, 'utf8') <= 72 &&
+        /[a-z]/u.test(password) &&
+        /[A-Z]/u.test(password) &&
+        /[0-9]/u.test(password) &&
+        /[^A-Za-z0-9]/u.test(password);
 
-    if (!passwordPolicy.test(password)) {
+    if (!passwordIsValid) {
         throw createSetupError(
-            'Das Adminpasswort muss 12 bis 128 Zeichen sowie Groß- und Kleinbuchstaben, eine Zahl und ein Sonderzeichen enthalten.',
+            'Das Adminpasswort muss mindestens 12 Zeichen und höchstens 72 Bytes sowie Groß- und Kleinbuchstaben, eine Zahl und ein Sonderzeichen enthalten.',
             400,
             'INVALID_PASSWORD'
         );
@@ -184,6 +189,7 @@ async function createInitialAdmin(input) {
         setInstallationState('ready');
 
         return {
+            authVersion: 1,
             email: admin.email,
             role: 'global_admin'
         };

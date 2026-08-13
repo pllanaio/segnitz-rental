@@ -239,7 +239,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             finalDiv.innerHTML = `
                 <div class="alert alert-success">
                     ${body}<br>
-                    Bestellnummer: <strong>${order.orderNo || order.order_no || orderId}</strong>
+                    Bestellnummer: <strong>${escapeHtml(order.orderNo || order.order_no || orderId)}</strong>
                 </div>
             `;
         }
@@ -265,7 +265,10 @@ document.addEventListener('DOMContentLoaded', async () => {
             ? `?${queryParams.toString()}`
             : '';
 
-        const response = await fetch(`/orders/${orderId}/payment-status${query}`);
+        const response = await fetch(`/orders/${orderId}/payment-status/sync${query}`, {
+            method: 'POST',
+            headers: { Accept: 'application/json' }
+        });
         const order = await response.json();
 
         if (!response.ok) {
@@ -309,6 +312,15 @@ async function retryMolliePayment(orderId) {
         if (result.alreadyPaid) {
             showAlert(result.message || 'Die Zahlung ist bereits eingegangen.', 'success');
             window.location.reload();
+            return;
+        }
+
+        if (result.paymentPending || !result.checkoutUrl) {
+            showAlert(
+                result.message || 'Die Online-Zahlung wird noch vorbereitet. Bitte versuchen Sie es gleich erneut.',
+                'info',
+                8000
+            );
             return;
         }
 
@@ -554,7 +566,7 @@ submitBtn.addEventListener('click', async (event) => {
 
             if (response.status === 409) {
                 showAlert(
-                    `${result.error} <a href="/login.html" class="alert-link">Hier klicken, um sich einzuloggen.</a>`,
+                    `${result.error || 'Diese E-Mail-Adresse ist bereits registriert.'} Bitte loggen Sie sich ein.`,
                     'warning',
                     8000
                 );
@@ -569,6 +581,8 @@ submitBtn.addEventListener('click', async (event) => {
             window.location.href = result.checkoutUrl;
             return;
         }
+
+        const paymentPending = result.paymentPending === true;
 
         bodyElement.classList.add('loaded');
 
@@ -591,21 +605,46 @@ submitBtn.addEventListener('click', async (event) => {
         const resultText = document.getElementById('paymentResultText');
         const finalDiv = document.getElementById('final');
 
-        if (resultTitle) {
-            resultTitle.textContent = 'Barzahlungs-Miete bestätigt';
-        }
+        if (paymentPending) {
+            if (resultTitle) {
+                resultTitle.textContent = 'Online-Zahlung wird vorbereitet';
+            }
 
-        if (resultText) {
-            resultText.textContent = 'Ihre Mietprodukte sind verbindlich eingeplant. Miete und Kaution zahlen Sie vollständig bei der Abholung.';
-        }
+            if (resultText) {
+                resultText.textContent = result.message ||
+                    'Der Zahlungsanbieter ist vorübergehend nicht erreichbar. Ihre Bestellung wurde sicher gespeichert.';
+            }
 
-        if (finalDiv) {
-            finalDiv.innerHTML = `
-                <div class="alert alert-success">
-                    Bestellnummer: <strong>${result.orderNo}</strong><br>
-                    Bei Abholung zu zahlen: <strong>${Number(result.amountDue || 0).toFixed(2)} €</strong>
-                </div>
-            `;
+            if (finalDiv) {
+                finalDiv.innerHTML = `
+                    <div class="alert alert-info">
+                        Bestellnummer: <strong>${escapeHtml(result.orderNo)}</strong><br>
+                        Die Zahlungsseite kann in Kürze erneut angefordert werden.
+                    </div>
+                    <button type="button" class="btn btn-primary"
+                        data-frontend-action="retry-payment"
+                        data-order-id="${Number(result.orderId)}">
+                        Zahlungsseite erneut laden
+                    </button>
+                `;
+            }
+        } else {
+            if (resultTitle) {
+                resultTitle.textContent = 'Barzahlungs-Miete bestätigt';
+            }
+
+            if (resultText) {
+                resultText.textContent = 'Ihre Mietprodukte sind verbindlich eingeplant. Miete und Kaution zahlen Sie vollständig bei der Abholung.';
+            }
+
+            if (finalDiv) {
+                finalDiv.innerHTML = `
+                    <div class="alert alert-success">
+                        Bestellnummer: <strong>${escapeHtml(result.orderNo)}</strong><br>
+                        Bei Abholung zu zahlen: <strong>${Number(result.amountDue || 0).toFixed(2)} €</strong>
+                    </div>
+                `;
+            }
         }
 
         if (result.pdfUrl) {
@@ -753,7 +792,7 @@ async function showProductDetails(card) {
     const endInput = document.getElementById('modalRentalEnd');
     const infoBox = document.getElementById('modalRentalInfo');
 
-    const today = new Date().toISOString().split('T')[0];
+    const today = SegnitzDate.formatLocalDate();
     startInput.value = '';
     endInput.value = '';
     startInput.min = today;
@@ -779,7 +818,7 @@ async function showProductDetails(card) {
             item.className = index === 0 ? 'carousel-item active' : 'carousel-item';
 
             item.innerHTML = `
-                <img src="${imagePath}" class="d-block w-100 rounded modal-product-image" alt="${card.dataset.title}">
+                <img src="${escapeHtml(imagePath)}" class="d-block w-100 rounded modal-product-image" alt="${escapeHtml(card.dataset.title)}">
             `;
 
             carouselInner.appendChild(item);
@@ -823,7 +862,7 @@ function renderBlockedPeriodsInfo() {
     infoBox.innerHTML = `
         <strong>Bereits reservierte Zeiträume:</strong><br>
         ${currentBlockedPeriods.map(period => {
-        return `${period.rentalStart} bis ${period.rentalEnd}`;
+        return `${escapeHtml(period.rentalStart)} bis ${escapeHtml(period.rentalEnd)}`;
     }).join('<br>')}
     `;
 }
@@ -1072,18 +1111,18 @@ function createRentalProductCard(product) {
 
     card.innerHTML = `
     <div class="product-card-image-wrap">
-        ${firstImage ? `<img src="${firstImage}" alt="${product.title}">` : ''}
+        ${firstImage ? `<img src="${escapeHtml(firstImage)}" alt="${escapeHtml(product.title)}">` : ''}
         <div class="availability-badge badge bg-secondary">
             Verfügbarkeit wird geprüft...
         </div>
     </div>
 
     <div class="product-card-body">
-        <h5 class="product-card-title">${product.title}</h5>
+        <h5 class="product-card-title">${escapeHtml(product.title)}</h5>
         ${ratingHtml}
 
         <p class="product-card-description">
-            ${product.description || ''}
+            ${escapeHtml(product.description || '')}
         </p>
 
         <div class="product-card-price-row">
@@ -1452,7 +1491,7 @@ function renderCart() {
             <div class="border rounded p-3 mb-2">
                 <div class="d-flex justify-content-between gap-3">
                     <div>
-                        <strong>${item.title}</strong><br>
+                        <strong>${escapeHtml(item.title)}</strong><br>
                         <span class="small text-muted">
                             ${item.rentalStart} bis ${item.rentalEnd} · ${days} Tag${days === 1 ? '' : 'e'}
                         </span><br>
@@ -1551,7 +1590,7 @@ function renderCartReview() {
 
         return `
             <div class="border rounded p-3 mb-2">
-                <strong>${item.title}</strong><br>
+                <strong>${escapeHtml(item.title)}</strong><br>
                 Mietzeitraum: ${item.rentalStart} bis ${item.rentalEnd}<br>
                 Dauer: ${days} Tag${days === 1 ? '' : 'e'}<br>
                 Miete: ${formatCurrency(lineTotal)}<br>
@@ -1872,13 +1911,16 @@ function createCategoryFilterButton(categoryValue, label, count) {
             ? 'btn btn-warning w-100 text-start d-flex justify-content-between align-items-center mb-2'
             : 'btn btn-outline-light w-100 text-start d-flex justify-content-between align-items-center mb-2';
 
-    button.innerHTML = `
-        <span>
-            <i class="bi ${categoryValue === 'all' ? 'bi-grid' : 'bi-tag'}"></i>
-            ${label}
-        </span>
-        <span>${count}</span>
-    `;
+    const labelNode = document.createElement('span');
+    const icon = document.createElement('i');
+    icon.className = `bi ${categoryValue === 'all' ? 'bi-grid' : 'bi-tag'}`;
+    labelNode.appendChild(icon);
+    labelNode.appendChild(document.createTextNode(` ${label}`));
+
+    const countNode = document.createElement('span');
+    countNode.textContent = String(count);
+    button.appendChild(labelNode);
+    button.appendChild(countNode);
 
     button.addEventListener('click', () => {
         selectedCategory = categoryValue;
@@ -2074,12 +2116,14 @@ function renderModalProductReviews(showAll = false) {
             ${renderRatingStars(review.rating)}
 
             <div class="small text-muted">
-                ${review.firstName || ''} ${review.lastName || ''}
-                · ${review.createdAt || ''}
+                ${escapeHtml(review.displayName || 'Kunde')}
+                · ${escapeHtml(review.createdAt || '')}
             </div>
 
             <div>
-                ${review.reviewText || '<span class="text-muted">Keine Rezension geschrieben.</span>'}
+                ${review.reviewText
+                    ? escapeHtml(review.reviewText)
+                    : '<span class="text-muted">Keine Rezension geschrieben.</span>'}
             </div>
         </div>
     `).join('');

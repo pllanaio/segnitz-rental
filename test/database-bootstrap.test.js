@@ -3,13 +3,23 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const {
+    buildMigrationManifest,
     makeCreateTableIdempotent,
+    hasExistingApplicationTables,
+    legacyMigrationChecksum,
     migrationChecksum,
+    recordFreshSchemaMigrations,
+    runAutomaticMigrations,
     quoteIdentifier,
     validateConfiguredSetupToken,
     validateDatabaseConfig
 } = require('../database/bootstrap');
 const { migrations } = require('../database/migrations/automatic');
+const {
+    normalizeCheckClause,
+    normalizeGenerationExpression,
+    parseCanonicalSchema
+} = require('../database/schemaContract');
 const {
     setupTokenMatches,
     validateAdminInput
@@ -53,12 +63,159 @@ test('macht ausschließlich CREATE-TABLE-Anweisungen idempotent', () => {
     );
 });
 
+test('erkennt ein frisches Schema auch neben fremden Tabellen', () => {
+    const canonicalSchema = new Map([
+        ['users', {}],
+        ['rental_orders', {}]
+    ]);
+
+    assert.equal(hasExistingApplicationTables(new Set(['unrelated_table']), canonicalSchema), false);
+    assert.equal(hasExistingApplicationTables(new Set(['unrelated_table', 'users']), canonicalSchema), true);
+});
+
 test('berechnet für jede automatische Migration eine stabile Prüfsumme', () => {
     for (const migration of migrations) {
         const checksum = migrationChecksum(migration);
         assert.match(checksum, /^[a-f0-9]{64}$/);
         assert.equal(checksum, migrationChecksum(migration));
     }
+});
+
+test('akzeptiert Legacy-Prüfsummen nur für den unveränderten SQL-Quelltext', () => {
+    const migration = migrations[0];
+    assert.equal(legacyMigrationChecksum(migration), migration.legacyChecksums[0]);
+    assert.notEqual(
+        legacyMigrationChecksum({ ...migration, checksumSource: `${migration.checksumSource}\nSELECT 1` }),
+        migration.legacyChecksums[0]
+    );
+});
+
+test('bindet Migration-Version, Up-Logik und Helper in die Prüfsumme ein', () => {
+    const migration = {
+        version: 'test_01',
+        checksumSource: 'SELECT 1',
+        checksumDependencies: [function helper() { return 1; }],
+        async up() { return true; }
+    };
+
+    assert.notEqual(migrationChecksum(migration), migrationChecksum({
+        ...migration,
+        version: 'test_02'
+    }));
+    assert.notEqual(migrationChecksum(migration), migrationChecksum({
+        ...migration,
+        async up() { return false; }
+    }));
+    assert.notEqual(migrationChecksum(migration), migrationChecksum({
+        ...migration,
+        checksumDependencies: [function helper() { return 2; }]
+    }));
+});
+
+test('bindet SQL-Lese- und Kommentarlogik in jede Migrationsprüfsumme ein', () => {
+    for (const migration of migrations) {
+        const dependencySources = (migration.checksumDependencies || [])
+            .map(dependency => Function.prototype.toString.call(dependency))
+            .join('\n');
+
+        assert.match(dependencySources, /readFileSync/);
+        assert.match(dependencySources, /startsWith\('--'\)/);
+    }
+});
+
+test('bricht vor Up-Logik ab, wenn die Datenbank eine unbekannte Migration enthält', async () => {
+    let upCalls = 0;
+    const migrationList = [{
+        version: 'known_01',
+        checksumSource: 'SELECT 1',
+        async up() { upCalls += 1; }
+    }];
+    const expectedManifest = buildMigrationManifest(migrationList);
+    const connection = {
+        async execute(sql) {
+            assert.match(sql, /SELECT version, checksum/u);
+            return [[
+                expectedManifest[0],
+                { version: 'future_02', checksum: 'f'.repeat(64) }
+            ]];
+        }
+    };
+
+    await assert.rejects(
+        runAutomaticMigrations(connection, migrationList),
+        /unbekannte oder neuere Migrationen: future_02/u
+    );
+    assert.equal(upCalls, 0);
+});
+
+test('markiert ein frisches finales Schema ohne Legacy-Up-Logik als migriert', async () => {
+    let upCalls = 0;
+    const records = [];
+    const freshMigrations = [{
+        version: 'fresh_01',
+        checksumSource: 'CREATE TABLE final_schema (id INT)',
+        async up() { upCalls += 1; }
+    }];
+    const connection = {
+        async execute(sql, params) {
+            records.push({ sql, params });
+            return [{ affectedRows: 1 }];
+        }
+    };
+
+    assert.deepEqual(
+        await recordFreshSchemaMigrations(connection, freshMigrations),
+        ['fresh_01']
+    );
+    assert.equal(upCalls, 0);
+    assert.equal(records.length, 1);
+    assert.equal(records[0].params[0], 'fresh_01');
+    assert.match(records[0].params[1], /^[a-f0-9]{64}$/u);
+});
+
+test('normalisiert MySQL-Zeichensatzpräfixe ohne Lifecycle-Werte zu verändern', () => {
+    assert.equal(
+        normalizeCheckClause("status IN (_utf8mb4'pending_payment', 'payment_failed')"),
+        normalizeCheckClause("status IN ('pending_payment', 'payment_failed')")
+    );
+    assert.notEqual(
+        normalizeCheckClause("status IN ('pending_payment')"),
+        normalizeCheckClause("status IN ('pending')")
+    );
+});
+
+test('normalisiert echte MySQL-Klammerung ohne AND/OR-Präzedenz zu verlieren', () => {
+    assert.equal(
+        normalizeCheckClause(
+            "((`status` = _utf8mb4'active') and (`user_email` is null))"
+        ),
+        normalizeCheckClause("status = 'active' AND user_email IS NULL")
+    );
+    assert.equal(
+        normalizeGenerationExpression(
+            "CASE WHEN ((`status` = _utf8mb4'active') and (`user_email` is null)) " +
+            'THEN `session_id` ELSE NULL END'
+        ),
+        normalizeGenerationExpression(
+            "CASE WHEN status = 'active' AND user_email IS NULL THEN session_id ELSE NULL END"
+        )
+    );
+    assert.notEqual(
+        normalizeCheckClause("(is_open = 0 AND open_time IS NULL) OR is_open = 1"),
+        normalizeCheckClause("is_open = 0 AND (open_time IS NULL OR is_open = 1)")
+    );
+});
+
+test('leitet Spalten, Defaults, Indizes und Constraints aus dem kanonischen Schema ab', () => {
+    const contract = parseCanonicalSchema();
+    const orders = contract.get('rental_orders');
+
+    assert.equal(orders.columns.get('status').defaultValue, 'reserved');
+    assert.deepEqual(orders.indexes.get('uq_rental_orders_order_no'), {
+        columns: ['order_no'],
+        unique: true
+    });
+    assert.equal(orders.constraints.get('chk_rental_orders_lifecycle').type, 'CHECK');
 });
 
 test('validiert optional konfigurierte Setup-Codes', () => {
@@ -103,5 +260,16 @@ test('erzwingt für den ersten Admin eine starke und normalisierte Anmeldung', (
             password: 'weak123!'
         }),
         /Adminpasswort/
+    );
+
+    assert.throws(
+        () => validateAdminInput({
+            setupToken: 'setup-token',
+            firstName: 'Leon',
+            lastName: 'Admin',
+            email: 'admin@example.com',
+            password: `Aa1!${'x'.repeat(69)}`
+        }),
+        /72 Bytes/
     );
 });

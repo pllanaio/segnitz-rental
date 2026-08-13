@@ -65,6 +65,17 @@ test('classifies a regular page request as non-API', () => {
   );
 });
 
+test('classifies fetch-style GET requests without an explicit HTML accept header as API', () => {
+  assert.equal(
+    isApiRequest({
+      originalUrl: '/my-profile',
+      method: 'GET',
+      headers: { accept: '*/*' }
+    }),
+    true
+  );
+});
+
 test('rejects unauthenticated admin API calls with 401', () => {
   const req = { session: {}, originalUrl: '/admin/orders', method: 'GET' };
   const res = createResponse();

@@ -6,9 +6,10 @@ const fs = require('fs');
 
 const dbConfig = require('../config/db');
 const { checkAdmin } = require('../middleware/auth');
-const { uploadProductImages } = require('../utils/uploads');
-const { runDatabaseCleanup } = require('../utils/cleanup');
+const { removeUploadedFiles, uploadProductImages } = require('../utils/uploads');
 const { checkProductAvailability } = require('../utils/availability');
+const { runInTransactionWithRetry } = require('../utils/dbRetry');
+const { formatDateInTimeZone } = require('../utils/businessDate');
 const {
     syncProductCategories,
     deleteUnusedCategories
@@ -49,7 +50,16 @@ router.get('/products', async (req, res) => {
     let connection;
 
     try {
+        // The representation depends on the authenticated role: admins may see
+        // inactive products. Never let a shared cache mix the two variants.
+        res.set({
+            'Cache-Control': 'private, no-store',
+            Vary: 'Cookie'
+        });
         connection = await mysql.createConnection(dbConfig);
+        const visibilityClause = req.session?.role === 'global_admin'
+            ? ''
+            : 'WHERE p.is_active = 1';
 
         const [products] = await connection.execute(`
             SELECT
@@ -58,6 +68,7 @@ router.get('/products', async (req, res) => {
                 COUNT(pr.id) AS review_count
             FROM rental_products p
             LEFT JOIN product_reviews pr ON pr.product_id = p.id
+            ${visibilityClause}
             GROUP BY p.id
             ORDER BY p.title ASC
         `);
@@ -131,7 +142,6 @@ router.get('/products/:id/availability', async (req, res) => {
 
     try {
         connection = await mysql.createConnection(dbConfig);
-        await runDatabaseCleanup(connection);
 
         const [blockedPeriods] = await connection.execute(
             `SELECT 
@@ -140,8 +150,14 @@ router.get('/products/:id/availability', async (req, res) => {
      FROM rental_order_items roi
      JOIN rental_orders ro ON ro.id = roi.order_id
      WHERE roi.product_id = ?
-     AND ro.status IN ('reserved', 'paid', 'confirmed', 'active', 'picked_up')
-     AND (ro.status != 'reserved' OR ro.reserved_until > NOW())
+     AND ro.status IN (
+        'reserved', 'pending_payment', 'payment_failed',
+        'paid', 'confirmed', 'active', 'picked_up'
+     )
+     AND (
+        ro.status NOT IN ('reserved', 'pending_payment', 'payment_failed')
+        OR ro.reserved_until > NOW()
+     )
      AND roi.returned_at IS NULL
      AND COALESCE(roi.item_status, 'active') != 'cancelled'
      ORDER BY COALESCE(roi.adjusted_rental_start, roi.rental_start) ASC`,
@@ -298,77 +314,99 @@ router.put('/products/:id', checkAdmin, async (req, res) => {
 });
 
 router.delete('/products/:id', checkAdmin, async (req, res) => {
-    let connection;
-
     try {
-        connection = await mysql.createConnection(dbConfig);
+        await runInTransactionWithRetry(
+            () => mysql.createConnection(dbConfig),
+            async connection => {
+                const [products] = await connection.execute(
+                    `SELECT id, is_active
+                     FROM rental_products
+                     WHERE id = ?
+                     LIMIT 1
+                     FOR UPDATE`,
+                    [req.params.id]
+                );
 
-        // 1. Alle Bilder vorher holen
-        const [images] = await connection.execute(
-            'SELECT image_path FROM rental_product_images WHERE product_id = ?',
-            [req.params.id]
-        );
-
-        // 2. Produkt löschen (CASCADE löscht DB-Bilder)
-        await connection.execute(
-            'DELETE FROM rental_products WHERE id = ?',
-            [req.params.id]
-        );
-
-        await deleteUnusedCategories(connection);
-
-        // 3. Dateien auf der Festplatte löschen
-        for (const image of images) {
-            const filePath = path.join(__dirname, '..', 'public', image.image_path);
-
-            try {
-                if (fs.existsSync(filePath)) {
-                    fs.unlinkSync(filePath);
-                    console.log('Bild gelöscht:', filePath);
-                } else {
-                    console.warn('Datei nicht gefunden:', filePath);
+                if (products.length === 0) {
+                    const error = new Error('Produkt nicht gefunden.');
+                    error.statusCode = 404;
+                    throw error;
                 }
-            } catch (fileError) {
-                console.error('Fehler beim Löschen der Datei:', filePath, fileError);
-            }
-        }
 
-        res.json({ message: 'Produkt und Bilder gelöscht.' });
+                if (Number(products[0].is_active) !== 1) {
+                    const error = new Error('Produkt ist bereits deaktiviert.');
+                    error.statusCode = 409;
+                    throw error;
+                }
+
+                // Historische Bestellpositionen, Bilder und Kategorien bleiben referenziell erhalten.
+                await connection.execute(
+                    `UPDATE rental_products
+                     SET is_active = 0, updated_at = NOW()
+                     WHERE id = ?`,
+                    [req.params.id]
+                );
+            }
+        );
+
+        res.json({ message: 'Produkt wurde deaktiviert.' });
 
     } catch (error) {
-        console.error('Fehler beim Löschen des Produkts:', error);
-        res.status(500).json({ error: 'Produkt konnte nicht gelöscht werden.' });
-    } finally {
-        if (connection) {
-            await connection.end();
+        if (Number.isInteger(error?.statusCode)) {
+            return res.status(error.statusCode).json({ error: error.message });
         }
+        console.error('Fehler beim Deaktivieren des Produkts:', error);
+        res.status(500).json({ error: 'Produkt konnte nicht deaktiviert werden.' });
     }
 });
 
 router.post('/products/:id/images', checkAdmin, uploadProductImages.array('images', 10), async (req, res) => {
     const productId = req.params.id;
-
+    const uploadedFiles = Array.isArray(req.files) ? req.files : [];
     let connection;
+    let committed = false;
 
     try {
+        if (uploadedFiles.length === 0) {
+            return res.status(400).json({ error: 'Es wurden keine Bilder übermittelt.' });
+        }
+
         connection = await mysql.createConnection(dbConfig);
+        await connection.beginTransaction();
+
+        const [products] = await connection.execute(
+            `SELECT id
+             FROM rental_products
+             WHERE id = ?
+             LIMIT 1
+             FOR UPDATE`,
+            [productId]
+        );
+
+        if (products.length === 0) {
+            await connection.rollback();
+            await removeUploadedFiles(uploadedFiles);
+            return res.status(404).json({ error: 'Produkt nicht gefunden.' });
+        }
 
         const [existingImages] = await connection.execute(
             'SELECT COUNT(*) AS count FROM rental_product_images WHERE product_id = ?',
             [productId]
         );
 
-        const existingCount = existingImages[0].count;
-        const uploadCount = req.files.length;
+        const existingCount = Number(existingImages[0]?.count || 0);
+        const uploadCount = uploadedFiles.length;
 
         if (existingCount + uploadCount > 10) {
+            await connection.rollback();
+            await removeUploadedFiles(uploadedFiles);
             return res.status(400).json({
                 error: 'Maximal 10 Bilder pro Produkt erlaubt.'
             });
         }
 
-        for (let i = 0; i < req.files.length; i++) {
-            const imagePath = `img/products/${req.files[i].filename}`;
+        for (let i = 0; i < uploadedFiles.length; i++) {
+            const imagePath = `img/products/${uploadedFiles[i].filename}`;
 
             await connection.execute(
                 `INSERT INTO rental_product_images 
@@ -378,9 +416,20 @@ router.post('/products/:id/images', checkAdmin, uploadProductImages.array('image
             );
         }
 
+        await connection.commit();
+        committed = true;
         res.json({ message: 'Bilder erfolgreich hochgeladen.' });
 
     } catch (error) {
+        if (connection && !committed) {
+            try {
+                await connection.rollback();
+            } catch (rollbackError) {
+                console.error('Rollback des Bilderuploads fehlgeschlagen:', rollbackError);
+            }
+        }
+
+        if (!committed) await removeUploadedFiles(uploadedFiles);
         console.error('Fehler beim Bilderupload:', error);
         res.status(500).json({ error: 'Bilder konnten nicht hochgeladen werden.' });
     } finally {
@@ -466,23 +515,45 @@ router.get('/products/bestsellers', async (req, res) => {
 
         const [products] = await connection.execute(`
             SELECT
-                p.*,
+                p.id,
+                p.product_key,
+                p.title,
+                p.description,
+                p.price_per_day,
+                p.deposit,
+                p.image_path,
+                p.is_active,
+                p.category,
+                popularity.times_ordered,
                 COALESCE(ROUND(AVG(pr.rating), 1), 0) AS average_rating,
                 COUNT(pr.id) AS review_count
             FROM rental_products p
+            JOIN (
+                SELECT roi.product_id, COUNT(*) AS times_ordered
+                FROM rental_order_items roi
+                JOIN rental_orders ro ON ro.id = roi.order_id
+                WHERE ro.status IN ('paid', 'confirmed', 'active', 'picked_up', 'returned')
+                AND COALESCE(roi.item_status, 'active') NOT IN ('cancelled', 'expired')
+                GROUP BY roi.product_id
+            ) popularity ON popularity.product_id = p.id
             LEFT JOIN product_reviews pr ON pr.product_id = p.id
             WHERE p.is_active = 1
-            AND COALESCE(p.times_ordered, 0) > 0
-            GROUP BY p.id
-            ORDER BY p.times_ordered DESC
+            GROUP BY p.id, popularity.times_ordered
+            ORDER BY popularity.times_ordered DESC, p.id ASC
             LIMIT 6
         `);
+
+        if (products.length === 0) return res.json([]);
+
+        const productIds = products.map(product => product.id);
+        const placeholders = productIds.map(() => '?').join(',');
 
         const [images] = await connection.execute(`
             SELECT id, product_id, image_path, sort_order
             FROM rental_product_images
+            WHERE product_id IN (${placeholders})
             ORDER BY product_id ASC, sort_order ASC, id ASC
-        `);
+        `, productIds);
 
         const [categoryRows] = await connection.execute(`
             SELECT
@@ -493,10 +564,22 @@ router.get('/products/bestsellers', async (req, res) => {
             FROM rental_product_categories rpc
             JOIN rental_categories c
                 ON c.id = rpc.category_id
+            WHERE rpc.product_id IN (${placeholders})
             ORDER BY c.name ASC
-        `);
+        `, productIds);
 
         const categoriesByProductId = {};
+        const imagesByProductId = {};
+
+        images.forEach(image => {
+            if (!imagesByProductId[image.product_id]) {
+                imagesByProductId[image.product_id] = [];
+            }
+            imagesByProductId[image.product_id].push({
+                id: image.id,
+                path: image.image_path
+            });
+        });
 
         categoryRows.forEach(row => {
             if (!categoriesByProductId[row.product_id]) {
@@ -511,12 +594,7 @@ router.get('/products/bestsellers', async (req, res) => {
         });
 
         const productsWithImagesAndCategories = products.map(product => {
-            const productImages = images
-                .filter(image => image.product_id === product.id)
-                .map(image => ({
-                    id: image.id,
-                    path: image.image_path
-                }));
+            const productImages = imagesByProductId[product.id] || [];
 
             const categories = categoriesByProductId[product.id] || [];
 
@@ -546,7 +624,7 @@ router.get('/products/:id/current-availability', async (req, res) => {
 
     try {
         const productId = req.params.id;
-        const today = new Date().toISOString().split('T')[0];
+        const today = formatDateInTimeZone();
 
         connection = await mysql.createConnection(dbConfig);
 
@@ -584,15 +662,16 @@ router.get('/products/:id/reviews', async (req, res) => {
 
         const [reviews] = await connection.execute(
             `SELECT
-                pr.id,
-                pr.product_id AS productId,
-                pr.order_id AS orderId,
-                pr.user_email AS userEmail,
                 pr.rating,
                 pr.review_text AS reviewText,
                 DATE_FORMAT(pr.created_at, '%Y-%m-%d %H:%i:%s') AS createdAt,
-                u.first_name AS firstName,
-                u.last_name AS lastName
+                CONCAT(
+                    COALESCE(NULLIF(TRIM(u.first_name), ''), 'Kunde'),
+                    CASE
+                        WHEN NULLIF(TRIM(u.last_name), '') IS NULL THEN ''
+                        ELSE CONCAT(' ', LEFT(TRIM(u.last_name), 1), '.')
+                    END
+                ) AS displayName
              FROM product_reviews pr
              LEFT JOIN users u ON u.username = pr.user_email
              WHERE pr.product_id = ?
@@ -618,6 +697,11 @@ router.post('/products/:id/reviews', async (req, res) => {
     const { orderId, rating, reviewText } = req.body;
 
     const normalizedRating = Number(rating);
+    const normalizedReviewText = reviewText === null || reviewText === undefined
+        ? null
+        : typeof reviewText === 'string'
+            ? reviewText.trim()
+            : null;
 
     if (!productId || !orderId || !normalizedRating) {
         return res.status(400).json({ error: 'Produkt, Bestellung und Bewertung sind erforderlich.' });
@@ -625,6 +709,16 @@ router.post('/products/:id/reviews', async (req, res) => {
 
     if (!Number.isInteger(normalizedRating) || normalizedRating < 1 || normalizedRating > 5) {
         return res.status(400).json({ error: 'Die Bewertung muss zwischen 1 und 5 Sternen liegen.' });
+    }
+
+    if (reviewText !== null && reviewText !== undefined && typeof reviewText !== 'string') {
+        return res.status(400).json({ error: 'Der Bewertungstext muss Text sein.' });
+    }
+
+    if (normalizedReviewText && normalizedReviewText.length > 2000) {
+        return res.status(400).json({
+            error: 'Der Bewertungstext darf maximal 2000 Zeichen lang sein.'
+        });
     }
 
     let connection;
@@ -675,7 +769,7 @@ router.post('/products/:id/reviews', async (req, res) => {
                 orderId,
                 req.session.user,
                 normalizedRating,
-                reviewText ? String(reviewText).trim() : null
+                normalizedReviewText || null
             ]
         );
 

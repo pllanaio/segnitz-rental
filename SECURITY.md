@@ -31,3 +31,20 @@ Do not open a public issue containing credentials, customer data, payment data o
 ## Minimum release checks
 
 A production release requires successful CI tests, Docker build, dependency audit and CodeQL analysis. High-risk changes to authentication, payments, uploads or order status transitions require an additional review.
+
+## Required GitHub repository settings
+
+The following controls cannot be enabled by files in this repository and must
+be configured in the GitHub repository or organization settings:
+
+- protect `main` with a ruleset and block force-pushes and branch deletion
+- require the unit, integration, end-to-end, production-audit, Docker-build and
+  CodeQL checks before a release commit can become the current `main`
+- enable Dependabot alerts and security updates
+- enable secret scanning, non-provider pattern scanning and push protection
+
+The Docker publish workflow waits for the complete `CI` workflow to succeed,
+verifies that the tested commit is still the current `main`, publishes an
+immutable commit-SHA tag and signs the resulting image digest through GitHub's
+OIDC identity. Repository rules remain necessary to stop unreviewed or untested
+changes from landing in the branch in the first place.

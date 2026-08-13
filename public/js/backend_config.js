@@ -220,14 +220,14 @@ function createProductCard(product) {
         <div class="card-body">
             <div class="row g-3 align-items-center">
                 <div class="col-12 col-md-2">
-                    ${product.image_path ? `<img src="${product.image_path}" class="img-fluid rounded" alt="${product.title}">` : ''}
+                    ${product.image_path ? `<img src="${escapeHtml(product.image_path)}" class="img-fluid rounded" alt="${escapeHtml(product.title)}">` : ''}
                 </div>
 
                 <div class="col-12 col-md-6">
-                    <h5 class="mb-1">${product.title}</h5>
-                    <p class="mb-1 text-muted">${product.description || ''}</p>
+                    <h5 class="mb-1">${escapeHtml(product.title)}</h5>
+                    <p class="mb-1 text-muted">${escapeHtml(product.description || '')}</p>
                     <small>
-                        Key: ${product.product_key}
+                        Key: ${escapeHtml(product.product_key)}
                         |
                         Status: ${product.is_active ? 'Aktiv' : 'Inaktiv'}
                     </small>
@@ -366,7 +366,7 @@ function renderExistingImages(product) {
 
         col.innerHTML = `
             <div class="card h-100">
-                <img src="${image.path}" class="card-img-top" style="height:120px; object-fit:cover;">
+                <img src="${escapeHtml(image.path)}" class="card-img-top" style="height:120px; object-fit:cover;">
                 <div class="card-body p-2">
                     <small class="text-muted d-block mb-2">Ziehen zum Sortieren</small>
                     <button type="button" class="btn btn-danger btn-sm w-100">
@@ -721,10 +721,10 @@ function renderOrders() {
             <div class="card-body">
                 <div class="d-flex justify-content-between align-items-center gap-3">
                     <div>
-                        <h5 class="mb-1">${order.order_no}</h5>
-                        <div>${order.customer_first_name || ''} ${order.customer_last_name || ''}</div>
-                        ${order.customer_company ? `<div class="small text-muted">${order.customer_company}</div>` : ''}
-                        <small>${order.customer_email || ''}</small><br>
+                        <h5 class="mb-1">${escapeHtml(order.order_no)}</h5>
+                        <div>${escapeHtml(order.customer_first_name || '')} ${escapeHtml(order.customer_last_name || '')}</div>
+                        ${order.customer_company ? `<div class="small text-muted">${escapeHtml(order.customer_company)}</div>` : ''}
+                        <small>${escapeHtml(order.customer_email || '')}</small><br>
                         ${getOrderDisplayBadge(order)}
                         ${getPaymentBadge(order.payment_status)}
                         ${getReturnBadge(order.return_status, order.status)}
@@ -841,20 +841,20 @@ function renderOrderDetails(order) {
             <div class="col-12 col-lg-6">
                 <h5>Bestellung</h5>
                 <p>
-                    <strong>Bestellnummer:</strong> ${order.order_no}<br>
+                    <strong>Bestellnummer:</strong> ${escapeHtml(order.order_no)}<br>
                     <strong>Status:</strong> ${getOrderDisplayBadge(order)}<br>
 
                     ${status === 'cancelled' ? `
-                        <strong>Storniert am:</strong> ${order.cancelled_at || '-'}<br>
-                        <strong>Storniert von:</strong> ${order.cancelled_by_username || '-'}<br>
+                        <strong>Storniert am:</strong> ${escapeHtml(order.cancelled_at || '-')}<br>
+                        <strong>Storniert von:</strong> ${escapeHtml(order.cancelled_by_username || '-')}<br>
                         ${order.cancel_reason ? `
                                 <strong>Stornogrund:</strong><br>
                                 <span class="text-danger">${formatTextValue(order.cancel_reason)}</span><br>
                         ` : ''}
                     ` : ''}
 
-                    <strong>Zahlungsstatus:</strong> ${order.payment_status || '-'}<br>
-                    <strong>Zahlungsmethode:</strong> ${order.payment_method || '-'}<br>
+                    <strong>Zahlungsstatus:</strong> ${escapeHtml(order.payment_status || '-')}<br>
+                    <strong>Zahlungsmethode:</strong> ${escapeHtml(order.payment_method || '-')}<br>
                     <strong>Rückgabeabwicklung:</strong>
                     ${getReturnCaseBadge(order.return_case_status, order.status) || '-'}
                 </p>
@@ -863,12 +863,12 @@ function renderOrderDetails(order) {
             <div class="col-12 col-lg-6">
                 <h5>Kunde</h5>
                 <p>
-                    <strong>${order.customer_first_name || ''} ${order.customer_last_name || ''}</strong><br>
-                    ${order.customer_company ? `${order.customer_company}<br>` : ''}
-                    ${order.customer_email || ''}<br>
-                    ${order.customer_phone || ''}<br>
-                    ${order.customer_address || ''}<br>
-                    ${order.customer_zip || ''} ${order.customer_city || ''}
+                    <strong>${escapeHtml(order.customer_first_name || '')} ${escapeHtml(order.customer_last_name || '')}</strong><br>
+                    ${order.customer_company ? `${escapeHtml(order.customer_company)}<br>` : ''}
+                    ${escapeHtml(order.customer_email || '')}<br>
+                    ${escapeHtml(order.customer_phone || '')}<br>
+                    ${escapeHtml(order.customer_address || '')}<br>
+                    ${escapeHtml(order.customer_zip || '')} ${escapeHtml(order.customer_city || '')}
                 </p>
             </div>
 
@@ -1174,12 +1174,12 @@ function renderOrderItemCard(order, item) {
             <div class="card-body">
                 <div class="d-flex justify-content-between gap-3 flex-wrap">
                     <div>
-                        <h6 class="mb-1">${item.title}</h6>
-                        <div class="small text-muted">Position #${item.id}</div>
+                        <h6 class="mb-1">${escapeHtml(item.title)}</h6>
+                        <div class="small text-muted">Position #${escapeHtml(item.id)}</div>
 
                         <div class="mt-2">
                             <strong>Mietzeitraum:</strong>
-                            ${adjustedStart || '-'} bis ${adjustedEnd || '-'}
+                            ${escapeHtml(adjustedStart || '-')} bis ${escapeHtml(adjustedEnd || '-')}
                         </div>
 
                         <div>
@@ -1198,14 +1198,14 @@ function renderOrderItemCard(order, item) {
 
                         ${isCancelled ? `
                             <div class="small text-danger mt-2">
-                                Storniert am: ${item.cancelledAt || '-'}<br>
+                                Storniert am: ${escapeHtml(item.cancelledAt || '-')}<br>
                                 Grund: ${formatTextValue(item.cancelReason)}
                             </div>
                         ` : ''}
 
                         ${isReturned ? `
                             <div class="small text-muted mt-2">
-                                Rückgabe: ${item.returnedAt || '-'}<br>
+                                Rückgabe: ${escapeHtml(item.returnedAt || '-')}<br>
                                 Kaution: ${formatDepositDecision(item.depositDecision)}
                             </div>
                         ` : ''}
@@ -1249,8 +1249,8 @@ function renderOrderItemCard(order, item) {
                     <div class="row g-2 mt-3">
                         ${(item.returnImages || []).map(image => `
                             <div class="col-6 col-md-3">
-                                <a href="/${image.imagePath}" target="_blank">
-    <img src="/${image.imagePath}" class="img-fluid rounded border"
+                                <a href="/${escapeHtml(image.imagePath)}" target="_blank" rel="noopener noreferrer">
+    <img src="/${escapeHtml(image.imagePath)}" class="img-fluid rounded border"
         style="height: 120px; object-fit: cover; width: 100%;">
 </a>
                                 <button type="button" class="btn btn-outline-danger btn-sm w-100 mt-1"
@@ -1297,12 +1297,12 @@ function renderOrderItemCard(order, item) {
 
     <div class="checkout-summary-row">
         <span>Geplante Rückgabe</span>
-        <strong>${plannedReturnDate || '-'}</strong>
+        <strong>${escapeHtml(plannedReturnDate || '-')}</strong>
     </div>
 
     <div class="checkout-summary-row">
         <span>Tatsächliche Rückgabe</span>
-        <strong>${actualReturnDate || '-'}</strong>
+        <strong>${escapeHtml(actualReturnDate || '-')}</strong>
     </div>
 
     <div class="checkout-summary-row">
@@ -1840,14 +1840,14 @@ function formatTextValue(value) {
     }
 
     if (typeof value === 'object') {
-        if (value.message) return value.message;
-        if (value.reason) return value.reason;
-        if (value.text) return value.text;
+        if (value.message) return escapeHtml(value.message);
+        if (value.reason) return escapeHtml(value.reason);
+        if (value.text) return escapeHtml(value.text);
 
-        return JSON.stringify(value);
+        return escapeHtml(JSON.stringify(value));
     }
 
-    return String(value);
+    return escapeHtml(value);
 }
 
 function getSafeCheckoutUrl(value) {
@@ -2377,7 +2377,7 @@ function calculateLateDays(actualReturnDate, plannedReturnDate) {
 }
 
 function todayDateString() {
-    return new Date().toISOString().slice(0, 10);
+    return SegnitzDate.formatLocalDate();
 }
 
 function findCurrentOrderItem(itemId) {
@@ -2424,10 +2424,7 @@ function updateRentalPeriodPreview() {
     const currentStart = item.adjustedRentalStart || item.rentalStart;
     const currentEnd = item.adjustedRentalEnd || item.rentalEnd;
 
-    const extensionStartDate = new Date(currentEnd);
-    extensionStartDate.setDate(extensionStartDate.getDate() + 1);
-
-    const extensionStart = extensionStartDate.toISOString().slice(0, 10);
+    const extensionStart = SegnitzDate.addIsoCalendarDays(currentEnd, 1);
     const extensionDays = calculateRentalDays(extensionStart, end);
 
     const currentDays = calculateRentalDays(currentStart, currentEnd);

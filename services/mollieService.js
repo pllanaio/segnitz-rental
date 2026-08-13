@@ -5,6 +5,30 @@ let testPaymentCounter = 0;
 let testRefundCounter = 0;
 let testCustomerCounter = 0;
 
+async function withMollieTimeout(promise, operation = 'Mollie-Anfrage') {
+    const configured = Number(process.env.MOLLIE_REQUEST_TIMEOUT_MS || 15000);
+    const timeoutMs = Number.isFinite(configured)
+        ? Math.min(Math.max(configured, 1000), 30000)
+        : 15000;
+    let timeout;
+
+    try {
+        return await Promise.race([
+            promise,
+            new Promise((resolve, reject) => {
+                timeout = setTimeout(() => {
+                    const error = new Error(`${operation} hat das Zeitlimit überschritten.`);
+                    error.code = 'MOLLIE_TIMEOUT';
+                    reject(error);
+                }, timeoutMs);
+                timeout.unref?.();
+            })
+        ]);
+    } finally {
+        if (timeout) clearTimeout(timeout);
+    }
+}
+
 function isTestMode() {
     return process.env.MOLLIE_TEST_MODE === '1';
 }
@@ -123,11 +147,11 @@ async function createMollieCustomer({ name, email, metadata = {} }) {
 
     const mollie = getMollieClient();
 
-    return mollie.customers.create({
+    return withMollieTimeout(mollie.customers.create({
         name: name || email,
         email,
         metadata
-    });
+    }), 'Mollie-Customer-Erstellung');
 }
 
 async function getMollieCustomer(customerId) {
@@ -141,7 +165,7 @@ async function getMollieCustomer(customerId) {
 
     const mollie = getMollieClient();
 
-    return mollie.customers.get(customerId);
+    return withMollieTimeout(mollie.customers.get(customerId), 'Mollie-Customer-Abfrage');
 }
 
 async function getMollieCustomerMandates(customerId) {
@@ -155,9 +179,9 @@ async function getMollieCustomerMandates(customerId) {
 
     const mollie = getMollieClient();
 
-    return mollie.customerMandates.page({
+    return withMollieTimeout(mollie.customerMandates.page({
         customerId
-    });
+    }), 'Mollie-Mandatsabfrage');
 }
 
 async function getValidMollieMandate(customerId) {
@@ -218,7 +242,7 @@ async function createMolliePaymentForOrder(order) {
 
     if (order.idempotencyKey) payload.idempotencyKey = order.idempotencyKey;
 
-    return mollie.payments.create(payload);
+    return withMollieTimeout(mollie.payments.create(payload), 'Mollie-Zahlungserstellung');
 }
 
 async function createFirstMolliePayment(order) {
@@ -261,7 +285,7 @@ async function getMolliePayment(paymentId) {
 
     const mollie = getMollieClient();
 
-    return mollie.payments.get(paymentId);
+    return withMollieTimeout(mollie.payments.get(paymentId), 'Mollie-Zahlungsabfrage');
 }
 
 async function createMollieRefundForPayment({
@@ -306,7 +330,7 @@ async function createMollieRefundForPayment({
 
     if (idempotencyKey) payload.idempotencyKey = idempotencyKey;
 
-    return mollie.paymentRefunds.create(payload);
+    return withMollieTimeout(mollie.paymentRefunds.create(payload), 'Mollie-Rückerstattung');
 }
 
 async function listMollieRefundsForPayment(paymentId) {
@@ -320,12 +344,12 @@ async function listMollieRefundsForPayment(paymentId) {
 
     const mollie = getMollieClient();
 
-    return mollie.paymentRefunds.page({
+    return withMollieTimeout(mollie.paymentRefunds.page({
         paymentId
-    });
+    }), 'Mollie-Rückerstattungsabfrage');
 }
 
-async function cancelMolliePayment(paymentId) {
+async function cancelMolliePayment(paymentId, options = {}) {
     if (!paymentId) {
         throw new Error('paymentId ist erforderlich.');
     }
@@ -339,7 +363,71 @@ async function cancelMolliePayment(paymentId) {
 
     const mollie = getMollieClient();
 
-    return mollie.payments.cancel(paymentId);
+    return withMollieTimeout(mollie.payments.cancel(
+        paymentId,
+        options.idempotencyKey ? { idempotencyKey: options.idempotencyKey } : undefined
+    ), 'Mollie-Zahlungsstornierung');
+}
+
+function serializeMolliePayment(payment) {
+    return {
+        id: payment.id,
+        status: payment.status || null,
+        method: payment.method || null,
+        amount: payment.amount || null,
+        metadata: payment.metadata || null,
+        checkoutUrl: getMollieCheckoutUrl(payment) || null,
+        links: payment._links || null
+    };
+}
+
+function serializeMollieRefund(refund) {
+    return {
+        id: refund.id,
+        status: refund.status || null,
+        paymentId: refund.paymentId || refund.payment_id || null,
+        amount: refund.amount || null,
+        description: refund.description || null,
+        metadata: refund.metadata || null
+    };
+}
+
+async function executeMollieExternalEffect(effectType, payload, operationKey) {
+    if (effectType === 'mollie.payment.create') {
+        const payment = await createMolliePaymentForOrder({
+            ...payload.payment,
+            idempotencyKey: operationKey
+        });
+        return serializeMolliePayment(payment);
+    }
+
+    if (effectType === 'mollie.refund.create') {
+        const refund = await createMollieRefundForPayment({
+            ...payload.refund,
+            idempotencyKey: operationKey
+        });
+        return serializeMollieRefund(refund);
+    }
+
+    if (effectType === 'mollie.payment.cancel') {
+        const currentPayment = await getMolliePayment(payload.paymentId);
+        const currentStatus = String(currentPayment.status || '').toLowerCase();
+
+        if (!['open', 'pending', 'authorized'].includes(currentStatus)) {
+            return {
+                ...serializeMolliePayment(currentPayment),
+                cancellationSkipped: true
+            };
+        }
+
+        const cancelledPayment = await cancelMolliePayment(
+            payload.paymentId,
+            { idempotencyKey: operationKey }
+        );
+        return serializeMolliePayment(cancelledPayment);
+    }
+
+    throw new Error(`Unbekannter Mollie-Outbox-Effekt: ${effectType}`);
 }
 
 module.exports = {
@@ -357,6 +445,11 @@ module.exports = {
     listMollieRefundsForPayment,
     cancelMolliePayment,
 
+    executeMollieExternalEffect,
+    serializeMolliePayment,
+    serializeMollieRefund,
+
     getMollieCheckoutUrl,
-    formatMollieAmount
+    formatMollieAmount,
+    withMollieTimeout
 };

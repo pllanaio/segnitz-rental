@@ -17,6 +17,18 @@ const TEST_ADMIN = Object.freeze({
     role: 'global_admin'
 });
 
+const TEST_OTHER_CUSTOMER = Object.freeze({
+    email: 'other.lifecycle.customer@example.com',
+    password: 'OtherCustomerPassword123!',
+    role: 'customer'
+});
+
+const TEST_UNVERIFIED_CUSTOMER = Object.freeze({
+    email: 'unverified.lifecycle.customer@example.com',
+    password: 'UnverifiedPassword123!',
+    role: 'customer'
+});
+
 const TEST_PRODUCT = Object.freeze({
     id: 101,
     productKey: 'LIFECYCLE-BAGGER',
@@ -39,9 +51,11 @@ async function resetOrderLifecycleDatabase() {
     await withConnection(async connection => {
         await rebuildDatabaseSchema(connection);
 
-        const [customerHash, adminHash] = await Promise.all([
+        const [customerHash, adminHash, otherCustomerHash, unverifiedCustomerHash] = await Promise.all([
             bcrypt.hash(TEST_CUSTOMER.password, 4),
-            bcrypt.hash(TEST_ADMIN.password, 4)
+            bcrypt.hash(TEST_ADMIN.password, 4),
+            bcrypt.hash(TEST_OTHER_CUSTOMER.password, 4),
+            bcrypt.hash(TEST_UNVERIFIED_CUSTOMER.password, 4)
         ]);
 
         await connection.execute(
@@ -56,6 +70,24 @@ async function resetOrderLifecycleDatabase() {
              (username, password, role, first_name, last_name, email_verified)
              VALUES (?, ?, ?, 'Lifecycle', 'Admin', 1)`,
             [TEST_ADMIN.email, adminHash, TEST_ADMIN.role]
+        );
+
+        await connection.execute(
+            `INSERT INTO users
+             (username, password, role, first_name, last_name, email_verified)
+             VALUES (?, ?, ?, 'Andere', 'Kundin', 1)`,
+            [TEST_OTHER_CUSTOMER.email, otherCustomerHash, TEST_OTHER_CUSTOMER.role]
+        );
+
+        await connection.execute(
+            `INSERT INTO users
+             (username, password, role, first_name, last_name, email_verified)
+             VALUES (?, ?, ?, 'Nicht', 'Verifiziert', 0)`,
+            [
+                TEST_UNVERIFIED_CUSTOMER.email,
+                unverifiedCustomerHash,
+                TEST_UNVERIFIED_CUSTOMER.role
+            ]
         );
 
         await connection.execute(
@@ -112,5 +144,7 @@ module.exports = {
     resetOrderLifecycleDatabase,
     TEST_ADMIN,
     TEST_CUSTOMER,
-    TEST_PRODUCT
+    TEST_OTHER_CUSTOMER,
+    TEST_PRODUCT,
+    TEST_UNVERIFIED_CUSTOMER
 };

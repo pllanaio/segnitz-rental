@@ -148,6 +148,18 @@ after(async () => {
 test('baut eine leere Datenbank auf und sperrt die Anwendung bis zum ersten Admin', async () => {
     const client = new SessionClient();
 
+    const liveResponse = await client.request('/live');
+    assert.equal(liveResponse.status, 200);
+    assert.equal((await liveResponse.json()).status, 'alive');
+
+    for (const healthPath of ['/health', '/ready']) {
+        const healthResponse = await client.request(healthPath);
+        const health = await healthResponse.json();
+        assert.equal(healthResponse.status, 200, JSON.stringify(health));
+        assert.equal(health.database, 'ready');
+        assert.equal(health.schema, 'ready');
+    }
+
     const statusResponse = await client.request('/setup-status');
     assert.equal(statusResponse.status, 200);
     assert.deepEqual(await statusResponse.json(), { setupRequired: true });
@@ -216,6 +228,166 @@ test('baut eine leere Datenbank auf und sperrt die Anwendung bis zum ersten Admi
 
     const completedStatusResponse = await client.request('/setup-status');
     assert.deepEqual(await completedStatusResponse.json(), { setupRequired: false });
+
+    const connection = await mysql.createConnection(dbConfig);
+    try {
+        const [openingHours] = await connection.execute(
+            `SELECT weekday, is_open,
+                    TIME_FORMAT(open_time, '%H:%i') AS openTime,
+                    TIME_FORMAT(close_time, '%H:%i') AS closeTime
+             FROM opening_hours ORDER BY weekday`
+        );
+        assert.deepEqual(openingHours, [
+            { weekday: 0, is_open: 0, openTime: null, closeTime: null },
+            { weekday: 1, is_open: 1, openTime: '08:00', closeTime: '17:00' },
+            { weekday: 2, is_open: 1, openTime: '08:00', closeTime: '17:00' },
+            { weekday: 3, is_open: 1, openTime: '08:00', closeTime: '17:00' },
+            { weekday: 4, is_open: 1, openTime: '08:00', closeTime: '17:00' },
+            { weekday: 5, is_open: 1, openTime: '08:00', closeTime: '17:00' },
+            { weekday: 6, is_open: 0, openTime: null, closeTime: null }
+        ]);
+    } finally {
+        await connection.end();
+    }
+});
+
+test('akzeptiert alle definierten Lifecycle-Werte und verwirft unbekannte Status', async () => {
+    const connection = await mysql.createConnection(dbConfig);
+    let cartId;
+    let orderId;
+    let paymentId;
+    let productId;
+    let itemId;
+
+    const expectConstraintFailure = promise => assert.rejects(
+        promise,
+        error => error?.code === 'ER_CHECK_CONSTRAINT_VIOLATED' || /check constraint/iu.test(error?.message)
+    );
+
+    try {
+        const [product] = await connection.execute(
+            `INSERT INTO rental_products (product_key, title, price_per_day, deposit)
+             VALUES ('bootstrap-lifecycle-product', 'Lifecycle-Test', 1, 1)`
+        );
+        productId = product.insertId;
+        const [cart] = await connection.execute(
+            `INSERT INTO rental_carts (session_id, status) VALUES ('bootstrap-lifecycle-cart', 'active')`
+        );
+        cartId = cart.insertId;
+        await connection.execute("UPDATE rental_carts SET status = 'converted' WHERE id = ?", [cartId]);
+        await expectConstraintFailure(
+            connection.execute("UPDATE rental_carts SET status = 'unknown' WHERE id = ?", [cartId])
+        );
+
+        const [order] = await connection.execute(
+            `INSERT INTO rental_orders (status, total_amount) VALUES ('reserved', 0)`
+        );
+        orderId = order.insertId;
+        for (const status of [
+            'reserved', 'pending_payment', 'payment_failed', 'paid', 'confirmed', 'active',
+            'picked_up', 'returned', 'partially_returned', 'cancelled',
+            'partially_cancelled', 'expired', 'payment_dispute'
+        ]) {
+            await connection.execute('UPDATE rental_orders SET status = ? WHERE id = ?', [status, orderId]);
+        }
+        for (const status of [
+            null, 'pending', 'open', 'authorized', 'paid', 'failed', 'cancelled', 'expired',
+            'charged_back', 'refunded', 'refund_pending', 'refund_failed'
+        ]) {
+            await connection.execute(
+                'UPDATE rental_orders SET payment_status = ? WHERE id = ?', [status, orderId]
+            );
+        }
+        for (const status of [
+            null, 'pending', 'not_required', 'returned_ok', 'returned_damaged',
+            'returned_late', 'returned_late_damaged'
+        ]) {
+            await connection.execute(
+                'UPDATE rental_orders SET return_status = ? WHERE id = ?', [status, orderId]
+            );
+        }
+        for (const status of [
+            null, 'open', 'partial', 'closed', 'payment_failed', 'payment_pending',
+            'refund_failed', 'refund_pending', 'payment_dispute'
+        ]) {
+            await connection.execute(
+                'UPDATE rental_orders SET return_case_status = ? WHERE id = ?', [status, orderId]
+            );
+        }
+        await expectConstraintFailure(
+            connection.execute("UPDATE rental_orders SET status = 'unknown' WHERE id = ?", [orderId])
+        );
+
+        const [item] = await connection.execute(
+            `INSERT INTO rental_order_items
+             (order_id, product_id, rental_start, rental_end, price_per_day, deposit)
+             VALUES (?, ?, '2027-01-01', '2027-01-02', 1, 1)`,
+            [orderId, productId]
+        );
+        itemId = item.insertId;
+        for (const status of [
+            'active', 'picked_up', 'cancelled', 'expired', 'returned_ok',
+            'returned_damaged', 'returned_late', 'returned_late_damaged'
+        ]) {
+            await connection.execute(
+                'UPDATE rental_order_items SET item_status = ? WHERE id = ?', [status, itemId]
+            );
+        }
+        for (const decision of [null, 'no_refund', 'full_refund', 'partial_refund']) {
+            await connection.execute(
+                'UPDATE rental_order_items SET deposit_decision = ? WHERE id = ?', [decision, itemId]
+            );
+        }
+        for (const status of [
+            null, 'pending', 'not_required', 'returned_ok', 'returned_damaged',
+            'returned_late', 'returned_late_damaged'
+        ]) {
+            await connection.execute(
+                'UPDATE rental_order_items SET return_status = ? WHERE id = ?', [status, itemId]
+            );
+        }
+        await expectConstraintFailure(
+            connection.execute(
+                "UPDATE rental_order_items SET item_status = 'unknown' WHERE id = ?", [itemId]
+            )
+        );
+
+        const [payment] = await connection.execute(
+            `INSERT INTO rental_order_payments
+             (order_id, payment_type, payment_method, payment_status, amount)
+             VALUES (?, 'initial_payment', 'cash', 'pending', 1)`,
+            [orderId]
+        );
+        paymentId = payment.insertId;
+        for (const type of [
+            'initial_payment', 'rental', 'deposit', 'rental_adjustment',
+            'return_additional_charge', 'deposit_refund', 'order_cancellation_refund',
+            'duplicate_payment_refund', 'chargeback', 'refund_record'
+        ]) {
+            await connection.execute(
+                'UPDATE rental_order_payments SET payment_type = ? WHERE id = ?', [type, paymentId]
+            );
+        }
+        for (const status of [
+            'pending', 'open', 'authorized', 'paid', 'failed', 'cancelled', 'expired',
+            'charged_back', 'offset', 'replaced', 'refunded'
+        ]) {
+            await connection.execute(
+                'UPDATE rental_order_payments SET payment_status = ? WHERE id = ?', [status, paymentId]
+            );
+        }
+        await expectConstraintFailure(
+            connection.execute(
+                "UPDATE rental_order_payments SET payment_status = 'unknown' WHERE id = ?", [paymentId]
+            )
+        );
+    } finally {
+        if (paymentId) await connection.execute('DELETE FROM rental_order_payments WHERE id = ?', [paymentId]);
+        if (orderId) await connection.execute('DELETE FROM rental_orders WHERE id = ?', [orderId]);
+        if (cartId) await connection.execute('DELETE FROM rental_carts WHERE id = ?', [cartId]);
+        if (productId) await connection.execute('DELETE FROM rental_products WHERE id = ?', [productId]);
+        await connection.end();
+    }
 });
 
 test('repariert ein unvollständiges Bestandsschema beim nächsten Start automatisch', async () => {
@@ -224,6 +396,9 @@ test('repariert ein unvollständiges Bestandsschema beim nächsten Start automat
     const connection = await mysql.createConnection(dbConfig);
 
     try {
+        await connection.query(
+            'ALTER TABLE rental_orders DROP CHECK chk_rental_orders_lifecycle'
+        );
         await connection.query(
             'ALTER TABLE rental_order_payments DROP COLUMN checkout_url'
         );
@@ -234,7 +409,8 @@ test('repariert ein unvollständiges Bestandsschema beim nächsten Start automat
             `DELETE FROM app_schema_migrations
              WHERE version IN (
                 '20260813_01_align_dump_with_application',
-                '20260813_02_harden_return_lifecycle'
+                '20260813_02_harden_return_lifecycle',
+                '20260813_03_schema_invariants_and_opening_hours'
              )`
         );
     } finally {
@@ -275,7 +451,11 @@ test('repariert ein unvollständiges Bestandsschema beim nächsten Start automat
             migrationRows.map(row => row.version),
             [
                 '20260813_01_align_dump_with_application',
-                '20260813_02_harden_return_lifecycle'
+                '20260813_02_harden_return_lifecycle',
+                '20260813_03_schema_invariants_and_opening_hours',
+                '20260813_04_business_data_concurrency',
+                '20260813_05_external_effects_outbox',
+                '20260813_06_user_auth_version'
             ]
         );
     } finally {

@@ -28,12 +28,19 @@ const mysql = require('mysql2/promise');
 const dbConfig = require('./database/bootstrappedDbConfig');
 const crypto = require('crypto');
 const multer = require('multer');
-const { getSafeImageExtension, imageFileFilter } = require('./utils/uploads');
-const { checkAdmin } = require('./middleware/auth');
+const {
+    RETURN_IMAGE_DIRECTORY,
+    getSafeImageExtension,
+    getStoredReturnImageFilename,
+    imageFileFilter
+} = require('./utils/uploads');
+const { checkAdmin, isApiRequest } = require('./middleware/auth');
 const { syncProductCategories } = require('./utils/categories');
 const productRoutes = require('./routes/productRoutes');
-const { runDatabaseCleanup } = require('./utils/cleanup');
+const { createCleanupRunner } = require('./utils/cleanup');
+const { closeHttpServer, withDeadline } = require('./services/runtimeShutdown');
 const {
+    escapeHtml,
     sendOrderEmail,
     sendVerificationEmail,
     sendPasswordChangedEmail,
@@ -42,7 +49,6 @@ const {
     sendOrderCancelledEmail,
     sendItemCancelledEmail,
     sendRentalAdjustmentEmailWithPayment,
-    sendReturnAdditionalChargeEmail,
     sendPaymentReceiptEmail,
     sendReturnSummaryEmail
 } = require('./services/mailService');
@@ -68,14 +74,21 @@ const {
     checkProductAvailability,
     lockRentalProducts
 } = require('./utils/availability');
+const {
+    isRetryableTransactionError,
+    runInTransactionWithRetry
+} = require('./utils/dbRetry');
+const { allocateCustomerNumber } = require('./services/customerNumberService');
+const { addIsoCalendarDays, formatDateInTimeZone } = require('./utils/businessDate');
+const {
+    createOrderAccessGrant,
+    hasValidOrderAccessCookie,
+    setOrderAccessCookie
+} = require('./services/orderAccessService');
 
 const {
-    createMolliePaymentForOrder,
     getMolliePayment,
-    createMollieRefundForPayment,
-    listMollieRefundsForPayment,
-    getMollieCheckoutUrl,
-    cancelMolliePayment
+    listMollieRefundsForPayment
 } = require('./services/mollieService');
 
 const {
@@ -88,27 +101,98 @@ const {
     mapMollieRefundStatus,
     roundMoney
 } = require('./services/paymentStateService');
+const {
+    CUSTOMER_FIELD_LIMITS,
+    hasValidCustomerFieldLengths,
+    isDigitsOnly,
+    isSafeAddress,
+    isValidEmail,
+    isValidPassword,
+    isValidSignatureDataUrl,
+    normalizeEmail
+} = require('./utils/inputValidation');
+const {
+    enqueueMolliePaymentCancellation,
+    enqueueMolliePaymentCreation,
+    enqueueMollieRefundCreation,
+    getExternalEffect
+} = require('./services/externalEffectsOutbox');
+const { processExternalEffectByKey } = require('./services/externalEffectsWorker');
 
+const MAX_GUEST_ORDER_IDS = 50;
+const GUEST_VERIFICATION_MAX_AGE_MS = 15 * 60 * 1000;
+const LEGACY_LOGIN_PASSWORD_MAX_LENGTH = 128;
+const LEGACY_LOGIN_PASSWORD_MAX_BYTES = 512;
 
-async function cleanupOnStartup() {
-    let connection;
+function rememberGuestOrder(req, orderId) {
+    if (req.session.user) return;
 
-    try {
-        connection = await mysql.createConnection(dbConfig);
-        await runDatabaseCleanup(connection);
-        console.log(`${new Date().toISOString()} - Datenbank-Cleanup beim Serverstart ausgeführt`);
-    } catch (error) {
-        console.error('Fehler beim Datenbank-Cleanup beim Serverstart:', error);
-    } finally {
-        if (connection) {
-            await connection.end();
-        }
+    const normalizedOrderId = Number(orderId);
+    if (!Number.isInteger(normalizedOrderId) || normalizedOrderId < 1) return;
+
+    const existingIds = Array.isArray(req.session.guestOrderIds)
+        ? req.session.guestOrderIds
+            .map(Number)
+            .filter(id => Number.isInteger(id) && id > 0 && id !== normalizedOrderId)
+        : [];
+
+    req.session.guestOrderIds = [...existingIds, normalizedOrderId].slice(-MAX_GUEST_ORDER_IDS);
+}
+
+function hasFreshGuestVerification(req, email) {
+    const verifiedAt = Number(req.session.verifiedGuestAt);
+    const age = Date.now() - verifiedAt;
+
+    return normalizeEmail(req.session.verifiedGuestEmail) === email &&
+        Number.isFinite(verifiedAt) &&
+        age >= 0 &&
+        age <= GUEST_VERIFICATION_MAX_AGE_MS;
+}
+
+function consumeGuestVerification(req) {
+    delete req.session.verifiedGuestEmail;
+    delete req.session.verifiedGuestAt;
+}
+
+function roleRequiresEmailVerification(role) {
+    return !['global_admin', 'bearbeiter'].includes(String(role || ''));
+}
+
+function mayAccessOrder(req, order) {
+    const sessionEmail = normalizeEmail(req.session.user);
+    const customerEmail = normalizeEmail(order.customerEmail || order.customer_email);
+    const isAdmin = req.session.role === 'global_admin';
+    const isCustomer = Boolean(sessionEmail) && sessionEmail === customerEmail;
+    const guestOrderIds = Array.isArray(req.session.guestOrderIds)
+        ? req.session.guestOrderIds.map(Number)
+        : [];
+    const isRememberedGuestOrder = !sessionEmail && guestOrderIds.includes(Number(order.id));
+    const isCartBoundGuest = !sessionEmail && Boolean(req.session.cartKey) &&
+        req.session.cartKey === order.cartSessionId && !order.cartUserEmail;
+    const hasDurableGuestAccess = !sessionEmail && hasValidOrderAccessCookie(req, order);
+
+    return isAdmin || isCustomer || isRememberedGuestOrder || isCartBoundGuest || hasDurableGuestAccess;
+}
+
+function parseOrderId(value) {
+    const orderId = Number(value);
+    return Number.isInteger(orderId) && orderId > 0 ? orderId : null;
+}
+
+function sendTransactionFailure(res, error, fallbackMessage) {
+    if (isRetryableTransactionError(error)) {
+        res.set('Retry-After', '1');
+        return res.status(503).json({
+            error: 'Die Daten wurden gleichzeitig geändert. Bitte versuchen Sie es erneut.'
+        });
     }
+
+    return res.status(500).json({ error: fallbackMessage });
 }
 
 const returnImageStorage = multer.diskStorage({
     destination: (req, file, cb) => {
-        cb(null, path.join(__dirname, 'public', 'img', 'returns'));
+        cb(null, RETURN_IMAGE_DIRECTORY);
     },
     filename: (req, file, cb) => {
         const extension = getSafeImageExtension(file.mimetype);
@@ -214,6 +298,7 @@ const {
     getInstallationState,
     isSetupRequired
 } = require('./database/installationState');
+const { checkDatabaseReadiness } = require('./database/readiness');
 const {
     createInitialAdmin,
     getSetupStatus
@@ -231,29 +316,101 @@ const setupLimiter = rateLimit({
 
 function isSetupAssetPath(pathname) {
     return pathname === '/setup.html' ||
+        pathname === '/verify-email.html' ||
         pathname === '/setup-status' ||
         pathname === '/setup-admin' ||
         pathname === '/health' ||
+        pathname === '/ready' ||
+        pathname === '/live' ||
         pathname === '/favicon.ico' ||
         pathname === '/js/setup_config.js' ||
+        pathname === '/js/verify_email_config.js' ||
         pathname === '/js/bootstrap.bundle.min.js' ||
         pathname.startsWith('/css/') ||
         pathname.startsWith('/img/');
+}
+
+const PUBLIC_BRAND_ASSET_PATHS = new Set([
+    '/img/android-chrome-192x192.png',
+    '/img/android-chrome-512x512.png',
+    '/img/apple-touch-icon.png',
+    '/img/browserconfig.xml',
+    '/img/favicon-16x16.png',
+    '/img/favicon-32x32.png',
+    '/img/favicon.ico',
+    '/img/logo.png',
+    '/img/mstile-144x144.png',
+    '/img/mstile-150x150.png',
+    '/img/mstile-310x150.png',
+    '/img/mstile-310x310.png',
+    '/img/mstile-70x70.png',
+    '/img/safari-pinned-tab.svg',
+    '/img/site.webmanifest'
+]);
+
+function isPublicStaticAssetPath(pathname) {
+
+    return pathname === '/' ||
+        pathname === '/index.html' ||
+        pathname === '/login.html' ||
+        pathname === '/register.html' ||
+        pathname === '/setup.html' ||
+        pathname === '/email-verified.html' ||
+        pathname === '/verify-email.html' ||
+        pathname === '/favicon.ico' ||
+        PUBLIC_BRAND_ASSET_PATHS.has(pathname) ||
+        pathname.startsWith('/css/') ||
+        pathname.startsWith('/js/') ||
+        pathname.startsWith('/img/products/');
+}
+
+function createSessionCookieClearOptions() {
+    const { maxAge: _discardedMaxAge, ...clearOptions } = createSessionCookieOptions();
+    return {
+        ...clearOptions,
+        path: '/'
+    };
 }
 
 async function refreshSetupStateWhenRequired() {
     return getSetupStatus();
 }
 
-app.get('/health', (req, res) => {
+app.get('/live', (req, res) => {
     const installation = getInstallationState();
 
     res.json({
-        status: installation === 'ready' ? 'ok' : 'setup_required',
-        database: 'ready',
+        status: 'alive',
         installation
     });
 });
+
+async function readinessHandler(req, res) {
+    const installation = getInstallationState();
+
+    try {
+        const readiness = await checkDatabaseReadiness();
+
+        return res.json({
+            status: installation === 'ready' ? 'ok' : 'setup_required',
+            database: 'ready',
+            schema: 'ready',
+            installation,
+            timeZone: readiness.sessionTimeZone
+        });
+    } catch (error) {
+        console.error('Readiness-Prüfung fehlgeschlagen:', error);
+        return res.status(503).json({
+            status: 'unavailable',
+            database: 'unavailable',
+            schema: 'unknown',
+            installation
+        });
+    }
+}
+
+app.get('/health', readinessHandler);
+app.get('/ready', readinessHandler);
 
 app.get('/setup-status', async (req, res) => {
     try {
@@ -280,6 +437,7 @@ app.post('/setup-admin', setupLimiter, async (req, res) => {
 
         req.session.user = admin.email;
         req.session.role = admin.role;
+        req.session.authVersion = Number(admin.authVersion || 1);
         req.session.createdAt = Date.now();
         const csrfToken = getOrCreateCsrfToken(req);
 
@@ -348,6 +506,82 @@ app.use(async (req, res, next) => {
     });
 });
 
+app.use(async (req, res, next) => {
+    if (!req.session?.user || isPublicStaticAssetPath(req.path)) return next();
+
+    let connection;
+    try {
+        connection = await mysql.createConnection(dbConfig);
+        const [users] = await connection.execute(
+            `SELECT role, auth_version
+             FROM users
+             WHERE username = ?
+             LIMIT 1`,
+            [normalizeEmail(req.session.user)]
+        );
+        const user = users[0] || null;
+        const sessionAuthVersion = Number(req.session.authVersion);
+        const authVersionMatches = user &&
+            Number.isInteger(sessionAuthVersion) &&
+            sessionAuthVersion === Number(user.auth_version) &&
+            req.session.role === user.role;
+
+        if (authVersionMatches) return next();
+
+        await new Promise(resolve => req.session.destroy(() => resolve()));
+        res.clearCookie('segnitz.sid', createSessionCookieClearOptions());
+
+        if (req.path === '/auth-status') {
+            return res.json({
+                loggedIn: false,
+                user: null,
+                role: null
+            });
+        }
+        if (isApiRequest(req)) {
+            return res.status(401).json({
+                error: 'Die Sitzung ist nicht mehr gültig. Bitte erneut anmelden.'
+            });
+        }
+        return res.redirect('/login.html?reason=session_expired');
+    } catch (error) {
+        console.error('Sitzungsversion konnte nicht geprüft werden:', error);
+        return res.status(503).json({
+            error: 'Die Sitzung konnte derzeit nicht geprüft werden.'
+        });
+    } finally {
+        if (connection) await connection.end();
+    }
+});
+
+function isSensitiveResponsePath(pathname) {
+    return pathname === '/auth-status' ||
+        pathname === '/backend.html' ||
+        pathname === '/profile.html' ||
+        pathname === '/login' ||
+        pathname === '/logout' ||
+        pathname === '/cart' ||
+        pathname.startsWith('/cart/') ||
+        pathname.startsWith('/my-profile') ||
+        pathname.startsWith('/my-orders') ||
+        pathname.startsWith('/admin/') ||
+        pathname.startsWith('/orders/') ||
+        pathname.startsWith('/img/returns/');
+}
+
+app.use((req, res, next) => {
+    if (!isSensitiveResponsePath(req.path)) return next();
+
+    res.set({
+        'Cache-Control': 'private, no-store',
+        Expires: '0',
+        Pragma: 'no-cache'
+    });
+    delete req.headers['if-modified-since'];
+    delete req.headers['if-none-match'];
+    return next();
+});
+
 app.use(requireCsrfToken);
 
 app.use('/', productRoutes);
@@ -381,6 +615,62 @@ app.get('/backend.html', checkAdmin, (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'backend.html'));
 });
 
+app.get('/verify-email.html', (req, res) => {
+    res.set({
+        'Cache-Control': 'no-store',
+        'Referrer-Policy': 'no-referrer'
+    });
+    res.sendFile(path.join(__dirname, 'public', 'verify-email.html'));
+});
+
+app.get('/img/returns/:filename', async (req, res) => {
+    const filename = getStoredReturnImageFilename(`img/returns/${req.params.filename}`);
+
+    if (!filename || !req.session?.user) {
+        return res.sendStatus(404);
+    }
+
+    let connection;
+    try {
+        connection = await mysql.createConnection(dbConfig);
+        const [images] = await connection.execute(
+            `SELECT image.image_path AS imagePath, rental_order.customer_email AS customerEmail
+             FROM rental_order_return_images image
+             JOIN rental_orders rental_order ON rental_order.id = image.order_id
+             WHERE image.image_path = ?
+             LIMIT 1`,
+            [`img/returns/${filename}`]
+        );
+        const image = images[0];
+        const mayReadImage = image && (
+            req.session.role === 'global_admin' ||
+            normalizeEmail(req.session.user) === normalizeEmail(image.customerEmail)
+        );
+
+        if (!mayReadImage) return res.sendStatus(404);
+
+        return res.sendFile(filename, {
+            dotfiles: 'deny',
+            root: RETURN_IMAGE_DIRECTORY
+        }, error => {
+            if (!error) return;
+            if (res.headersSent) {
+                res.destroy(error);
+                return;
+            }
+            res.sendStatus(error.code === 'ENOENT' ? 404 : 500);
+        });
+    } catch (error) {
+        console.error('Rückgabefoto konnte nicht sicher geladen werden:', error);
+        return res.sendStatus(500);
+    } finally {
+        if (connection) await connection.end();
+    }
+});
+
+// Never fall through to express.static for private return-image paths.
+app.use('/img/returns', (req, res) => res.sendStatus(404));
+
 // Statische Dateien bereitstellen
 app.use(express.static("public"));
 
@@ -391,6 +681,27 @@ const loginLimiter = rateLimit({
     legacyHeaders: false,
     skipSuccessfulRequests: true,
     message: 'Zu viele Login-Versuche. Bitte versuche es in 15 Minuten erneut.'
+});
+
+const guestOrderLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip: req => Boolean(req.session?.user),
+    message: {
+        error: 'Zu viele Bestellversuche. Bitte versuche es in 15 Minuten erneut.'
+    }
+});
+
+const accountMutationLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 5,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: {
+        error: 'Zu viele Kontoanfragen. Bitte versuche es in 15 Minuten erneut.'
+    }
 });
 
 const adminReturnMutationLimiter = rateLimit({
@@ -406,8 +717,6 @@ const adminReturnMutationLimiter = rateLimit({
 app.post('/login', loginLimiter, async (req, res) => {
     const { username, password } = req.body;
 
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
     if (
         typeof username !== 'string' ||
         typeof password !== 'string' ||
@@ -417,13 +726,16 @@ app.post('/login', loginLimiter, async (req, res) => {
         return res.status(400).send('Benutzername und Passwort sind erforderlich.');
     }
 
-    const normalizedUsername = username.trim().toLowerCase();
+    const normalizedUsername = normalizeEmail(username);
 
-    if (normalizedUsername.length > 254 || password.length > 128) {
+    if (
+        password.length > LEGACY_LOGIN_PASSWORD_MAX_LENGTH ||
+        Buffer.byteLength(password, 'utf8') > LEGACY_LOGIN_PASSWORD_MAX_BYTES
+    ) {
         return res.status(400).send('Eingabe ist zu lang.');
     }
 
-    if (!emailRegex.test(normalizedUsername)) {
+    if (!isValidEmail(normalizedUsername)) {
         return res.status(400).send('Ungültige E-Mail-Adresse.');
     }
 
@@ -433,7 +745,8 @@ app.post('/login', loginLimiter, async (req, res) => {
         connection = await mysql.createConnection(dbConfig);
 
         const [rows] = await connection.execute(
-            'SELECT password, role FROM users WHERE username = ? LIMIT 1',
+            `SELECT password, role, email_verified, auth_version
+             FROM users WHERE username = ? LIMIT 1`,
             [normalizedUsername]
         );
 
@@ -447,75 +760,76 @@ app.post('/login', loginLimiter, async (req, res) => {
             return res.status(401).send('Falsche Zugangsdaten.');
         }
 
+        const requiresVerifiedEmail = roleRequiresEmailVerification(rows[0].role);
+
+        if (requiresVerifiedEmail && Number(rows[0].email_verified) !== 1) {
+            return res.status(403).json({
+                error: 'Bitte bestätigen Sie zuerst Ihre E-Mail-Adresse.'
+            });
+        }
+
         const previousRedirectAfterLogin = req.session.redirectAfterLogin || null;
         const previousCartKey = req.session.cartKey || null;
 
-        req.session.regenerate(async (err) => {
-            if (err) {
-                console.error('Session Regenerate Fehler:', err);
-                return res.status(500).send('Login fehlgeschlagen.');
-            }
+        await new Promise((resolve, reject) => {
+            req.session.regenerate(error => error ? reject(error) : resolve());
+        });
 
-            try {
-                req.session.user = normalizedUsername;
-                req.session.role = rows[0].role;
-                req.session.createdAt = Date.now();
+        req.session.user = normalizedUsername;
+        req.session.role = rows[0].role;
+        req.session.authVersion = Number(rows[0].auth_version);
+        req.session.createdAt = Date.now();
 
-                if (previousRedirectAfterLogin) {
-                    req.session.redirectAfterLogin = previousRedirectAfterLogin;
-                }
+        if (previousRedirectAfterLogin) {
+            req.session.redirectAfterLogin = previousRedirectAfterLogin;
+        }
 
-                if (previousCartKey) {
-                    req.session.cartKey = previousCartKey;
-                }
+        if (previousCartKey) {
+            req.session.cartKey = previousCartKey;
+        }
 
-                await mergeGuestCartIntoUserCart(connection, req, normalizedUsername);
+        await runInTransactionWithRetry(
+            () => mysql.createConnection(dbConfig),
+            mergeConnection => mergeGuestCartIntoUserCart(
+                mergeConnection,
+                req,
+                normalizedUsername
+            )
+        );
 
-                if (connection) await connection.end();
-                connection = null;
+        const redirectAfterLogin = req.session.redirectAfterLogin || null;
+        delete req.session.redirectAfterLogin;
 
-                const redirectAfterLogin = req.session.redirectAfterLogin || null;
-                delete req.session.redirectAfterLogin;
+        console.log(
+            new Date().toISOString(),
+            '- Anmeldung: Benutzer',
+            normalizedUsername,
+            'erfolgreich angemeldet mit Rolle',
+            rows[0].role
+        );
 
-                console.log(
-                    new Date().toISOString(),
-                    '- Anmeldung: Benutzer',
-                    normalizedUsername,
-                    'erfolgreich angemeldet mit Rolle',
-                    rows[0].role
-                );
+        const csrfToken = getOrCreateCsrfToken(req);
 
-                const csrfToken = getOrCreateCsrfToken(req);
+        await new Promise((resolve, reject) => {
+            req.session.save(error => error ? reject(error) : resolve());
+        });
 
-                await new Promise((resolve, reject) => {
-                    req.session.save(error => error ? reject(error) : resolve());
-                });
+        res.set('X-CSRF-Token', csrfToken);
 
-                res.set('X-CSRF-Token', csrfToken);
-
-                return res.status(200).json({
-                    message: 'Login erfolgreich!',
-                    redirectTo: redirectAfterLogin || (
-                        rows[0].role === 'global_admin'
-                            ? '/backend.html'
-                            : '/index.html'
-                    ),
-                    csrfToken
-                });
-            } catch (sessionError) {
-
-                if (connection) await connection.end();
-                connection = null;
-
-                console.error('Fehler nach Session-Regeneration:', sessionError);
-                return res.status(500).send('Login fehlgeschlagen.');
-            }
+        return res.status(200).json({
+            message: 'Login erfolgreich!',
+            redirectTo: redirectAfterLogin || (
+                rows[0].role === 'global_admin'
+                    ? '/backend.html'
+                    : '/index.html'
+            ),
+            csrfToken
         });
     } catch (error) {
         console.error('Fehler beim Login:', error);
         return res.status(500).send('Serverfehler beim Versuch, sich anzumelden.');
     } finally {
-        // Verbindung wird erst nach Callback benutzt; deshalb hier NICHT schließen
+        if (connection) await connection.end();
     }
 });
 
@@ -534,7 +848,7 @@ app.post('/logout', (req, res) => {
                 return res.status(500).send('Fehler beim Abmelden');
             }
 
-            res.clearCookie('segnitz.sid');
+            res.clearCookie('segnitz.sid', createSessionCookieClearOptions());
 
             res.send('Logout erfolgreich');
         });
@@ -572,7 +886,49 @@ function isFormCheckboxChecked(formData, fieldName) {
     return element?.checked === true || ['on', 'true', '1'].includes(normalizedValue);
 }
 
-app.post('/data', async (req, res) => {
+async function createGuestVerificationChallenge(connection, email) {
+    await connection.beginTransaction();
+    try {
+        const [recentChallenges] = await connection.execute(
+            `SELECT id
+             FROM guest_verifications
+             WHERE email = ?
+             AND expires_at > NOW()
+             AND created_at >= DATE_SUB(NOW(), INTERVAL 5 MINUTE)
+             ORDER BY id DESC
+             LIMIT 1
+             FOR UPDATE`,
+            [email]
+        );
+
+        if (recentChallenges.length > 0) {
+            await connection.rollback();
+            return false;
+        }
+
+        const token = createVerificationToken();
+        const expires = getVerificationExpiry();
+        await connection.execute(
+            `INSERT INTO guest_verifications
+             (email, verification_token, expires_at, verified)
+             VALUES (?, ?, ?, 0)`,
+            [email, token, expires]
+        );
+
+        await sendVerificationEmail(email, token, {
+            purpose: 'guest_order',
+            verificationWindowMinutes: GUEST_VERIFICATION_MAX_AGE_MS / (60 * 1000),
+            connection
+        });
+        await connection.commit();
+        return true;
+    } catch (error) {
+        await connection.rollback();
+        throw error;
+    }
+}
+
+app.post('/data', guestOrderLimiter, async (req, res) => {
     let connection;
 
     try {
@@ -587,12 +943,13 @@ app.post('/data', async (req, res) => {
         }
 
         const paymentMethod = req.body.paymentMethod;
+        const orderAccessGrant = req.session.user ? null : createOrderAccessGrant();
 
         const submittedEmail =
             getFormValue(formData, 'CustomerEmail') ||
             getFormValue(formData, 'email');
 
-        const email = String(req.session.user || submittedEmail || '').trim().toLowerCase();
+        const email = normalizeEmail(req.session.user || submittedEmail);
 
         const firstName = String(getFormValue(formData, 'FirstName') || '').trim();
         const lastName = String(getFormValue(formData, 'LastName') || '').trim();
@@ -604,11 +961,11 @@ app.post('/data', async (req, res) => {
         const signatureDataUrl = getSignatureDataUrl(formData);
 
         if (
-            !email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ||
-            !firstName || !lastName || !phone || !address || !zip || !city ||
-            !/^[0-9]+$/.test(phone) ||
-            !/^[0-9]+$/.test(zip) ||
-            !/^[a-zA-Z0-9äöüÄÖÜß\s]+$/.test(address)
+            !isValidEmail(email) ||
+            !hasValidCustomerFieldLengths({ firstName, lastName, company, phone, address, zip, city }) ||
+            !isDigitsOnly(phone, CUSTOMER_FIELD_LIMITS.phone) ||
+            !isDigitsOnly(zip, CUSTOMER_FIELD_LIMITS.zip) ||
+            !isSafeAddress(address)
         ) {
             return res.status(400).json({
                 error: 'Bitte füllen Sie alle Pflichtfelder mit gültigen Kundendaten aus.'
@@ -621,7 +978,7 @@ app.post('/data', async (req, res) => {
             });
         }
 
-        if (!/^data:image\/(?:png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(String(signatureDataUrl || ''))) {
+        if (!isValidSignatureDataUrl(signatureDataUrl)) {
             return res.status(400).json({ error: 'Eine gültige Unterschrift ist erforderlich.' });
         }
 
@@ -636,9 +993,28 @@ app.post('/data', async (req, res) => {
         }
 
         connection = await mysql.createConnection(dbConfig);
-        await runDatabaseCleanup(connection);
 
-        if (!req.session.user && email) {
+        if (req.session.user) {
+            const [accountRows] = await connection.execute(
+                `SELECT id, role, email_verified
+                 FROM users
+                 WHERE username = ?
+                 LIMIT 1`,
+                [email]
+            );
+
+            const account = accountRows[0];
+            const accountRequiresVerification = roleRequiresEmailVerification(account?.role);
+
+            if (
+                !account ||
+                (accountRequiresVerification && Number(account.email_verified) !== 1)
+            ) {
+                return res.status(403).json({
+                    error: 'Bitte bestätigen Sie zuerst Ihre E-Mail-Adresse.'
+                });
+            }
+        } else if (email) {
             const [existingUsers] = await connection.execute(
                 'SELECT id FROM users WHERE username = ? LIMIT 1',
                 [email]
@@ -649,12 +1025,24 @@ app.post('/data', async (req, res) => {
                     error: 'Diese E-Mail-Adresse gehört bereits zu einem Konto. Bitte einloggen.'
                 });
             }
+
+            if (!hasFreshGuestVerification(req, email)) {
+                const verificationEmailSent = await createGuestVerificationChallenge(connection, email);
+
+                return res.status(403).json({
+                    error: verificationEmailSent
+                        ? 'Bitte bestätigen Sie Ihre E-Mail-Adresse über den zugesandten Link und senden Sie die Bestellung danach erneut ab.'
+                        : 'Für diese E-Mail-Adresse wurde bereits ein Bestätigungslink versendet. Bitte prüfen Sie Ihr Postfach.',
+                    verificationRequired: true,
+                    verificationEmailSent
+                });
+            }
         }
 
         await connection.beginTransaction();
 
         const userId = await getUserIdByEmail(connection, email);
-        const cartId = await getOrCreateActiveCart(connection, req);
+        const cartId = await getOrCreateActiveCart(connection, req, { forUpdate: true });
         const cartItems = await getCartItemsForOrder(connection, cartId);
 
         if (cartItems.length === 0) {
@@ -668,7 +1056,7 @@ app.post('/data', async (req, res) => {
             connection,
             cartItems.map(item => item.productId)
         );
-        const today = new Date().toLocaleDateString('sv-SE');
+        const today = formatDateInTimeZone();
 
         if (lockedProducts.some(product => Number(product.is_active) !== 1)) {
             await connection.rollback();
@@ -714,10 +1102,12 @@ app.post('/data', async (req, res) => {
         const [orderResult] = await connection.execute(
             `INSERT INTO rental_orders
             (order_no, cart_id, user_id, customer_email, customer_first_name, customer_last_name,
-            customer_company, customer_phone, customer_address, customer_zip, customer_city, signature_data_url, status, reserved_until, confirmation_json, total_amount)
+            customer_company, customer_phone, customer_address, customer_zip, customer_city,
+            signature_data_url, status, reserved_until, confirmation_json, total_amount,
+            guest_access_token_hash, guest_access_token_expires_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                 CASE WHEN ? = 'reserved' THEN DATE_ADD(NOW(), INTERVAL 15 MINUTE) ELSE NULL END,
-                ?, ?)`,
+                ?, ?, ?, ?)`,
             [
                 orderNo,
                 cartId,
@@ -734,7 +1124,9 @@ app.post('/data', async (req, res) => {
                 initialOrderStatus,
                 initialOrderStatus,
                 JSON.stringify(orderSummary),
-                orderSummary.totals.grandTotalBeforeDepositReturn
+                orderSummary.totals.grandTotalBeforeDepositReturn,
+                orderAccessGrant?.tokenHash || null,
+                orderAccessGrant?.expiresAt || null
             ]
         );
 
@@ -764,81 +1156,42 @@ app.post('/data', async (req, res) => {
                 ]
             );
 
-            await connection.execute(
-                `UPDATE rental_products
-                SET times_ordered = COALESCE(times_ordered, 0) + 1
-                WHERE id = ?`,
-                [item.productId]
-            );
         }
 
         console.log('Payment-Methode Backend:', paymentMethod);
 
         if (paymentMethod === 'online') {
-
-            const payment = await createMolliePaymentForOrder({
-                id: orderId,
-                orderNo,
-                totalAmount: orderSummary.totals.grandTotalBeforeDepositReturn,
-                type: 'order_payment',
-                idempotencyKey: `initial-order-payment-${orderId}`
-            });
-            const checkoutUrl = getMollieCheckoutUrl(payment);
-
-            if (!checkoutUrl) {
-                throw new Error('Mollie Checkout-URL fehlt.');
-            }
-
-            await connection.execute(
+            const operationKey = `initial-order-payment-${orderId}`;
+            const [initialPaymentRecord] = await connection.execute(
                 `INSERT INTO rental_order_payments
-     (order_id, order_item_id, payment_type, payment_method, payment_status, amount, mollie_payment_id, note)
-     VALUES (?, NULL, 'initial_payment', 'online', 'pending', ?, ?, ?)`,
+                 (order_id, order_item_id, payment_type, payment_method, payment_status,
+                  amount, external_operation_key, note)
+                 VALUES (?, NULL, 'initial_payment', 'online', 'pending', ?, ?, ?)`,
                 [
                     orderId,
                     orderSummary.totals.grandTotalBeforeDepositReturn,
-                    payment.id,
+                    operationKey,
                     'Gesamtzahlung aus Miete und Kaution'
                 ]
             );
-
-            await connection.execute(
+            const [rentalPaymentRecord] = await connection.execute(
                 `INSERT INTO rental_order_payments
-     (order_id, order_item_id, payment_type, payment_method, payment_status, amount, mollie_payment_id, note)
-     VALUES (?, NULL, 'rental', 'online', 'pending', ?, ?, ?)`,
-                [
-                    orderId,
-                    orderSummary.totals.rentalTotal,
-                    payment.id,
-                    'Mietanteil der Initialzahlung'
-                ]
+                 (order_id, order_item_id, payment_type, payment_method, payment_status, amount, note)
+                 VALUES (?, NULL, 'rental', 'online', 'pending', ?, ?)`,
+                [orderId, orderSummary.totals.rentalTotal, 'Mietanteil der Initialzahlung']
             );
-
-            await connection.execute(
+            const [depositPaymentRecord] = await connection.execute(
                 `INSERT INTO rental_order_payments
-     (order_id, order_item_id, payment_type, payment_method, payment_status, amount, mollie_payment_id, note)
-     VALUES (?, NULL, 'deposit', 'online', 'pending', ?, ?, ?)`,
-                [
-                    orderId,
-                    orderSummary.totals.depositTotal,
-                    payment.id,
-                    'Kautionsanteil der Initialzahlung'
-                ]
+                 (order_id, order_item_id, payment_type, payment_method, payment_status, amount, note)
+                 VALUES (?, NULL, 'deposit', 'online', 'pending', ?, ?)`,
+                [orderId, orderSummary.totals.depositTotal, 'Kautionsanteil der Initialzahlung']
             );
 
             await connection.execute(
                 `UPDATE rental_orders
-SET payment_method = 'online',
-    payment_status = 'pending',
-    mollie_payment_id = ?,
-    mollie_checkout_url = ?,
-    mollie_payment_status = ?
-WHERE id = ?`,
-                [
-                    payment.id,
-                    checkoutUrl,
-                    payment.status || 'open',
-                    orderId
-                ]
+                 SET payment_method = 'online', payment_status = 'pending'
+                 WHERE id = ?`,
+                [orderId]
             );
 
             await connection.execute(
@@ -848,7 +1201,52 @@ WHERE id = ?`,
                 [cartId]
             );
 
+            await enqueueMolliePaymentCreation(connection, {
+                operationKey,
+                payment: {
+                id: orderId,
+                orderNo,
+                totalAmount: orderSummary.totals.grandTotalBeforeDepositReturn,
+                    type: 'order_payment'
+                },
+                application: {
+                    kind: 'payment_records',
+                    orderId,
+                    paymentRecordIds: [
+                        initialPaymentRecord.insertId,
+                        rentalPaymentRecord.insertId,
+                        depositPaymentRecord.insertId
+                    ]
+                }
+            });
+
             await connection.commit();
+            rememberGuestOrder(req, orderId);
+            if (orderAccessGrant) setOrderAccessCookie(res, orderId, orderAccessGrant);
+            if (!req.session.user) consumeGuestVerification(req);
+
+            let payment;
+            try {
+                payment = await processExternalEffectByKey(operationKey);
+            } catch (paymentError) {
+                console.error('Initialzahlung wurde vorgemerkt und wird erneut versucht:', paymentError);
+                return res.status(202).json({
+                    message: 'Online-Zahlung wird vorbereitet. Bitte den Zahlungsstatus in Kürze erneut laden.',
+                    orderId,
+                    orderNo,
+                    paymentPending: true
+                });
+            }
+
+            const checkoutUrl = payment.checkoutUrl;
+            if (!checkoutUrl) {
+                return res.status(202).json({
+                    message: 'Online-Zahlung wurde angelegt; die Checkout-URL wird noch synchronisiert.',
+                    orderId,
+                    orderNo,
+                    paymentPending: true
+                });
+            }
 
             return res.status(200).json({
                 message: 'Online-Zahlung wurde vorbereitet.',
@@ -898,47 +1296,41 @@ WHERE id = ?`,
             [cartId]
         );
 
-        await connection.commit();
-
-        const customerOrderEmail = email;
-
-        const internalOrderEmail = 'orders@segnitzbau.de';
-
-        const recipients = [
-            customerOrderEmail,
-            internalOrderEmail
+        const uniqueRecipients = [...new Set([
+            email,
+            'orders@segnitzbau.de'
         ]
             .filter(Boolean)
-            .map(e => e.trim().toLowerCase());
+            .map(recipient => recipient.trim().toLowerCase()))];
+        const emailSent = await sendOrderEmail(
+            uniqueRecipients,
+            {
+                ...orderSummary,
+                id: orderId,
+                reservedUntil
+            },
+            {
+                firstName,
+                lastName,
+                company,
+                email,
+                phone,
+                address,
+                zip,
+                city
+            },
+            signatureDataUrl,
+            'Zahlung bei Abholung',
+            {
+                connection,
+                operationKey: `mail-order-confirmation-${orderId}`
+            }
+        );
 
-        const uniqueRecipients = [...new Set(recipients)];
-
-        let emailSent = false;
-
-        try {
-            emailSent = await sendOrderEmail(
-                uniqueRecipients,
-                {
-                    ...orderSummary,
-                    id: orderId,
-                    reservedUntil
-                },
-                {
-                    firstName,
-                    lastName,
-                    company,
-                    email,
-                    phone,
-                    address,
-                    zip,
-                    city
-                },
-                signatureDataUrl,
-                'Zahlung bei Abholung'
-            );
-        } catch (emailError) {
-            console.error('Fehler beim E-Mail-Versand:', emailError);
-        }
+        await connection.commit();
+        rememberGuestOrder(req, orderId);
+        if (orderAccessGrant) setOrderAccessCookie(res, orderId, orderAccessGrant);
+        if (!req.session.user) consumeGuestVerification(req);
 
         delete req.session.cartKey;
 
@@ -962,9 +1354,11 @@ WHERE id = ?`,
             }
         }
 
-        return res.status(500).json({
-            error: 'Bestellung konnte nicht reserviert werden.'
-        });
+        return sendTransactionFailure(
+            res,
+            error,
+            'Bestellung konnte nicht reserviert werden.'
+        );
 
     } finally {
         if (connection) {
@@ -983,176 +1377,275 @@ function getVerificationExpiry() {
     return expires;
 }
 
-async function generateCustomerNo(connection) {
-    const year = new Date().getFullYear();
+app.post('/register-customer', accountMutationLimiter, async (req, res) => {
+    const firstName = typeof req.body.firstName === 'string' ? req.body.firstName.trim() : '';
+    const lastName = typeof req.body.lastName === 'string' ? req.body.lastName.trim() : '';
+    const company = typeof req.body.company === 'string' ? req.body.company.trim() : '';
+    const email = normalizeEmail(req.body.email);
+    const phone = typeof req.body.phone === 'string' ? req.body.phone.trim() : '';
+    const address = typeof req.body.address === 'string' ? req.body.address.trim() : '';
+    const zip = typeof req.body.zip === 'string' ? req.body.zip.trim() : '';
+    const city = typeof req.body.city === 'string' ? req.body.city.trim() : '';
+    const password = req.body.password;
 
-    const [rows] = await connection.execute(
-        `SELECT customer_no 
-         FROM users 
-         WHERE customer_no LIKE ?
-         ORDER BY customer_no DESC 
-         LIMIT 1`,
-        [`K${year}%`]
-    );
-
-    let nextNumber = 1;
-
-    if (rows.length > 0 && rows[0].customer_no) {
-        nextNumber = Number(rows[0].customer_no.slice(5)) + 1;
-    }
-
-    return `K${year}${String(nextNumber).padStart(5, '0')}`;
-}
-
-app.post('/register-customer', loginLimiter, async (req, res) => {
-    const {
-        firstName,
-        lastName,
-        company,
-        email,
-        phone,
-        address,
-        zip,
-        city,
-        password
-    } = req.body;
-
-    if (!firstName || !lastName || !email || !phone || !address || !zip || !city || !password) {
+    if (
+        !isValidEmail(email) ||
+        !hasValidCustomerFieldLengths({ firstName, lastName, company, phone, address, zip, city }) ||
+        !isDigitsOnly(phone, CUSTOMER_FIELD_LIMITS.phone) ||
+        !isDigitsOnly(zip, CUSTOMER_FIELD_LIMITS.zip) ||
+        !isSafeAddress(address) ||
+        typeof password !== 'string'
+    ) {
         return res.status(400).json({
-            error: 'Pflichtfelder fehlen'
+            error: 'Pflichtfelder fehlen oder enthalten ungültige bzw. zu lange Werte.'
         });
     }
 
-    const passwordPolicyRegex = /^(?=.*[0-9])(?=.*[^A-Za-z0-9]).{8,}$/;
-
-    if (!passwordPolicyRegex.test(password)) {
+    if (!isValidPassword(password)) {
         return res.status(400).json({
-            error: 'Das Passwort muss mindestens 8 Zeichen, eine Zahl und ein Sonderzeichen enthalten.'
+            error: 'Das Passwort muss 8 bis 72 Bytes, eine Zahl und ein Sonderzeichen enthalten.'
         });
     }
 
     try {
-        const connection = await mysql.createConnection(dbConfig);
+        const hashedPassword = await bcrypt.hash(password, 10);
+        const token = createVerificationToken();
+        const expires = getVerificationExpiry();
+        const registration = await runInTransactionWithRetry(
+            () => mysql.createConnection(dbConfig),
+            async connection => {
+                const [existingUsers] = await connection.execute(
+                    `SELECT id, role, email_verified, customer_no, verification_token,
+                            verification_expires > NOW() AS verification_token_valid
+                     FROM users
+                     WHERE username = ?
+                     LIMIT 1
+                     FOR UPDATE`,
+                    [email]
+                );
 
-        const [existingUsers] = await connection.execute(
-            'SELECT id FROM users WHERE username = ?',
-            [email]
+                if (existingUsers.length > 0) {
+                    const existingUser = existingUsers[0];
+                    if (
+                        !['global_admin', 'bearbeiter'].includes(existingUser.role) &&
+                        Number(existingUser.email_verified) !== 1
+                    ) {
+                        const existingTokenIsUsable =
+                            Number(existingUser.verification_token_valid) === 1 &&
+                            /^[a-f0-9]{64}$/u.test(String(existingUser.verification_token || ''));
+                        const verificationToken = existingTokenIsUsable
+                            ? existingUser.verification_token
+                            : token;
+
+                        if (!existingTokenIsUsable) {
+                            await connection.execute(
+                                `UPDATE users
+                                 SET verification_token = ?, verification_expires = ?,
+                                     reset_token = NULL, reset_token_expires = NULL,
+                                     auth_version = auth_version + 1
+                                 WHERE id = ? AND COALESCE(email_verified, 0) != 1`,
+                                [verificationToken, expires, existingUser.id]
+                            );
+                        }
+                        await sendVerificationEmail(email, verificationToken, {
+                            connection,
+                            operationKey: `mail-verify-resend-${existingUser.id}-${crypto.randomUUID()}`
+                        });
+                        return {
+                            customerNo: existingUser.customer_no,
+                            verificationResent: true
+                        };
+                    }
+
+                    const error = new Error('Für diese E-Mail existiert bereits ein Konto');
+                    error.statusCode = 409;
+                    throw error;
+                }
+
+                const allocatedCustomerNo = await allocateCustomerNumber(connection);
+                await connection.execute(
+                    `INSERT INTO users
+                    (username, password, role, first_name, last_name, company, phone, address, zip, city, customer_no, email_verified, verification_token, verification_expires)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    [
+                        email,
+                        hashedPassword,
+                        'user',
+                        firstName,
+                        lastName,
+                        company || null,
+                        phone,
+                        address,
+                        zip,
+                        city,
+                        allocatedCustomerNo,
+                        0,
+                        token,
+                        expires
+                    ]
+                );
+
+                await sendVerificationEmail(email, token, {
+                    connection
+                });
+
+                return {
+                    customerNo: allocatedCustomerNo,
+                    verificationResent: false
+                };
+            }
+        );
+        const { customerNo, verificationResent } = registration;
+
+        console.log(
+            verificationResent
+                ? `${new Date().toISOString()} - Registrierung: Bestätigungsmail für ${email} wurde erneut vorgemerkt`
+                : `${new Date().toISOString()} - Registrierung: Neuer Benutzer ${firstName} ${lastName} (E-Mail: ${email}, Kundennummer: ${customerNo}) wurde erfolgreich registriert und eine Bestätigungsmail wurde vorgemerkt`
         );
 
-        if (existingUsers.length > 0) {
-            await connection.end();
+        res.status(verificationResent ? 202 : 201).json({
+            message: verificationResent
+                ? 'Das Konto ist noch nicht bestätigt. Eine neue Bestätigungsmail wurde vorgemerkt.'
+                : 'Kundenkonto wurde erstellt. Bitte bestätigen Sie Ihre E-Mail-Adresse.',
+            customerNo
+        });
+    } catch (error) {
+        if (error?.statusCode === 409) {
+            return res.status(409).json({ error: error.message });
+        }
+
+        if (
+            error?.code === 'ER_DUP_ENTRY' &&
+            String(error.message || '').includes('uq_users_username')
+        ) {
             return res.status(409).json({
                 error: 'Für diese E-Mail existiert bereits ein Konto'
             });
         }
 
-        const hashedPassword = await bcrypt.hash(password, 10);
-        const customerNo = await generateCustomerNo(connection);
-        const token = createVerificationToken();
-        const expires = getVerificationExpiry();
-
-        await connection.execute(
-            `INSERT INTO users 
-            (username, password, role, first_name, last_name, company, phone, address, zip, city, customer_no, email_verified, verification_token, verification_expires)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [
-                email,
-                hashedPassword,
-                'user',
-                firstName,
-                lastName,
-                company || null,
-                phone,
-                address,
-                zip,
-                city,
-                customerNo,
-                0,
-                token,
-                expires
-            ]
-        );
-
-        await connection.end();
-
-        await sendVerificationEmail(email, token);
-
-        console.log(
-            `${new Date().toISOString()} - Registrierung: Neuer Benutzer ${firstName} ${lastName} (E-Mail: ${email}, Kundennummer: ${customerNo}) wurde erfolgreich registriert und eine Bestätigungsmail wurde versendet`
-        );
-
-        res.status(201).json({
-            message: 'Kundenkonto wurde erstellt. Bitte bestätigen Sie Ihre E-Mail-Adresse.',
-            customerNo
-        });
-    } catch (error) {
         console.error('Fehler beim Erstellen des Kundenkontos:', error);
-        res.status(500).json({
+        return res.status(500).json({
             error: 'Fehler beim Erstellen des Kundenkontos'
         });
     }
 });
 
 app.get('/verify-email', async (req, res) => {
-    const {
-        token
-    } = req.query;
+    res.set({
+        'Cache-Control': 'no-store',
+        'Referrer-Policy': 'no-referrer'
+    });
+    const { token } = req.query;
 
-    if (!token) {
+    if (typeof token !== 'string' || !/^[a-f0-9]{64}$/u.test(token)) {
         return res.status(400).send('Ungültiger Bestätigungslink.');
     }
 
-    try {
-        const connection = await mysql.createConnection(dbConfig);
-        await runDatabaseCleanup(connection);
+    let connection;
 
+    try {
+        connection = await mysql.createConnection(dbConfig);
+        const [challenges] = await connection.execute(
+            `SELECT 'user' AS challengeType
+             FROM users
+             WHERE verification_token = ? AND verification_expires > NOW()
+             UNION ALL
+             SELECT 'guest' AS challengeType
+             FROM guest_verifications
+             WHERE verification_token = ? AND expires_at > NOW()
+             LIMIT 1`,
+            [token, token]
+        );
+        if (challenges.length === 0) {
+            return res.status(400).send('Bestätigungslink ungültig oder abgelaufen.');
+        }
+
+        return res.redirect(`/verify-email.html#token=${encodeURIComponent(token)}`);
+    } catch (error) {
+        console.error('Fehler bei E-Mail-Verifikationsprüfung:', error);
+        return res.status(500).send('Fehler bei der E-Mail-Verifikation.');
+    } finally {
+        if (connection) await connection.end();
+    }
+});
+
+app.post('/verify-email/complete', async (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    const token = req.body?.token;
+    if (typeof token !== 'string' || !/^[a-f0-9]{64}$/u.test(token)) {
+        return res.status(400).json({ error: 'Ungültiger Bestätigungslink.' });
+    }
+
+    let connection;
+    try {
+        connection = await mysql.createConnection(dbConfig);
+        await connection.beginTransaction();
         const [users] = await connection.execute(
-            `SELECT id, username 
-             FROM users 
-             WHERE verification_token = ? 
-             AND verification_expires > NOW()`,
+            `SELECT id
+             FROM users
+             WHERE verification_token = ? AND verification_expires > NOW()
+             LIMIT 1
+             FOR UPDATE`,
             [token]
         );
 
         if (users.length > 0) {
-            await connection.execute(
-                `UPDATE users 
-                 SET email_verified = 1, verification_token = NULL, verification_expires = NULL 
-                 WHERE id = ?`,
-                [users[0].id]
+            const resetToken = crypto.randomBytes(32).toString('hex');
+            const resetTokenExpires = new Date(Date.now() + 30 * 60 * 1000);
+            const unusablePassword = await bcrypt.hash(crypto.randomBytes(48).toString('hex'), 10);
+            const [updateResult] = await connection.execute(
+                `UPDATE users
+                 SET email_verified = 1, password = ?, verification_token = NULL,
+                     verification_expires = NULL, reset_token = ?, reset_token_expires = ?,
+                     auth_version = auth_version + 1
+                 WHERE id = ? AND verification_token = ? AND verification_expires > NOW()`,
+                [unusablePassword, resetToken, resetTokenExpires, users[0].id, token]
             );
-
-            await connection.end();
-
-            return res.redirect('/email-verified.html');
+            if (Number(updateResult.affectedRows) !== 1) {
+                await connection.rollback();
+                return res.status(409).json({ error: 'Bestätigungslink wurde bereits verwendet.' });
+            }
+            await connection.commit();
+            return res.json({
+                redirectTo: `/login.html#resetToken=${encodeURIComponent(resetToken)}&registrationComplete=1`
+            });
         }
 
         const [guests] = await connection.execute(
-            `SELECT id, email 
-             FROM guest_verifications 
-             WHERE verification_token = ? 
-             AND expires_at > NOW()`,
+            `SELECT id, email
+             FROM guest_verifications
+             WHERE verification_token = ? AND expires_at > NOW()
+             LIMIT 1
+             FOR UPDATE`,
             [token]
         );
-
         if (guests.length > 0) {
-            await connection.execute(
-                `UPDATE guest_verifications 
-                 SET verified = 1 
-                 WHERE id = ?`,
-                [guests[0].id]
+            const verifiedGuestEmail = normalizeEmail(guests[0].email);
+            const [deleteResult] = await connection.execute(
+                `DELETE FROM guest_verifications WHERE id = ? AND verification_token = ?`,
+                [guests[0].id, token]
             );
-
-            await connection.end();
-
-            return res.redirect('/email-verified.html');
+            if (Number(deleteResult.affectedRows) !== 1) {
+                await connection.rollback();
+                return res.status(409).json({ error: 'Bestätigungslink wurde bereits verwendet.' });
+            }
+            await connection.commit();
+            req.session.verifiedGuestEmail = verifiedGuestEmail;
+            req.session.verifiedGuestAt = Date.now();
+            await new Promise((resolve, reject) => {
+                req.session.save(error => error ? reject(error) : resolve());
+            });
+            return res.json({ redirectTo: '/email-verified.html' });
         }
 
-        await connection.end();
-        return res.status(400).send('Bestätigungslink ungültig oder abgelaufen.');
+        await connection.rollback();
+        return res.status(409).json({ error: 'Bestätigungslink ungültig, abgelaufen oder bereits verwendet.' });
     } catch (error) {
+        if (connection) await connection.rollback();
         console.error('Fehler bei E-Mail-Verifikation:', error);
-        res.status(500).send('Fehler bei der E-Mail-Verifikation.');
+        return res.status(500).json({ error: 'Fehler bei der E-Mail-Verifikation.' });
+    } finally {
+        if (connection) await connection.end();
     }
 });
 
@@ -1163,8 +1656,10 @@ app.get('/my-profile', async (req, res) => {
         });
     }
 
+    let connection;
+
     try {
-        const connection = await mysql.createConnection(dbConfig);
+        connection = await mysql.createConnection(dbConfig);
 
         const [rows] = await connection.execute(
             `SELECT
@@ -1183,8 +1678,6 @@ app.get('/my-profile', async (req, res) => {
             [req.session.user]
         );
 
-        await connection.end();
-
         if (rows.length === 0) {
             return res.status(404).json({
                 error: 'Benutzer nicht gefunden'
@@ -1194,9 +1687,11 @@ app.get('/my-profile', async (req, res) => {
         res.json(rows[0]);
     } catch (error) {
         console.error('Fehler beim Laden des Benutzerprofils:', error);
-        res.status(500).json({
+        return res.status(500).json({
             error: 'Fehler beim Laden des Benutzerprofils'
         });
+    } finally {
+        if (connection) await connection.end();
     }
 });
 
@@ -1205,25 +1700,23 @@ app.put('/my-profile', async (req, res) => {
         return res.status(401).json({ error: 'Nicht angemeldet.' });
     }
 
-    const { firstName, lastName, company, phone, address, zip, city } = req.body;
+    const firstName = typeof req.body.firstName === 'string' ? req.body.firstName.trim() : '';
+    const lastName = typeof req.body.lastName === 'string' ? req.body.lastName.trim() : '';
+    const company = typeof req.body.company === 'string' ? req.body.company.trim() : '';
+    const phone = typeof req.body.phone === 'string' ? req.body.phone.trim() : '';
+    const address = typeof req.body.address === 'string' ? req.body.address.trim() : '';
+    const zip = typeof req.body.zip === 'string' ? req.body.zip.trim() : '';
+    const city = typeof req.body.city === 'string' ? req.body.city.trim() : '';
 
-    if (!firstName || !lastName || !phone || !address || !zip || !city) {
-        return res.status(400).json({ error: 'Pflichtfelder fehlen.' });
-    }
-
-    const onlyDigits = /^[0-9]+$/;
-    const addressRegex = /^[a-zA-Z0-9äöüÄÖÜß\s]+$/;
-
-    if (!onlyDigits.test(phone)) {
-        return res.status(400).json({ error: 'Telefon darf nur Ziffern enthalten.' });
-    }
-
-    if (!onlyDigits.test(zip)) {
-        return res.status(400).json({ error: 'PLZ darf nur Ziffern enthalten.' });
-    }
-
-    if (!addressRegex.test(address)) {
-        return res.status(400).json({ error: 'Adresse darf nur Buchstaben, Zahlen und Leerzeichen enthalten.' });
+    if (
+        !hasValidCustomerFieldLengths({ firstName, lastName, company, phone, address, zip, city }) ||
+        !isDigitsOnly(phone, CUSTOMER_FIELD_LIMITS.phone) ||
+        !isDigitsOnly(zip, CUSTOMER_FIELD_LIMITS.zip) ||
+        !isSafeAddress(address)
+    ) {
+        return res.status(400).json({
+            error: 'Profildaten fehlen oder enthalten ungültige bzw. zu lange Werte.'
+        });
     }
 
     let connection;
@@ -1260,7 +1753,14 @@ app.put('/my-profile/password', async (req, res) => {
 
     const { currentPassword, newPassword, newPasswordConfirm } = req.body;
 
-    if (!currentPassword || !newPassword || !newPasswordConfirm) {
+    if (
+        typeof currentPassword !== 'string' ||
+        typeof newPassword !== 'string' ||
+        typeof newPasswordConfirm !== 'string' ||
+        !currentPassword || !newPassword || !newPasswordConfirm ||
+        currentPassword.length > LEGACY_LOGIN_PASSWORD_MAX_LENGTH ||
+        Buffer.byteLength(currentPassword, 'utf8') > LEGACY_LOGIN_PASSWORD_MAX_BYTES
+    ) {
         return res.status(400).json({ error: 'Bitte alle Passwortfelder ausfüllen.' });
     }
 
@@ -1268,11 +1768,9 @@ app.put('/my-profile/password', async (req, res) => {
         return res.status(400).json({ error: 'Die neuen Passwörter stimmen nicht überein.' });
     }
 
-    const passwordPolicyRegex = /^(?=.*[0-9])(?=.*[^A-Za-z0-9]).{8,}$/;
-
-    if (!passwordPolicyRegex.test(newPassword)) {
+    if (!isValidPassword(newPassword)) {
         return res.status(400).json({
-            error: 'Das neue Passwort muss mindestens 8 Zeichen, eine Zahl und ein Sonderzeichen enthalten.'
+            error: 'Das neue Passwort muss 8 bis 72 Bytes, eine Zahl und ein Sonderzeichen enthalten.'
         });
     }
 
@@ -1280,37 +1778,51 @@ app.put('/my-profile/password', async (req, res) => {
 
     try {
         connection = await mysql.createConnection(dbConfig);
+        await connection.beginTransaction();
 
         const [users] = await connection.execute(
-            `SELECT password FROM users WHERE username = ? LIMIT 1`,
+            `SELECT password, auth_version
+             FROM users
+             WHERE username = ?
+             LIMIT 1
+             FOR UPDATE`,
             [req.session.user]
         );
 
         if (users.length === 0) {
+            await connection.rollback();
             return res.status(404).json({ error: 'Benutzer nicht gefunden.' });
         }
 
         const passwordValid = await bcrypt.compare(currentPassword, users[0].password);
 
         if (!passwordValid) {
+            await connection.rollback();
             return res.status(401).json({ error: 'Das aktuelle Passwort ist falsch.' });
         }
 
         const hashedPassword = await bcrypt.hash(newPassword, 10);
 
         await connection.execute(
-            `UPDATE users SET password = ? WHERE username = ?`,
+            `UPDATE users
+             SET password = ?, auth_version = auth_version + 1
+             WHERE username = ?`,
             [hashedPassword, req.session.user]
         );
 
-        try {
-            await sendPasswordChangedEmail(req.session.user);
-        } catch (mailError) {
-            console.error('Passwort wurde geändert, aber Mailversand fehlgeschlagen:', mailError);
-        }
+        await sendPasswordChangedEmail(req.session.user, {
+            connection,
+            operationKey: `mail-password-changed-${crypto.randomUUID()}`
+        });
+        await connection.commit();
+        req.session.authVersion = Number(users[0].auth_version) + 1;
+        await new Promise((resolve, reject) => {
+            req.session.save(error => error ? reject(error) : resolve());
+        });
 
         res.json({ message: 'Passwort wurde geändert. Eine Bestätigungs-E-Mail wurde versendet.' });
     } catch (error) {
+        if (connection) await connection.rollback();
         console.error('Fehler beim Ändern des Passworts:', error);
         res.status(500).json({ error: 'Passwort konnte nicht geändert werden.' });
     } finally {
@@ -1324,21 +1836,45 @@ function parsePositiveInt(value, fallback, max = 100) {
     return Math.min(number, max);
 }
 
+function addCreatedAtRangeFilter(where, params, yearValue, monthValue) {
+    const year = /^\d{4}$/.test(String(yearValue || ''))
+        ? Number(yearValue)
+        : null;
+    const month = /^(0[1-9]|1[0-2])$/.test(String(monthValue || ''))
+        ? Number(monthValue)
+        : null;
+
+    if (year) {
+        const startMonth = month || 1;
+        const endYear = month === 12 ? year + 1 : year;
+        const endMonth = month ? (month === 12 ? 1 : month + 1) : 1;
+        const rangeStart = `${year}-${String(startMonth).padStart(2, '0')}-01`;
+        const rangeEnd = `${month ? endYear : year + 1}-${String(endMonth).padStart(2, '0')}-01`;
+
+        where.push('ro.created_at >= ? AND ro.created_at < ?');
+        params.push(rangeStart, rangeEnd);
+    }
+}
+
+function validateOrderDateFilters(year, month) {
+    if (
+        year &&
+        (!/^\d{4}$/.test(year) || Number(year) < 1000 || Number(year) > 9998)
+    ) {
+        return 'Ungültiges Filterjahr.';
+    }
+    if (month && !/^(0[1-9]|1[0-2])$/.test(month)) return 'Ungültiger Filtermonat.';
+    if (month && !year) return 'Ein Filtermonat erfordert ein Filterjahr.';
+    return null;
+}
+
 function addOrderListFilters({ where, params, query, year, month, status, returnStatus, paymentStatus, customerEmail }) {
     if (customerEmail) {
         where.push('ro.customer_email = ?');
         params.push(customerEmail);
     }
 
-    if (year) {
-        where.push('YEAR(ro.created_at) = ?');
-        params.push(year);
-    }
-
-    if (month) {
-        where.push('MONTH(ro.created_at) = ?');
-        params.push(Number(month));
-    }
+    addCreatedAtRangeFilter(where, params, year, month);
 
     if (status) {
         where.push('ro.status = ?');
@@ -1388,6 +1924,11 @@ app.get('/my-orders', async (req, res) => {
         const page = parsePositiveInt(req.query.page, 1, 100000);
         const limit = parsePositiveInt(req.query.limit, 10, 100);
         const offset = (page - 1) * limit;
+        const year = String(req.query.year || '').trim();
+        const month = String(req.query.month || '').trim();
+        const dateFilterError = validateOrderDateFilters(year, month);
+
+        if (dateFilterError) return res.status(400).json({ error: dateFilterError });
 
         const where = [];
         const params = [];
@@ -1396,8 +1937,8 @@ app.get('/my-orders', async (req, res) => {
             where,
             params,
             customerEmail: req.session.user,
-            year: String(req.query.year || '').trim(),
-            month: String(req.query.month || '').trim(),
+            year,
+            month,
             status: String(req.query.status || '').trim(),
             returnStatus: String(req.query.returnStatus || '').trim(),
             paymentStatus: String(req.query.paymentStatus || '').trim()
@@ -1719,8 +2260,8 @@ ORDER BY id DESC`,
     }
 });
 
-async function syncMollieRefundsForPayment(connection, paymentId) {
-    const refunds = await listMollieRefundsForPayment(paymentId);
+async function syncMollieRefundsForPayment(connection, paymentId, prefetchedRefunds = null) {
+    const refunds = prefetchedRefunds || await listMollieRefundsForPayment(paymentId);
     const refundList =
         refunds?._embedded?.refunds ||
         refunds?._embedded?.payment_refunds ||
@@ -1894,30 +2435,18 @@ async function cancelOpenMolliePayments(
     );
 
     for (const row of paymentRows) {
-        const payment = await getMolliePayment(row.mollie_payment_id);
-        const mappedStatus = mapMolliePaymentStatus(payment.status);
+        await enqueueMollieCancellationIntent(connection, row.mollie_payment_id);
 
-        if (mappedStatus === 'pending' || mappedStatus === 'authorized') {
-            await cancelMolliePayment(row.mollie_payment_id);
-            await connection.execute(
-                `UPDATE rental_order_payments
-                 SET payment_status = 'cancelled',
-                     note = CONCAT(COALESCE(note, ''),
-                        CASE WHEN note IS NULL OR note = '' THEN '' ELSE ' | ' END,
-                        ?)
-                 WHERE mollie_payment_id = ?
-                 AND payment_status IN ('pending', 'open', 'authorized')`,
-                [reason, row.mollie_payment_id]
-            );
-        } else {
-            await connection.execute(
-                `UPDATE rental_order_payments
-                 SET payment_status = ?,
-                     paid_at = CASE WHEN ? = 'paid' THEN COALESCE(paid_at, NOW()) ELSE paid_at END
-                 WHERE mollie_payment_id = ?`,
-                [mappedStatus, mappedStatus, row.mollie_payment_id]
-            );
-        }
+        await connection.execute(
+            `UPDATE rental_order_payments
+             SET payment_status = 'cancelled',
+                 note = CONCAT(COALESCE(note, ''),
+                    CASE WHEN note IS NULL OR note = '' THEN '' ELSE ' | ' END,
+                    ?)
+             WHERE mollie_payment_id = ?
+             AND payment_status IN ('pending', 'open', 'authorized')`,
+            [reason, row.mollie_payment_id]
+        );
     }
 
     await connection.execute(
@@ -1932,6 +2461,101 @@ async function cancelOpenMolliePayments(
          AND payment_status IN ('pending', 'open', 'authorized', 'failed', 'expired')`,
         [reason, orderId, ...itemScopeParams]
     );
+}
+
+async function enqueueMollieCancellationIntent(
+    connection,
+    paymentId,
+    paymentStatus = 'cancelled'
+) {
+    if (!paymentId) return null;
+
+    const paymentKeyHash = crypto
+        .createHash('sha256')
+        .update(String(paymentId), 'utf8')
+        .digest('hex')
+        .slice(0, 32);
+    const operationPrefix = `cancel-payment-${paymentKeyHash}-`;
+    const legacyOperationKey = `cancel-payment-${paymentId}`;
+    const [existingEffects] = await connection.execute(
+        `SELECT operation_key AS operationKey, status
+         FROM external_effects_outbox
+         WHERE operation_key = ? OR operation_key LIKE ?
+         ORDER BY id DESC
+         FOR UPDATE`,
+        [legacyOperationKey, `${operationPrefix}%`]
+    );
+    const activeEffect = existingEffects.find(effect =>
+        ['pending', 'processing', 'retry'].includes(effect.status)
+    );
+    if (activeEffect) {
+        return getExternalEffect(activeEffect.operationKey, { connection });
+    }
+    const succeededEffect = existingEffects.find(effect => effect.status === 'succeeded');
+    if (succeededEffect) {
+        return getExternalEffect(succeededEffect.operationKey, { connection });
+    }
+
+    const operationKey = `${operationPrefix}${existingEffects.length + 1}`;
+    return enqueueMolliePaymentCancellation(connection, {
+        operationKey,
+        paymentId,
+        application: {
+            kind: 'cancel_payment',
+            paymentId,
+            paymentStatus
+        }
+    });
+}
+
+async function persistOnlineRefundIntent(connection, {
+    operationKey,
+    orderId,
+    orderItemId = null,
+    paymentType,
+    paymentId,
+    amount,
+    description,
+    metadata = {},
+    note
+}) {
+    const [result] = await connection.execute(
+        `INSERT INTO rental_order_payments
+         (order_id, order_item_id, payment_type, payment_method, payment_status,
+          amount, mollie_payment_id, external_operation_key, note)
+         VALUES (?, ?, ?, 'online', 'pending', ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id)`,
+        [
+            orderId,
+            orderItemId,
+            paymentType,
+            -Math.abs(Number(amount)),
+            paymentId,
+            operationKey,
+            note
+        ]
+    );
+    const paymentRecordId = Number(result.insertId);
+
+    await enqueueMollieRefundCreation(connection, {
+        operationKey,
+        refund: {
+            paymentId,
+            amount: Math.abs(Number(amount)),
+            description,
+            metadata
+        },
+        application: {
+            kind: 'refund_record',
+            paymentRecordId
+        }
+    });
+
+    return {
+        id: paymentRecordId,
+        status: 'pending',
+        operationKey
+    };
 }
 
 async function createOnlineCancellationRefund(connection, {
@@ -1987,7 +2611,12 @@ async function createOnlineCancellationRefund(connection, {
     if (refundAmount <= 0) return null;
 
     const targetKey = itemId ? `item-${itemId}` : 'order';
-    const refund = await createMollieRefundForPayment({
+    const operationKey = `cancellation-refund-${order.id}-${targetKey}-${paymentId}`;
+    return persistOnlineRefundIntent(connection, {
+        operationKey,
+        orderId: order.id,
+        orderItemId: itemId,
+        paymentType: 'order_cancellation_refund',
         paymentId,
         amount: refundAmount,
         description: itemId
@@ -1998,29 +2627,8 @@ async function createOnlineCancellationRefund(connection, {
             itemId: itemId ? String(itemId) : null,
             type: 'order_cancellation_refund'
         },
-        idempotencyKey: `cancellation-refund-${order.id}-${targetKey}-${paymentId}`
+        note
     });
-    const refundStatus = mapMollieRefundStatus(refund.status);
-
-    await connection.execute(
-        `INSERT INTO rental_order_payments
-         (order_id, order_item_id, payment_type, payment_method, payment_status,
-          amount, mollie_payment_id, mollie_refund_id, note, paid_at)
-         VALUES (?, ?, 'order_cancellation_refund', 'online', ?, ?, ?, ?, ?,
-            CASE WHEN ? = 'paid' THEN NOW() ELSE NULL END)`,
-        [
-            order.id,
-            itemId,
-            refundStatus,
-            -Math.abs(refundAmount),
-            paymentId,
-            refund.id,
-            note,
-            refundStatus
-        ]
-    );
-
-    return refund;
 }
 
 async function createCancellationRefunds(connection, order, item = null) {
@@ -2166,7 +2774,12 @@ async function refundDuplicateOnlinePayment(
     const amount = Number(paymentContext.amount || 0);
     if (amount <= 0) return null;
 
-    const refund = await createMollieRefundForPayment({
+    const operationKey = `duplicate-payment-refund-${paymentContext.mollie_payment_id}`;
+    await persistOnlineRefundIntent(connection, {
+        operationKey,
+        orderId: paymentContext.order_id,
+        orderItemId: paymentContext.order_item_id,
+        paymentType: 'duplicate_payment_refund',
         paymentId: paymentContext.mollie_payment_id,
         amount,
         description: `Rückerstattung Doppelzahlung ${paymentContext.order_no}`,
@@ -2175,29 +2788,10 @@ async function refundDuplicateOnlinePayment(
             itemId: paymentContext.order_item_id ? String(paymentContext.order_item_id) : null,
             type: 'duplicate_payment_refund'
         },
-        idempotencyKey: `duplicate-payment-refund-${paymentContext.mollie_payment_id}`
+        note
     });
-    const refundStatus = mapMollieRefundStatus(refund.status);
 
-    await connection.execute(
-        `INSERT INTO rental_order_payments
-         (order_id, order_item_id, payment_type, payment_method, payment_status,
-          amount, mollie_payment_id, mollie_refund_id, note, paid_at)
-         VALUES (?, ?, 'duplicate_payment_refund', 'online', ?, ?, ?, ?, ?,
-            CASE WHEN ? = 'paid' THEN NOW() ELSE NULL END)`,
-        [
-            paymentContext.order_id,
-            paymentContext.order_item_id,
-            refundStatus,
-            -Math.abs(amount),
-            paymentContext.mollie_payment_id,
-            refund.id,
-            note,
-            refundStatus
-        ]
-    );
-
-    return refundStatus;
+    return 'pending';
 }
 
 app.post('/my-orders/:id/cancel', async (req, res) => {
@@ -2222,6 +2816,11 @@ app.get('/admin/orders', checkAdmin, async (req, res) => {
         const page = parsePositiveInt(req.query.page, 1, 100000);
         const limit = parsePositiveInt(req.query.limit, 10, 100);
         const offset = (page - 1) * limit;
+        const year = String(req.query.year || '').trim();
+        const month = String(req.query.month || '').trim();
+        const dateFilterError = validateOrderDateFilters(year, month);
+
+        if (dateFilterError) return res.status(400).json({ error: dateFilterError });
 
         const where = [];
         const params = [];
@@ -2230,8 +2829,8 @@ app.get('/admin/orders', checkAdmin, async (req, res) => {
             where,
             params,
             query: String(req.query.query || '').trim(),
-            year: String(req.query.year || '').trim(),
-            month: String(req.query.month || '').trim(),
+            year,
+            month,
             status: String(req.query.status || '').trim(),
             returnStatus: String(req.query.returnStatus || '').trim(),
             paymentStatus: String(req.query.paymentStatus || '').trim()
@@ -2509,6 +3108,25 @@ app.put('/admin/order-items/:itemId/pickup', checkAdmin, async (req, res) => {
 
         const pickedUpByUserId = await getUserIdByEmail(connection, req.session.user);
 
+        const [itemReferences] = await connection.execute(
+            `SELECT order_id, product_id
+             FROM rental_order_items
+             WHERE id = ?
+             LIMIT 1`,
+            [req.params.itemId]
+        );
+
+        if (itemReferences.length === 0) {
+            await connection.rollback();
+            return res.status(404).json({ error: 'Artikel nicht gefunden.' });
+        }
+
+        await lockRentalProducts(connection, [itemReferences[0].product_id]);
+        await connection.execute(
+            `SELECT id FROM rental_orders WHERE id = ? LIMIT 1 FOR UPDATE`,
+            [itemReferences[0].order_id]
+        );
+
         const [items] = await connection.execute(
             `SELECT
                 roi.id,
@@ -2572,7 +3190,7 @@ app.put('/admin/order-items/:itemId/pickup', checkAdmin, async (req, res) => {
     } catch (error) {
         if (connection) await connection.rollback();
         console.error('Fehler beim Markieren des Artikels als abgeholt:', error);
-        res.status(500).json({ error: 'Artikel konnte nicht als abgeholt markiert werden.' });
+        return sendTransactionFailure(res, error, 'Artikel konnte nicht als abgeholt markiert werden.');
     } finally {
         if (connection) await connection.end();
     }
@@ -2637,20 +3255,19 @@ app.put('/admin/orders/:id/pick-up', checkAdmin, async (req, res) => {
             [pickedUpByUserId, req.params.id]
         );
 
-        await connection.commit();
+        await sendPickedUpEmail(order, {
+            connection,
+            operationKey: `mail-picked-up-${order.id}`
+        });
 
-        try {
-            await sendPickedUpEmail(order);
-        } catch (mailError) {
-            console.error('Abholung gespeichert, aber Mailversand fehlgeschlagen:', mailError);
-        }
+        await connection.commit();
 
         res.json({ message: 'Bestellung wurde als abgeholt markiert.' });
 
     } catch (error) {
         if (connection) await connection.rollback();
         console.error('Fehler beim Markieren als abgeholt:', error);
-        res.status(500).json({ error: 'Bestellung konnte nicht als abgeholt markiert werden.' });
+        return sendTransactionFailure(res, error, 'Bestellung konnte nicht als abgeholt markiert werden.');
     } finally {
         if (connection) await connection.end();
     }
@@ -2753,13 +3370,12 @@ app.put('/admin/orders/:id/cancel', checkAdmin, async (req, res) => {
             await connection.execute('DELETE FROM rental_carts WHERE id = ?', [order.cart_id]);
         }
 
-        await connection.commit();
+        await sendOrderCancelledEmail(order, cancelReason, {
+            connection,
+            operationKey: `mail-order-cancelled-${order.id}`
+        });
 
-        try {
-            await sendOrderCancelledEmail(order, cancelReason);
-        } catch (mailError) {
-            console.error('Storno gespeichert, aber Mailversand fehlgeschlagen:', mailError);
-        }
+        await connection.commit();
 
         res.json({
             message: 'Bestellung wurde storniert.'
@@ -2775,9 +3391,7 @@ app.put('/admin/orders/:id/cancel', checkAdmin, async (req, res) => {
         }
 
         console.error('Fehler beim Stornieren der Bestellung:', error);
-        res.status(500).json({
-            error: 'Bestellung konnte nicht storniert werden.'
-        });
+        return sendTransactionFailure(res, error, 'Bestellung konnte nicht storniert werden.');
     } finally {
         if (connection) await connection.end();
     }
@@ -2789,6 +3403,25 @@ app.put('/admin/order-items/:itemId/cancel', checkAdmin, adminReturnMutationLimi
     try {
         connection = await mysql.createConnection(dbConfig);
         await connection.beginTransaction();
+
+        const [itemReferences] = await connection.execute(
+            `SELECT order_id, product_id
+             FROM rental_order_items
+             WHERE id = ?
+             LIMIT 1`,
+            [req.params.itemId]
+        );
+
+        if (itemReferences.length === 0) {
+            await connection.rollback();
+            return res.status(404).json({ error: 'Bestellposition nicht gefunden.' });
+        }
+
+        await lockRentalProducts(connection, [itemReferences[0].product_id]);
+        await connection.execute(
+            `SELECT id FROM rental_orders WHERE id = ? LIMIT 1 FOR UPDATE`,
+            [itemReferences[0].order_id]
+        );
 
         const [items] = await connection.execute(
             `SELECT
@@ -3034,19 +3667,20 @@ FOR UPDATE`,
             );
         }
 
-        await connection.commit();
+        await sendItemCancelledEmail(
+            {
+                id: item.order_id,
+                order_no: item.order_no,
+                customer_email: item.customer_email
+            },
+            item,
+            {
+                connection,
+                operationKey: `mail-item-cancelled-${item.order_id}-${item.id}`
+            }
+        );
 
-        try {
-            await sendItemCancelledEmail(
-                {
-                    order_no: item.order_no,
-                    customer_email: item.customer_email
-                },
-                item
-            );
-        } catch (mailError) {
-            console.error('Artikel-Storno gespeichert, aber Mailversand fehlgeschlagen:', mailError);
-        }
+        await connection.commit();
 
         res.json({
             message: 'Artikel wurde storniert.'
@@ -3062,9 +3696,7 @@ FOR UPDATE`,
         }
 
         console.error('Fehler beim Stornieren der Bestellposition:', error);
-        res.status(500).json({
-            error: 'Artikel konnte nicht storniert werden.'
-        });
+        return sendTransactionFailure(res, error, 'Artikel konnte nicht storniert werden.');
     } finally {
         if (connection) await connection.end();
     }
@@ -3237,7 +3869,11 @@ app.post('/admin/order-items/:itemId/send-return-summary', checkAdmin, async (re
                 customer_email: item.customer_email
             },
             item,
-            payments
+            payments,
+            {
+                connection,
+                operationKey: `mail-return-summary-resend-${req.params.itemId}-${crypto.randomUUID()}`
+            }
         );
 
         res.json({
@@ -3280,6 +3916,7 @@ app.put('/admin/order-items/:itemId/rental-adjustment', checkAdmin, async (req, 
             return res.status(404).json({ error: 'Bestellposition nicht gefunden.' });
         }
 
+        await lockRentalProducts(connection, [itemReferences[0].product_id]);
         await connection.execute(
             `SELECT id
              FROM rental_orders
@@ -3288,7 +3925,6 @@ app.put('/admin/order-items/:itemId/rental-adjustment', checkAdmin, async (req, 
              FOR UPDATE`,
             [itemReferences[0].order_id]
         );
-        await lockRentalProducts(connection, [itemReferences[0].product_id]);
 
         const [items] = await connection.execute(
             `SELECT 
@@ -3414,10 +4050,7 @@ FOR UPDATE`,
             });
         }
 
-        const extensionStartDate = new Date(currentEnd);
-        extensionStartDate.setUTCDate(extensionStartDate.getUTCDate() + 1);
-
-        const extensionStart = extensionStartDate.toISOString().slice(0, 10);
+        const extensionStart = addIsoCalendarDays(currentEnd, 1);
 
         const extensionDays = calculateRentalDays(extensionStart, finalEnd);
 
@@ -3470,6 +4103,7 @@ FOR UPDATE`,
 
         const baseUrl = process.env.BASE_URL.replace(/\/$/, '');
         let paymentUrl = null;
+        let paymentOperationKey = null;
 
         if (amountDue > 0 && item.payment_method === 'cash') {
             await connection.execute(
@@ -3494,63 +4128,85 @@ FOR UPDATE`,
 
             paymentUrl = null;
         } else if (amountDue > 0) {
-            const payment = await createMolliePaymentForOrder({
+            paymentOperationKey = `rental-adjustment-${item.order_id}-${req.params.itemId}-${String(finalEnd).slice(0, 10)}-${amountDue.toFixed(2)}`;
+            const [paymentRecord] = await connection.execute(
+                `INSERT INTO rental_order_payments
+                 (order_id, order_item_id, payment_type, payment_method, payment_status,
+                  amount, external_operation_key, note)
+                 VALUES (?, ?, 'rental_adjustment', 'online', 'pending', ?, ?, ?)`,
+                [
+                    item.order_id,
+                    req.params.itemId,
+                    amountDue,
+                    paymentOperationKey,
+                    'Mollie-Nachzahlung für Mietzeitraumanpassung vorgemerkt'
+                ]
+            );
+
+            await enqueueMolliePaymentCreation(connection, {
+                operationKey: paymentOperationKey,
+                payment: {
                 id: item.order_id,
                 orderNo: item.order_no,
                 totalAmount: amountDue,
                 description: `Nachzahlung Mietzeitraum ${item.order_no} - ${item.title} (#${req.params.itemId})`,
                 type: 'rental_adjustment',
                 itemId: req.params.itemId,
-                idempotencyKey: `rental-adjustment-${item.order_id}-${req.params.itemId}-${String(finalEnd).slice(0, 10)}-${amountDue.toFixed(2)}`,
                 redirectUrl: `${baseUrl}/index.html?payment=extension&orderId=${encodeURIComponent(item.order_id)}&paymentType=rental_adjustment&itemId=${encodeURIComponent(req.params.itemId)}`
+                },
+                application: {
+                    kind: 'payment_records',
+                    paymentRecordIds: [paymentRecord.insertId],
+                    successMail: {
+                        operationKey: `mail-rental-adjustment-${paymentOperationKey}`,
+                        message: {
+                            to: item.customer_email,
+                            subject: `Mietzeitraum zu Auftrag ${item.order_no} wurde angepasst`,
+                            htmlTemplate: `
+                                <h2>Ihr Mietzeitraum wurde angepasst</h2>
+                                <p>Der Mietzeitraum für <strong>${escapeHtml(item.title)}</strong> wurde geändert.</p>
+                                <p>Offener Betrag: <strong>${amountDue.toFixed(2)} €</strong></p>
+                                <p><a href="{{CHECKOUT_URL}}">Jetzt online bezahlen</a></p>
+                            `,
+                            textTemplate: `Mietzeitraum angepasst. Offener Betrag: ${amountDue.toFixed(2)} €. Jetzt bezahlen: {{CHECKOUT_URL}}`
+                        }
+                    }
+                }
             });
+        }
 
-            paymentUrl = getMollieCheckoutUrl(payment);
-
-            if (!paymentUrl) {
-                throw new Error('Mollie Checkout-URL für die Verlängerung fehlt.');
-            }
-
-            await connection.execute(
-                `INSERT INTO rental_order_payments
-         (
-            order_id,
-            order_item_id,
-            payment_type,
-            payment_method,
-            payment_status,
-            amount,
-            mollie_payment_id,
-            checkout_url
-         )
-         VALUES (?, ?, 'rental_adjustment', 'online', 'pending', ?, ?, ?)`,
-                [
-                    item.order_id,
-                    req.params.itemId,
-                    amountDue,
-                    payment.id,
-                    paymentUrl
-                ]
+        if (!paymentOperationKey) {
+            await sendRentalAdjustmentEmailWithPayment(
+                {
+                    id: item.order_id,
+                    order_no: item.order_no,
+                    customer_email: item.customer_email
+                },
+                {
+                    ...item,
+                    adjusted_rental_end: String(finalEnd).slice(0, 10)
+                },
+                paymentUrl,
+                amountDue,
+                {
+                    connection,
+                    operationKey: `mail-rental-adjustment-${item.order_id}-${req.params.itemId}-${String(finalEnd).slice(0, 10)}-${amountDue.toFixed(2)}`
+                }
             );
         }
 
         await connection.commit();
 
-        try {
-            await sendRentalAdjustmentEmailWithPayment(
-                {
-                    order_no: item.order_no,
-                    customer_email: item.customer_email
-                },
-                item,
-                paymentUrl,
-                amountDue
-            );
-        } catch (mailError) {
-            console.error(
-                'Mietzeitraum gespeichert, aber Mailversand fehlgeschlagen:',
-                mailError
-            );
+        if (paymentOperationKey) {
+            try {
+                const payment = await processExternalEffectByKey(paymentOperationKey);
+                paymentUrl = payment.checkoutUrl || null;
+            } catch (paymentError) {
+                console.error(
+                    'Mietzeitraum gespeichert; Mollie-Nachzahlung wird erneut versucht:',
+                    paymentError.message
+                );
+            }
         }
 
         res.json({
@@ -3567,9 +4223,7 @@ FOR UPDATE`,
             }
         }
         console.error('Fehler beim Speichern des angepassten Mietzeitraums:', error);
-        res.status(500).json({
-            error: 'Mietzeitraum konnte nicht gespeichert werden.'
-        });
+        return sendTransactionFailure(res, error, 'Mietzeitraum konnte nicht gespeichert werden.');
     } finally {
         if (connection) await connection.end();
     }
@@ -3586,6 +4240,34 @@ function calculateLateDays(actualReturnDate, plannedReturnDate) {
     }
 
     return Math.ceil((actual - planned) / (1000 * 60 * 60 * 24));
+}
+
+function normalizePaymentConcurrencySnapshot(payment) {
+    if (!payment) return null;
+
+    return {
+        id: Number(payment.id),
+        paymentMethod: String(payment.payment_method || ''),
+        molliePaymentId: String(payment.mollie_payment_id || ''),
+        paymentStatus: String(payment.payment_status || ''),
+        amount: roundMoney(Number(payment.amount || 0))
+    };
+}
+
+function paymentConcurrencySnapshotsMatch(expectedPayment, lockedPayment) {
+    const expected = normalizePaymentConcurrencySnapshot(expectedPayment);
+    const locked = normalizePaymentConcurrencySnapshot(lockedPayment);
+
+    return JSON.stringify(expected) === JSON.stringify(locked);
+}
+
+function paymentConcurrencySnapshotListsMatch(expectedPayments, lockedPayments) {
+    if (expectedPayments.length !== lockedPayments.length) return false;
+
+    const expectedById = new Map(expectedPayments.map(payment => [Number(payment.id), payment]));
+    return lockedPayments.every(payment =>
+        paymentConcurrencySnapshotsMatch(expectedById.get(Number(payment.id)), payment)
+    );
 }
 
 app.put('/admin/order-items/:itemId/return', checkAdmin, adminReturnMutationLimiter, async (req, res) => {
@@ -3608,9 +4290,60 @@ app.put('/admin/order-items/:itemId/return', checkAdmin, adminReturnMutationLimi
         } = req.body;
 
         connection = await mysql.createConnection(dbConfig);
+
+        const [adjustmentSnapshotRows] = await connection.execute(
+            `SELECT id, payment_method, mollie_payment_id, payment_status, amount
+             FROM rental_order_payments
+             WHERE order_item_id = ?
+             AND payment_type = 'rental_adjustment'
+             AND payment_status IN (
+                'pending', 'open', 'authorized', 'failed', 'cancelled', 'expired'
+             )
+             ORDER BY id`,
+            [req.params.itemId]
+        );
+        const prefetchedAdjustmentPayments = new Map();
+
+        try {
+            const providerPayments = await Promise.all(
+                [...new Set(
+                    adjustmentSnapshotRows
+                        .filter(payment => payment.payment_method === 'online' && payment.mollie_payment_id)
+                        .map(payment => payment.mollie_payment_id)
+                )].map(async paymentId => [paymentId, await getMolliePayment(paymentId)])
+            );
+            providerPayments.forEach(([paymentId, payment]) => {
+                prefetchedAdjustmentPayments.set(paymentId, payment);
+            });
+        } catch (providerError) {
+            console.error('Mollie-Zahlungsstatus konnte vor der Rückgabe nicht geladen werden:', providerError);
+            return res.status(503).json({
+                error: 'Der Zahlungsanbieter ist vorübergehend nicht erreichbar. Bitte erneut versuchen.'
+            });
+        }
+
         await connection.beginTransaction();
 
         const processedByUserId = await getUserIdByEmail(connection, req.session.user);
+
+        const [itemReferences] = await connection.execute(
+            `SELECT order_id, product_id
+             FROM rental_order_items
+             WHERE id = ?
+             LIMIT 1`,
+            [req.params.itemId]
+        );
+
+        if (itemReferences.length === 0) {
+            await connection.rollback();
+            return res.status(404).json({ error: 'Bestellposition nicht gefunden.' });
+        }
+
+        await lockRentalProducts(connection, [itemReferences[0].product_id]);
+        await connection.execute(
+            `SELECT id FROM rental_orders WHERE id = ? LIMIT 1 FOR UPDATE`,
+            [itemReferences[0].order_id]
+        );
 
         const [items] = await connection.execute(
             `SELECT 
@@ -3766,16 +4499,25 @@ FOR UPDATE`,
                         : 'returned_ok';
 
         const [openAdjustmentRows] = await connection.execute(
-            `SELECT id, payment_method, mollie_payment_id, amount
+            `SELECT id, payment_method, mollie_payment_id, payment_status, amount
              FROM rental_order_payments
              WHERE order_id = ?
              AND order_item_id = ?
              AND payment_type = 'rental_adjustment'
              AND payment_status IN (
                 'pending', 'open', 'authorized', 'failed', 'cancelled', 'expired'
-             )`,
+             )
+             ORDER BY id
+             FOR UPDATE`,
             [item.order_id, req.params.itemId]
         );
+
+        if (!paymentConcurrencySnapshotListsMatch(adjustmentSnapshotRows, openAdjustmentRows)) {
+            await connection.rollback();
+            return res.status(409).json({
+                error: 'Die Nachzahlung wurde gleichzeitig geändert. Bitte Rückgabe erneut laden.'
+            });
+        }
 
         let openRentalAdjustmentAmount = 0;
 
@@ -3785,11 +4527,17 @@ FOR UPDATE`,
                 continue;
             }
 
-            const molliePayment = await getMolliePayment(adjustment.mollie_payment_id);
+            const molliePayment = prefetchedAdjustmentPayments.get(adjustment.mollie_payment_id);
+            if (!molliePayment) {
+                await connection.rollback();
+                return res.status(503).json({
+                    error: 'Der Zahlungsstatus ist nicht verfügbar. Bitte erneut versuchen.'
+                });
+            }
             const mollieStatus = mapMolliePaymentStatus(molliePayment.status);
 
             if (isOpenPaymentStatus(mollieStatus)) {
-                await cancelMolliePayment(adjustment.mollie_payment_id);
+                await enqueueMollieCancellationIntent(connection, adjustment.mollie_payment_id);
                 openRentalAdjustmentAmount += Number(adjustment.amount || 0);
             } else if (mollieStatus !== 'paid') {
                 openRentalAdjustmentAmount += Number(adjustment.amount || 0);
@@ -4005,53 +4753,21 @@ FOR UPDATE`,
                     );
                 }
 
-                try {
-                    const refund = await createMollieRefundForPayment({
-                        paymentId: originalPaymentId,
-                        amount: calculatedDepositRefundAmount,
-                        description: `Kautionsrückerstattung ${item.order_no} - ${item.title} (#${req.params.itemId})`,
-                        metadata: {
-                            orderId: String(item.order_id),
-                            itemId: String(req.params.itemId),
-                            type: 'deposit_refund'
-                        },
-                        idempotencyKey: `deposit-refund-${item.order_id}-${req.params.itemId}`
-                    });
-                    const refundStatus = mapMollieRefundStatus(refund.status);
-
-                    await connection.execute(
-                        `INSERT INTO rental_order_payments
-                 (
-                    order_id,
-                    order_item_id,
-                    payment_type,
-                    payment_method,
-                    payment_status,
-                    amount,
-                    mollie_payment_id,
-                    mollie_refund_id,
-                    note,
-                    paid_at
-                 )
-                 VALUES (?, ?, 'deposit_refund', 'online', ?, ?, ?, ?, ?,
-                    CASE WHEN ? = 'paid' THEN NOW() ELSE NULL END)`,
-                        [
-                            item.order_id,
-                            req.params.itemId,
-                            refundStatus,
-                            -Math.abs(calculatedDepositRefundAmount),
-                            originalPaymentId,
-                            refund.id,
-                            refundStatus === 'paid'
-                                ? 'Kaution automatisch per Mollie erstattet'
-                                : 'Kautionsrückerstattung bei Mollie beauftragt',
-                            refundStatus
-                        ]
-                    );
-                } catch (refundError) {
-                    console.error('Mollie-Refund fehlgeschlagen:', refundError);
-                    throw refundError;
-                }
+                await persistOnlineRefundIntent(connection, {
+                    operationKey: `deposit-refund-${item.order_id}-${req.params.itemId}`,
+                    orderId: item.order_id,
+                    orderItemId: req.params.itemId,
+                    paymentType: 'deposit_refund',
+                    paymentId: originalPaymentId,
+                    amount: calculatedDepositRefundAmount,
+                    description: `Kautionsrückerstattung ${item.order_no} - ${item.title} (#${req.params.itemId})`,
+                    metadata: {
+                        orderId: String(item.order_id),
+                        itemId: String(req.params.itemId),
+                        type: 'deposit_refund'
+                    },
+                    note: 'Kautionsrückerstattung bei Mollie vorgemerkt'
+                });
             } else if (initialPaymentMethod === 'cash') {
                 await connection.execute(
                     `INSERT INTO rental_order_payments
@@ -4090,7 +4806,7 @@ FOR UPDATE`,
      LIMIT 1`,
             [item.order_id, req.params.itemId]
         );
-        let returnChargeEmail = null;
+        let returnChargeOperationKey = null;
 
         if (
             customerAdditionalDue > 0 &&
@@ -4120,67 +4836,71 @@ FOR UPDATE`,
             customerAdditionalDue > 0 &&
             existingOpenReturnCharges.length === 0
         ) {
-            const payment = await createMolliePaymentForOrder({
+            returnChargeOperationKey = `return-charge-${item.order_id}-${req.params.itemId}-${customerAdditionalDue.toFixed(2)}`;
+            const [paymentRecord] = await connection.execute(
+                `INSERT INTO rental_order_payments
+                 (order_id, order_item_id, payment_type, payment_method, payment_status,
+                  amount, external_operation_key, note)
+                 VALUES (?, ?, 'return_additional_charge', 'online', 'pending', ?, ?, ?)`,
+                [
+                    item.order_id,
+                    req.params.itemId,
+                    customerAdditionalDue,
+                    returnChargeOperationKey,
+                    'Mollie-Nachzahlung für Rückgabe vorgemerkt'
+                ]
+            );
+
+            await enqueueMolliePaymentCreation(connection, {
+                operationKey: returnChargeOperationKey,
+                payment: {
                 id: item.order_id,
                 orderNo: item.order_no,
                 totalAmount: customerAdditionalDue,
                 description: `Nachzahlung Rückgabe ${item.order_no} - ${item.title} (#${req.params.itemId})`,
                 type: 'return_additional_charge',
                 redirectUrl: `${process.env.BASE_URL.replace(/\/$/, '')}/index.html?payment=return_charge&orderId=${encodeURIComponent(item.order_id)}&paymentType=return_additional_charge&itemId=${encodeURIComponent(req.params.itemId)}`,
-                itemId: req.params.itemId,
-                idempotencyKey: `return-charge-${item.order_id}-${req.params.itemId}-${customerAdditionalDue.toFixed(2)}`
+                itemId: req.params.itemId
+                },
+                application: {
+                    kind: 'payment_records',
+                    paymentRecordIds: [paymentRecord.insertId],
+                    successMail: {
+                        operationKey: `mail-return-charge-${returnChargeOperationKey}`,
+                        message: {
+                            to: item.customer_email,
+                            subject: `Nachzahlung zu Mietauftrag ${item.order_no}`,
+                            htmlTemplate: `
+                                <h2>Nachzahlung zu Ihrem Mietartikel</h2>
+                                <p>Für <strong>${escapeHtml(item.title)}</strong> wurde eine Nachzahlung von <strong>${customerAdditionalDue.toFixed(2)} €</strong> erfasst.</p>
+                                <p><a href="{{CHECKOUT_URL}}">Jetzt online bezahlen</a></p>
+                            `,
+                            textTemplate: `Nachzahlung ${customerAdditionalDue.toFixed(2)} €. Jetzt bezahlen: {{CHECKOUT_URL}}`
+                        }
+                    }
+                }
             });
-
-            const checkoutUrl = getMollieCheckoutUrl(payment);
-
-            if (!checkoutUrl) {
-                throw new Error('Mollie Checkout-URL für die Rückgabe-Nachzahlung fehlt.');
-            }
-
-            await connection.execute(
-                `INSERT INTO rental_order_payments
-             (
-                order_id,
-                order_item_id,
-                payment_type,
-                payment_method,
-                payment_status,
-                amount,
-                mollie_payment_id,
-                checkout_url
-             )
-             VALUES (?, ?, 'return_additional_charge', 'online', 'pending', ?, ?, ?)`,
-                    [
-                        item.order_id,
-                        req.params.itemId,
-                        customerAdditionalDue,
-                        payment.id,
-                        checkoutUrl
-                ]
-            );
-
-            returnChargeEmail = { checkoutUrl };
         }
 
         await refreshReturnCaseStatus(connection, item.order_id);
         await connection.commit();
 
-        if (returnChargeEmail) {
+        if (returnChargeOperationKey) {
             try {
-                await sendReturnAdditionalChargeEmail(
-                    {
-                        order_no: item.order_no,
-                        customer_email: item.customer_email
-                    },
-                    item,
-                    returnChargeEmail.checkoutUrl,
-                    customerAdditionalDue,
-                    normalizedAdditionalChargeReason
+                const payment = await processExternalEffectByKey(returnChargeOperationKey);
+                if (!payment.checkoutUrl) {
+                    console.error('Mollie-Nachzahlung wurde ohne Checkout-URL abgeschlossen.');
+                }
+            } catch (paymentError) {
+                console.error(
+                    'Rückgabe gespeichert; Mollie-Nachzahlung wird erneut versucht:',
+                    paymentError.message
                 );
-            } catch (mailError) {
-                console.error('Rückgabe gespeichert, aber Nachzahlungs-Mail fehlgeschlagen:', mailError);
             }
         }
+
+        // The payment completion transaction enqueues the durable checkout mail,
+        // including after a delayed worker recovery.
 
         res.json({
             message: 'Rückgabe der Bestellposition wurde gespeichert.',
@@ -4196,7 +4916,7 @@ FOR UPDATE`,
             }
         }
         console.error('Fehler bei Positionsrückgabe:', error);
-        res.status(500).json({ error: 'Positionsrückgabe konnte nicht gespeichert werden.' });
+        return sendTransactionFailure(res, error, 'Positionsrückgabe konnte nicht gespeichert werden.');
     } finally {
         if (connection) await connection.end();
     }
@@ -4217,10 +4937,15 @@ app.delete('/admin/return-images/:id', checkAdmin, async (req, res) => {
         );
 
         if (rows.length === 0) {
+            await connection.rollback();
             return res.status(404).json({ error: 'Foto nicht gefunden.' });
         }
 
-        const imagePath = path.join(__dirname, 'public', rows[0].image_path);
+        const filename = getStoredReturnImageFilename(rows[0].image_path);
+        if (!filename) {
+            return res.status(409).json({ error: 'Der gespeicherte Fotopfad ist ungültig.' });
+        }
+        const imagePath = path.join(RETURN_IMAGE_DIRECTORY, filename);
 
         await connection.execute(
             `DELETE FROM rental_order_return_images WHERE id = ?`,
@@ -4242,24 +4967,26 @@ app.delete('/admin/return-images/:id', checkAdmin, async (req, res) => {
     }
 });
 
-app.post('/password-reset-request', loginLimiter, async (req, res) => {
-    const { email } = req.body;
+app.post('/password-reset-request', accountMutationLimiter, async (req, res) => {
+    const email = normalizeEmail(req.body.email);
 
-    if (!email) {
-        return res.status(400).send('E-Mail erforderlich.');
+    if (!isValidEmail(email)) {
+        return res.status(400).send('Gültige E-Mail erforderlich.');
     }
 
     let connection;
 
     try {
         connection = await mysql.createConnection(dbConfig);
+        await connection.beginTransaction();
 
         const [rows] = await connection.execute(
             'SELECT id FROM users WHERE username = ? LIMIT 1',
-            [email.toLowerCase()]
+            [email]
         );
 
         if (rows.length === 0) {
+            await connection.rollback();
             // Wichtig: Keine Info leaken
             return res.status(200).send('Wenn die E-Mail existiert, wurde ein Link versendet.');
         }
@@ -4271,7 +4998,7 @@ app.post('/password-reset-request', loginLimiter, async (req, res) => {
             `UPDATE users
              SET reset_token = ?, reset_token_expires = ?
              WHERE username = ?`,
-            [token, expires, email.toLowerCase()]
+            [token, expires, email]
         );
 
         const baseUrl = process.env.BASE_URL;
@@ -4280,18 +5007,18 @@ app.post('/password-reset-request', loginLimiter, async (req, res) => {
             throw new Error('BASE_URL fehlt in der .env');
         }
 
-        const resetUrl = `${baseUrl.replace(/\/$/, '')}/login.html?resetToken=${token}`;
+        const resetUrl = `${baseUrl.replace(/\/$/, '')}/login.html#resetToken=${token}`;
 
-        try {
-            await sendPasswordResetEmail(email.toLowerCase(), resetUrl);
-        } catch (mailError) {
-            console.error('Fehler beim Versand der Passwort-Reset-Mail:', mailError);
-            return res.status(500).send('Reset-Link konnte nicht versendet werden.');
-        }
+        await sendPasswordResetEmail(email, resetUrl, {
+            connection,
+            operationKey: `mail-password-reset-${token}`
+        });
+        await connection.commit();
 
         return res.status(200).send('Wenn die E-Mail existiert, wurde ein Link versendet.');
 
     } catch (err) {
+        if (connection) await connection.rollback();
         console.error(err);
         return res.status(500).send('Fehler beim Anfordern des Reset-Links.');
     } finally {
@@ -4299,51 +5026,63 @@ app.post('/password-reset-request', loginLimiter, async (req, res) => {
     }
 });
 
-app.post('/password-reset', async (req, res) => {
+app.post('/password-reset', accountMutationLimiter, async (req, res) => {
     const { token, password } = req.body;
 
-    if (!token || !password) {
+    if (
+        typeof token !== 'string' ||
+        !/^[a-f0-9]{64}$/u.test(token) ||
+        typeof password !== 'string'
+    ) {
         return res.status(400).send('Ungültige Anfrage.');
     }
 
-    const passwordPolicyRegex = /^(?=.*[0-9])(?=.*[^A-Za-z0-9]).{8,}$/;
-
-    if (!passwordPolicyRegex.test(password)) {
-        return res.status(400).send('Das Passwort muss mindestens 8 Zeichen, eine Zahl und ein Sonderzeichen enthalten.');
+    if (!isValidPassword(password)) {
+        return res.status(400).send('Das Passwort muss 8 bis 72 Bytes, eine Zahl und ein Sonderzeichen enthalten.');
     }
 
+    const hashedPassword = await bcrypt.hash(password, 10);
     let connection;
 
     try {
         connection = await mysql.createConnection(dbConfig);
+        await connection.beginTransaction();
 
         const [rows] = await connection.execute(
             `SELECT id, reset_token_expires
              FROM users
              WHERE reset_token = ?
-             LIMIT 1`,
+             LIMIT 1
+             FOR UPDATE`,
             [token]
         );
 
         if (rows.length === 0) {
+            await connection.rollback();
             return res.status(400).send('Ungültiger oder abgelaufener Token.');
         }
 
         if (new Date(rows[0].reset_token_expires) < new Date()) {
+            await connection.rollback();
             return res.status(400).send('Token abgelaufen.');
         }
 
-        const hashedPassword = await bcrypt.hash(password, 10);
-
-        await connection.execute(
+        const [updateResult] = await connection.execute(
             `UPDATE users
-             SET password = ?, reset_token = NULL, reset_token_expires = NULL
-             WHERE id = ?`,
-            [hashedPassword, rows[0].id]
+             SET password = ?, reset_token = NULL, reset_token_expires = NULL,
+                 auth_version = auth_version + 1
+             WHERE id = ? AND reset_token = ? AND reset_token_expires > NOW()`,
+            [hashedPassword, rows[0].id, token]
         );
+        if (Number(updateResult.affectedRows) !== 1) {
+            await connection.rollback();
+            return res.status(400).send('Ungültiger oder abgelaufener Token.');
+        }
+        await connection.commit();
 
         return res.status(200).send('Passwort erfolgreich geändert.');
     } catch (err) {
+        if (connection) await connection.rollback();
         console.error(err);
         return res.status(500).send('Fehler beim Zurücksetzen.');
     } finally {
@@ -4426,31 +5165,44 @@ app.get('/admin/opening-hours', checkAdmin, async (req, res) => {
 app.put('/admin/opening-hours', checkAdmin, async (req, res) => {
     const { openingHours } = req.body;
 
-    if (!Array.isArray(openingHours)) {
+    if (!Array.isArray(openingHours) || openingHours.length < 1 || openingHours.length > 7) {
         return res.status(400).json({ error: 'Ungültige Öffnungszeiten.' });
+    }
+
+    const timePattern = /^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/u;
+    const weekdays = new Set();
+    const normalizedOpeningHours = [];
+
+    for (const day of openingHours) {
+        const weekday = Number(day?.weekday);
+        const isOpen = [true, 1, '1'].includes(day?.is_open) ? 1 : 0;
+        const openTime = isOpen && typeof day?.open_time === 'string' ? day.open_time.trim() : null;
+        const closeTime = isOpen && typeof day?.close_time === 'string' ? day.close_time.trim() : null;
+
+        if (!Number.isInteger(weekday) || weekday < 0 || weekday > 6 || weekdays.has(weekday)) {
+            return res.status(400).json({ error: 'Ungültiger oder doppelter Wochentag.' });
+        }
+
+        if (
+            isOpen &&
+            (!timePattern.test(openTime) || !timePattern.test(closeTime) || openTime >= closeTime)
+        ) {
+            return res.status(400).json({
+                error: 'Bei geöffneten Tagen müssen gültige Öffnungs- und Schließzeiten angegeben werden.'
+            });
+        }
+
+        weekdays.add(weekday);
+        normalizedOpeningHours.push({ weekday, isOpen, openTime, closeTime });
     }
 
     let connection;
 
     try {
         connection = await mysql.createConnection(dbConfig);
+        await connection.beginTransaction();
 
-        for (const day of openingHours) {
-            const weekday = Number(day.weekday);
-            const isOpen = day.is_open ? 1 : 0;
-            const openTime = isOpen ? day.open_time : null;
-            const closeTime = isOpen ? day.close_time : null;
-
-            if (weekday < 0 || weekday > 6) {
-                return res.status(400).json({ error: 'Ungültiger Wochentag.' });
-            }
-
-            if (isOpen && (!openTime || !closeTime || openTime >= closeTime)) {
-                return res.status(400).json({
-                    error: 'Bei geöffneten Tagen müssen gültige Öffnungs- und Schließzeiten angegeben werden.'
-                });
-            }
-
+        for (const { weekday, isOpen, openTime, closeTime } of normalizedOpeningHours) {
             await connection.execute(
                 `INSERT INTO opening_hours (weekday, is_open, open_time, close_time)
                  VALUES (?, ?, ?, ?)
@@ -4462,10 +5214,19 @@ app.put('/admin/opening-hours', checkAdmin, async (req, res) => {
             );
         }
 
-        res.json({ message: 'Öffnungszeiten wurden gespeichert.' });
+        await connection.commit();
+
+        return res.json({ message: 'Öffnungszeiten wurden gespeichert.' });
     } catch (error) {
+        if (connection) {
+            try {
+                await connection.rollback();
+            } catch (rollbackError) {
+                console.error('Rollback der Öffnungszeiten fehlgeschlagen:', rollbackError);
+            }
+        }
         console.error('Fehler beim Speichern der Öffnungszeiten:', error);
-        res.status(500).json({ error: 'Öffnungszeiten konnten nicht gespeichert werden.' });
+        return res.status(500).json({ error: 'Öffnungszeiten konnten nicht gespeichert werden.' });
     } finally {
         if (connection) await connection.end();
     }
@@ -4473,6 +5234,11 @@ app.put('/admin/opening-hours', checkAdmin, async (req, res) => {
 
 app.post('/orders/:id/mollie-checkout', async (req, res) => {
     let connection;
+    const orderId = parseOrderId(req.params.id);
+
+    if (!orderId) {
+        return res.status(400).json({ error: 'Ungültige Bestell-ID.' });
+    }
 
     try {
         connection = await mysql.createConnection(dbConfig);
@@ -4488,14 +5254,15 @@ app.post('/orders/:id/mollie-checkout', async (req, res) => {
                 ro.payment_status AS paymentStatus,
                 ro.cart_id AS cartId,
                 ro.customer_email AS customerEmail,
+                ro.guest_access_token_hash AS guestAccessTokenHash,
+                ro.guest_access_token_expires_at AS guestAccessTokenExpiresAt,
                 rc.session_id AS cartSessionId,
                 rc.user_email AS cartUserEmail
              FROM rental_orders ro
              LEFT JOIN rental_carts rc ON rc.id = ro.cart_id
              WHERE ro.id = ?
-             LIMIT 1
-             FOR UPDATE`,
-            [req.params.id]
+             LIMIT 1`,
+            [orderId]
         );
 
         if (orders.length === 0) {
@@ -4505,15 +5272,9 @@ app.post('/orders/:id/mollie-checkout', async (req, res) => {
             });
         }
 
-        const order = orders[0];
+        let order = orders[0];
 
-        const isAdmin = req.session.role === 'global_admin';
-        const isCustomer = req.session.user &&
-            String(req.session.user).toLowerCase() === String(order.customerEmail || '').toLowerCase();
-        const isGuestOwner = !req.session.user && req.session.cartKey &&
-            req.session.cartKey === order.cartSessionId && !order.cartUserEmail;
-
-        if (!isAdmin && !isCustomer && !isGuestOwner) {
+        if (!mayAccessOrder(req, order)) {
             await connection.rollback();
             return res.status(403).json({ error: 'Kein Zugriff auf diese Bestellung.' });
         }
@@ -4532,7 +5293,7 @@ app.post('/orders/:id/mollie-checkout', async (req, res) => {
             });
         }
 
-        const [items] = await connection.execute(
+        let [items] = await connection.execute(
             `SELECT id, product_id,
                     DATE_FORMAT(rental_start, '%Y-%m-%d') AS rentalStart,
                     DATE_FORMAT(rental_end, '%Y-%m-%d') AS rentalEnd,
@@ -4549,9 +5310,69 @@ app.post('/orders/:id/mollie-checkout', async (req, res) => {
             return res.status(409).json({ error: 'Die Bestellung enthält keine aktive Mietposition.' });
         }
 
-        await lockRentalProducts(
+        const lockedProducts = await lockRentalProducts(
             connection,
             items.map(item => item.product_id)
+        );
+        if (lockedProducts.some(product => Number(product.is_active) !== 1)) {
+            await connection.rollback();
+            return res.status(409).json({
+                error: 'Mindestens ein Produkt dieser Bestellung ist nicht mehr aktiv.'
+            });
+        }
+
+        const [lockedOrders] = await connection.execute(
+            `SELECT
+                ro.id,
+                ro.order_no AS orderNo,
+                ro.total_amount AS totalAmount,
+                ro.status,
+                ro.payment_method AS paymentMethod,
+                ro.payment_status AS paymentStatus,
+                ro.cart_id AS cartId,
+                ro.customer_email AS customerEmail,
+                ro.guest_access_token_hash AS guestAccessTokenHash,
+                ro.guest_access_token_expires_at AS guestAccessTokenExpiresAt,
+                rc.session_id AS cartSessionId,
+                rc.user_email AS cartUserEmail
+             FROM rental_orders ro
+             LEFT JOIN rental_carts rc ON rc.id = ro.cart_id
+             WHERE ro.id = ?
+             LIMIT 1
+             FOR UPDATE`,
+            [orderId]
+        );
+
+        if (lockedOrders.length === 0 || !mayAccessOrder(req, lockedOrders[0])) {
+            await connection.rollback();
+            return res.status(403).json({ error: 'Kein Zugriff auf diese Bestellung.' });
+        }
+
+        order = lockedOrders[0];
+
+        if (
+            order.paymentMethod !== 'online' ||
+            !['reserved', 'pending_payment', 'payment_failed', 'expired'].includes(order.status) ||
+            order.paymentStatus === 'paid'
+        ) {
+            await connection.rollback();
+            return res.status(409).json({
+                error: 'Für diese Bestellung kann kein Online-Checkout mehr erstellt werden.'
+            });
+        }
+
+        [items] = await connection.execute(
+            `SELECT id, product_id,
+                    DATE_FORMAT(rental_start, '%Y-%m-%d') AS rentalStart,
+                    DATE_FORMAT(rental_end, '%Y-%m-%d') AS rentalEnd,
+                    price_per_day AS pricePerDay,
+                    deposit
+             FROM rental_order_items
+             WHERE order_id = ?
+             AND COALESCE(item_status, 'active') IN ('active', 'expired')
+             ORDER BY product_id ASC, id ASC
+             FOR UPDATE`,
+            [order.id]
         );
 
         await cancelOpenMolliePayments(connection, order.id, {
@@ -4659,63 +5480,104 @@ app.post('/orders/:id/mollie-checkout', async (req, res) => {
             });
         }
 
+        const [pendingCheckoutEffects] = await connection.execute(
+            `SELECT rop.external_operation_key AS operationKey
+             FROM rental_order_payments rop
+             JOIN external_effects_outbox effect
+               ON effect.operation_key = rop.external_operation_key
+             WHERE rop.order_id = ?
+             AND rop.payment_type = 'initial_payment'
+             AND rop.external_operation_key IS NOT NULL
+             AND rop.mollie_payment_id IS NULL
+             AND effect.status IN ('pending', 'processing', 'retry')
+             ORDER BY rop.id DESC
+             LIMIT 1
+             FOR UPDATE`,
+            [order.id]
+        );
+
+        if (pendingCheckoutEffects.length > 0) {
+            const operationKey = pendingCheckoutEffects[0].operationKey;
+            await connection.commit();
+
+            try {
+                const payment = await processExternalEffectByKey(operationKey);
+                if (payment.checkoutUrl) {
+                    return res.json({ success: true, checkoutUrl: payment.checkoutUrl });
+                }
+            } catch (paymentError) {
+                console.error('Bereits vorgemerkter Checkout wartet auf Recovery:', paymentError.message);
+            }
+
+            return res.status(202).json({
+                success: false,
+                paymentPending: true,
+                message: 'Der bereits vorgemerkte Online-Checkout wird vorbereitet.'
+            });
+        }
+
         const [checkoutAttemptRows] = await connection.execute(
-            `SELECT COUNT(DISTINCT mollie_payment_id) AS attemptCount
+            `SELECT COUNT(DISTINCT COALESCE(mollie_payment_id, external_operation_key)) AS attemptCount
              FROM rental_order_payments
              WHERE order_id = ?
              AND payment_type = 'initial_payment'
-             AND mollie_payment_id IS NOT NULL`,
+             AND (mollie_payment_id IS NOT NULL OR external_operation_key IS NOT NULL)`,
             [order.id]
         );
         const checkoutAttempt = Number(checkoutAttemptRows[0]?.attemptCount || 0) + 1;
-
-        const payment = await createMolliePaymentForOrder({
-            ...order,
-            idempotencyKey: `checkout-retry-${order.id}-${checkoutAttempt}`
-        });
-
-        const checkoutUrl = getMollieCheckoutUrl(payment);
-
-        if (!checkoutUrl) {
-            throw new Error('Mollie Checkout-URL fehlt.');
-        }
+        const operationKey = `checkout-retry-${order.id}-${checkoutAttempt}`;
 
         const rentalTotal = roundMoney(items.reduce((sum, item) => {
             return sum + calculateRentalDays(item.rentalStart, item.rentalEnd) * Number(item.pricePerDay || 0);
         }, 0));
         const depositTotal = roundMoney(items.reduce((sum, item) => sum + Number(item.deposit || 0), 0));
 
-        await connection.execute(
+        const [initialRecord] = await connection.execute(
             `INSERT INTO rental_order_payments
-             (order_id, order_item_id, payment_type, payment_method, payment_status, amount, mollie_payment_id, note)
-             VALUES
-                (?, NULL, 'initial_payment', 'online', 'pending', ?, ?, 'Erneuter Online-Checkout: Gesamtzahlung'),
-                (?, NULL, 'rental', 'online', 'pending', ?, ?, 'Erneuter Online-Checkout: Mietanteil'),
-                (?, NULL, 'deposit', 'online', 'pending', ?, ?, 'Erneuter Online-Checkout: Kautionsanteil')`,
-            [
-                order.id, Number(order.totalAmount), payment.id,
-                order.id, rentalTotal, payment.id,
-                order.id, depositTotal, payment.id
-            ]
+             (order_id, order_item_id, payment_type, payment_method, payment_status,
+              amount, external_operation_key, note)
+             VALUES (?, NULL, 'initial_payment', 'online', 'pending', ?, ?,
+                     'Erneuter Online-Checkout: Gesamtzahlung')`,
+            [order.id, Number(order.totalAmount), operationKey]
+        );
+        const [rentalRecord] = await connection.execute(
+            `INSERT INTO rental_order_payments
+             (order_id, order_item_id, payment_type, payment_method, payment_status, amount, note)
+             VALUES (?, NULL, 'rental', 'online', 'pending', ?,
+                     'Erneuter Online-Checkout: Mietanteil')`,
+            [order.id, rentalTotal]
+        );
+        const [depositRecord] = await connection.execute(
+            `INSERT INTO rental_order_payments
+             (order_id, order_item_id, payment_type, payment_method, payment_status, amount, note)
+             VALUES (?, NULL, 'deposit', 'online', 'pending', ?,
+                     'Erneuter Online-Checkout: Kautionsanteil')`,
+            [order.id, depositTotal]
         );
 
         await connection.execute(
             `UPDATE rental_orders
- SET mollie_payment_id = ?,
-     mollie_checkout_url = ?,
-     mollie_payment_status = ?,
-     payment_method = 'online',
+ SET payment_method = 'online',
      payment_status = 'pending',
      status = 'reserved',
      reserved_until = DATE_ADD(NOW(), INTERVAL 15 MINUTE)
  WHERE id = ?`,
-            [
-                payment.id,
-                checkoutUrl,
-                payment.status || 'open',
-                order.id
-            ]
+            [order.id]
         );
+
+        await enqueueMolliePaymentCreation(connection, {
+            operationKey,
+            payment: order,
+            application: {
+                kind: 'payment_records',
+                orderId: order.id,
+                paymentRecordIds: [
+                    initialRecord.insertId,
+                    rentalRecord.insertId,
+                    depositRecord.insertId
+                ]
+            }
+        });
 
         await connection.execute(
             `UPDATE rental_order_items
@@ -4727,6 +5589,27 @@ app.post('/orders/:id/mollie-checkout', async (req, res) => {
         );
 
         await connection.commit();
+
+        let payment;
+        try {
+            payment = await processExternalEffectByKey(operationKey);
+        } catch (paymentError) {
+            console.error('Neuer Checkout wurde vorgemerkt und wird erneut versucht:', paymentError.message);
+            return res.status(202).json({
+                success: false,
+                paymentPending: true,
+                message: 'Der Online-Checkout wird vorbereitet.'
+            });
+        }
+
+        const checkoutUrl = payment.checkoutUrl;
+        if (!checkoutUrl) {
+            return res.status(202).json({
+                success: false,
+                paymentPending: true,
+                message: 'Der Online-Checkout wurde angelegt; die URL wird synchronisiert.'
+            });
+        }
 
         return res.json({
             success: true,
@@ -4742,10 +5625,7 @@ app.post('/orders/:id/mollie-checkout', async (req, res) => {
             }
         }
         console.error('Fehler beim Erstellen des Mollie-Checkouts:', error);
-
-        return res.status(500).json({
-            error: 'Checkout konnte nicht erstellt werden.'
-        });
+        return sendTransactionFailure(res, error, 'Checkout konnte nicht erstellt werden.');
 
     } finally {
         if (connection) await connection.end();
@@ -4754,9 +5634,124 @@ app.post('/orders/:id/mollie-checkout', async (req, res) => {
 
 app.get('/orders/:id/payment-status', async (req, res) => {
     let connection;
+    const orderId = parseOrderId(req.params.id);
     const paymentType = req.query.paymentType || null;
     const itemId = req.query.itemId || null;
     const additionalPaymentTypes = ['rental_adjustment', 'return_additional_charge'];
+
+    if (!orderId) {
+        return res.status(400).json({ error: 'Ungültige Bestell-ID.' });
+    }
+
+    if (paymentType && !additionalPaymentTypes.includes(paymentType)) {
+        return res.status(400).json({ error: 'Ungültige Zahlungsart.' });
+    }
+
+    if (paymentType && (!itemId || !Number.isInteger(Number(itemId)) || Number(itemId) < 1)) {
+        return res.status(400).json({ error: 'Für diese Zahlung ist eine gültige Bestellposition erforderlich.' });
+    }
+
+    try {
+        connection = await mysql.createConnection(dbConfig);
+
+        const [orders] = await connection.execute(
+            `SELECT ro.id, ro.order_no AS orderNo, ro.status, ro.payment_method,
+                    ro.payment_status, ro.mollie_payment_status, ro.mollie_payment_method,
+                    ro.customer_email AS customerEmail,
+                    ro.guest_access_token_hash AS guestAccessTokenHash,
+                    ro.guest_access_token_expires_at AS guestAccessTokenExpiresAt,
+                    rc.session_id AS cartSessionId,
+                    rc.user_email AS cartUserEmail
+             FROM rental_orders ro
+             LEFT JOIN rental_carts rc ON rc.id = ro.cart_id
+             WHERE ro.id = ?
+             LIMIT 1`,
+            [orderId]
+        );
+
+        if (orders.length === 0) {
+            return res.status(404).json({ error: 'Bestellung nicht gefunden.' });
+        }
+
+        const order = orders[0];
+
+        if (!mayAccessOrder(req, order)) {
+            return res.status(403).json({ error: 'Kein Zugriff auf diese Bestellung.' });
+        }
+
+        if (!paymentType) {
+            return res.json({
+                id: order.id,
+                orderNo: order.orderNo,
+                status: order.status,
+                payment_status: order.payment_status,
+                mollie_payment_status: order.mollie_payment_status,
+                mollie_payment_method: order.mollie_payment_method
+            });
+        }
+
+        const [paymentRows] = await connection.execute(
+            `SELECT id, order_item_id, payment_method, payment_status,
+                    mollie_payment_id, note
+             FROM rental_order_payments
+             WHERE order_id = ?
+             AND order_item_id = ?
+             AND payment_type = ?
+             ORDER BY id DESC
+             LIMIT 1`,
+            [orderId, Number(itemId), paymentType]
+        );
+
+        if (paymentRows.length === 0) {
+            return res.status(404).json({ error: 'Zahlung nicht gefunden.' });
+        }
+
+        const payment = paymentRows[0];
+        const settledByOffset = payment.payment_status === 'offset' ||
+            String(payment.note || '').includes('Kaution verrechnet');
+        const settledByCash = payment.payment_method === 'cash' && payment.payment_status === 'paid';
+        const [duplicateRefundRows] = payment.mollie_payment_id
+            ? await connection.execute(
+                `SELECT payment_status
+                 FROM rental_order_payments
+                 WHERE order_id = ?
+                 AND order_item_id = ?
+                 AND payment_type = 'duplicate_payment_refund'
+                 AND mollie_payment_id = ?
+                 ORDER BY id DESC
+                 LIMIT 1`,
+                [orderId, Number(itemId), payment.mollie_payment_id]
+            )
+            : [[]];
+
+        return res.json({
+            id: order.id,
+            orderNo: order.orderNo,
+            payment_status: settledByOffset || settledByCash ? 'paid' : payment.payment_status,
+            payment_type: paymentType,
+            payment_method: settledByOffset ? 'deposit_offset' : payment.payment_method,
+            settled_by_offset: settledByOffset,
+            settled_by_cash: settledByCash,
+            duplicate_refund_status: duplicateRefundRows[0]?.payment_status || null
+        });
+    } catch (error) {
+        console.error('Fehler beim lesenden Laden des Zahlungsstatus:', error);
+        return res.status(500).json({ error: 'Zahlungsstatus konnte nicht geladen werden.' });
+    } finally {
+        if (connection) await connection.end();
+    }
+});
+
+app.post('/orders/:id/payment-status/sync', async (req, res) => {
+    let connection;
+    const orderId = parseOrderId(req.params.id);
+    const paymentType = req.query.paymentType || null;
+    const itemId = req.query.itemId || null;
+    const additionalPaymentTypes = ['rental_adjustment', 'return_additional_charge'];
+
+    if (!orderId) {
+        return res.status(400).json({ error: 'Ungültige Bestell-ID.' });
+    }
 
     if (paymentType && !additionalPaymentTypes.includes(paymentType)) {
         return res.status(400).json({ error: 'Ungültige Zahlungsart.' });
@@ -4771,18 +5766,29 @@ app.get('/orders/:id/payment-status', async (req, res) => {
         await connection.beginTransaction();
 
         const [orders] = await connection.execute(
-            `SELECT id, cart_id, order_no AS orderNo, order_no, status, payment_method,
-                    payment_status, mollie_payment_id, mollie_payment_status
-             FROM rental_orders
-             WHERE id = ?
+            `SELECT ro.id, ro.cart_id, ro.order_no AS orderNo, ro.order_no, ro.status,
+                    ro.payment_method, ro.payment_status, ro.mollie_payment_id,
+                    ro.mollie_payment_status, ro.customer_email AS customerEmail,
+                    ro.guest_access_token_hash AS guestAccessTokenHash,
+                    ro.guest_access_token_expires_at AS guestAccessTokenExpiresAt,
+                    rc.session_id AS cartSessionId,
+                    rc.user_email AS cartUserEmail
+             FROM rental_orders ro
+             LEFT JOIN rental_carts rc ON rc.id = ro.cart_id
+             WHERE ro.id = ?
              LIMIT 1
              FOR UPDATE`,
-            [req.params.id]
+            [orderId]
         );
 
         if (orders.length === 0) {
             await connection.rollback();
             return res.status(404).json({ error: 'Bestellung nicht gefunden.' });
+        }
+
+        if (!mayAccessOrder(req, orders[0])) {
+            await connection.rollback();
+            return res.status(403).json({ error: 'Kein Zugriff auf diese Bestellung.' });
         }
 
         if (paymentType) {
@@ -4817,7 +5823,33 @@ app.get('/orders/:id/payment-status', async (req, res) => {
                 });
             }
 
-            const molliePayment = await getMolliePayment(paymentRows[0].mollie_payment_id);
+            const expectedPaymentId = paymentRows[0].mollie_payment_id;
+            await connection.commit();
+
+            const [molliePayment, prefetchedRefunds] = await Promise.all([
+                getMolliePayment(expectedPaymentId),
+                listMollieRefundsForPayment(expectedPaymentId)
+            ]);
+
+            await connection.beginTransaction();
+            const [refreshedPaymentRows] = await connection.execute(
+                `SELECT rop.id AS paymentRecordId, rop.order_id, rop.order_item_id,
+                        rop.amount, rop.mollie_payment_id, rop.payment_status,
+                        rop.payment_type, rop.note, ro.order_no AS orderNo
+                 FROM rental_order_payments rop
+                 JOIN rental_orders ro ON ro.id = rop.order_id
+                 WHERE rop.id = ? AND rop.order_id = ? AND rop.mollie_payment_id = ?
+                 LIMIT 1
+                 FOR UPDATE`,
+                [paymentRows[0].paymentRecordId, orderId, expectedPaymentId]
+            );
+            if (refreshedPaymentRows.length === 0) {
+                await connection.rollback();
+                return res.status(409).json({
+                    error: 'Die Zahlung wurde gleichzeitig geändert. Bitte erneut laden.'
+                });
+            }
+            paymentRows[0] = refreshedPaymentRows[0];
             const mappedPaymentStatus = mapMolliePaymentStatus(molliePayment.status);
             const wasOffsetAgainstDeposit =
                 paymentRows[0].payment_status === 'offset' ||
@@ -4841,10 +5873,10 @@ app.get('/orders/:id/payment-status', async (req, res) => {
                         },
                         'Onlinezahlung ging nach Verrechnung mit der Kaution ein und wurde automatisch erstattet'
                     );
-                    await syncMollieRefundsForPayment(connection, molliePayment.id);
+                    await syncMollieRefundsForPayment(connection, molliePayment.id, prefetchedRefunds);
                 } else {
                     if (isOpenPaymentStatus(mappedPaymentStatus)) {
-                        await cancelMolliePayment(molliePayment.id);
+                        await enqueueMollieCancellationIntent(connection, molliePayment.id);
                     }
 
                     await connection.execute(
@@ -4921,7 +5953,7 @@ app.get('/orders/:id/payment-status', async (req, res) => {
                             order_no: paymentRows[0].orderNo
                         }
                     );
-                    await syncMollieRefundsForPayment(connection, molliePayment.id);
+                    await syncMollieRefundsForPayment(connection, molliePayment.id, prefetchedRefunds);
 
                     if (!duplicateRefundStatus) {
                         const [refundRows] = await connection.execute(
@@ -4937,7 +5969,7 @@ app.get('/orders/:id/payment-status', async (req, res) => {
                     }
                 } else {
                     if (isOpenPaymentStatus(mappedPaymentStatus)) {
-                        await cancelMolliePayment(molliePayment.id);
+                        await enqueueMollieCancellationIntent(connection, molliePayment.id);
                     }
 
                     await connection.execute(
@@ -4986,7 +6018,7 @@ app.get('/orders/:id/payment-status', async (req, res) => {
                 ]
             );
 
-            await syncMollieRefundsForPayment(connection, molliePayment.id);
+            await syncMollieRefundsForPayment(connection, molliePayment.id, prefetchedRefunds);
 
             if (mappedPaymentStatus === 'paid') {
                 await refundEligibleDepositsAfterPaymentsSettled(connection, req.params.id);
@@ -5019,11 +6051,18 @@ app.get('/orders/:id/payment-status', async (req, res) => {
             });
         }
 
-        const payment = await getMolliePayment(order.mollie_payment_id);
+        const expectedPaymentId = order.mollie_payment_id;
+        await connection.commit();
+        const [payment, prefetchedRefunds] = await Promise.all([
+            getMolliePayment(expectedPaymentId),
+            listMollieRefundsForPayment(expectedPaymentId)
+        ]);
+        await connection.beginTransaction();
         const publicPaymentStatus = mapMolliePaymentStatus(payment.status);
 
         const [lockedOrders] = await connection.execute(
-            `SELECT id, cart_id, order_no, status, payment_method, payment_status
+            `SELECT id, cart_id, order_no, status, payment_method, payment_status,
+                    mollie_payment_id
              FROM rental_orders
              WHERE id = ?
              LIMIT 1
@@ -5031,6 +6070,12 @@ app.get('/orders/:id/payment-status', async (req, res) => {
             [order.id]
         );
         const lockedOrder = lockedOrders[0];
+        if (!lockedOrder || lockedOrder.mollie_payment_id !== expectedPaymentId) {
+            await connection.rollback();
+            return res.status(409).json({
+                error: 'Die Zahlung wurde gleichzeitig geändert. Bitte erneut laden.'
+            });
+        }
         const newOrderStatus = deriveOrderStatusFromInitialPayment(lockedOrder.status, payment.status);
         const mayFollowInitialPayment = ['reserved', 'pending_payment', 'payment_failed'].includes(
             String(lockedOrder.status || '').toLowerCase()
@@ -5046,7 +6091,7 @@ app.get('/orders/:id/payment-status', async (req, res) => {
             ['cancelled', 'expired'].includes(String(lockedOrder.status || '').toLowerCase()) &&
             isOpenPaymentStatus(publicPaymentStatus)
         ) {
-            await cancelMolliePayment(payment.id);
+            await enqueueMollieCancellationIntent(connection, payment.id);
             ledgerPaymentStatus = 'cancelled';
         }
 
@@ -5089,7 +6134,7 @@ app.get('/orders/:id/payment-status', async (req, res) => {
             ]
         );
 
-        await syncMollieRefundsForPayment(connection, payment.id);
+        await syncMollieRefundsForPayment(connection, payment.id, prefetchedRefunds);
 
         if (
             publicPaymentStatus === 'paid' &&
@@ -5128,7 +6173,7 @@ app.get('/orders/:id/payment-status', async (req, res) => {
             }
         }
         console.error('Fehler beim Laden des Zahlungsstatus:', error);
-        return res.status(500).json({ error: 'Zahlungsstatus konnte nicht geladen werden.' });
+        return sendTransactionFailure(res, error, 'Zahlungsstatus konnte nicht geladen werden.');
     } finally {
         if (connection) await connection.end();
     }
@@ -5159,6 +6204,43 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
 
     try {
         connection = await mysql.createConnection(dbConfig);
+
+        let additionalPaymentSnapshot = null;
+        let prefetchedAdditionalMolliePayment = null;
+        if (['rental_adjustment', 'return_additional_charge'].includes(paymentType) && orderItemId) {
+            const [snapshotRows] = await connection.execute(
+                `SELECT id, amount, payment_method, mollie_payment_id, payment_status
+                 FROM rental_order_payments
+                 WHERE order_id = ?
+                 AND order_item_id = ?
+                 AND payment_type = ?
+                 AND payment_status IN ('pending', 'open', 'authorized', 'failed', 'cancelled', 'expired')
+                 ORDER BY id DESC
+                 LIMIT 1`,
+                [orderId, orderItemId, paymentType]
+            );
+            additionalPaymentSnapshot = snapshotRows[0] || null;
+
+            if (
+                additionalPaymentSnapshot?.payment_method === 'online' &&
+                additionalPaymentSnapshot.mollie_payment_id
+            ) {
+                try {
+                    prefetchedAdditionalMolliePayment = await getMolliePayment(
+                        additionalPaymentSnapshot.mollie_payment_id
+                    );
+                } catch (providerError) {
+                    console.error(
+                        'Mollie-Zahlungsstatus konnte vor der Barzahlung nicht geladen werden:',
+                        providerError
+                    );
+                    return res.status(503).json({
+                        error: 'Der Zahlungsanbieter ist vorübergehend nicht erreichbar. Bitte erneut versuchen.'
+                    });
+                }
+            }
+        }
+
         await connection.beginTransaction();
 
         const recordedByUserId = await getUserIdByEmail(connection, req.session.user);
@@ -5245,7 +6327,7 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
                 ]
             );
 
-            await connection.execute(
+            const [cashInitialPayment] = await connection.execute(
                 `INSERT INTO rental_order_payments
          (
             order_id,
@@ -5276,18 +6358,18 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
                 [orderId]
             );
 
-            await connection.commit();
+            await sendPaymentReceiptEmail(order, {
+                id: cashInitialPayment.insertId,
+                amount: Number(amount),
+                payment_type: 'initial_payment',
+                payment_method: 'cash',
+                note: note || 'Miete und Kaution bar bei Abholung kassiert'
+            }, {
+                connection,
+                operationKey: `mail-payment-receipt-${cashInitialPayment.insertId}`
+            });
 
-            try {
-                await sendPaymentReceiptEmail(order, {
-                    amount: Number(amount),
-                    payment_type: 'initial_payment',
-                    payment_method: 'cash',
-                    note: note || 'Miete und Kaution bar bei Abholung kassiert'
-                });
-            } catch (mailError) {
-                console.error('Barzahlung gespeichert, aber Quittungsversand fehlgeschlagen:', mailError);
-            }
+            await connection.commit();
 
             return res.json({
                 message: 'Barzahlung für Miete und Kaution wurde erfasst.'
@@ -5298,7 +6380,7 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
 
         if (['rental_adjustment', 'return_additional_charge'].includes(paymentType) && orderItemId) {
             const [openPayments] = await connection.execute(
-                `SELECT id, amount, payment_method, mollie_payment_id
+                `SELECT id, amount, payment_method, mollie_payment_id, payment_status
          FROM rental_order_payments
          WHERE order_id = ?
          AND order_item_id = ?
@@ -5309,6 +6391,13 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
          FOR UPDATE`,
                 [orderId, orderItemId, paymentType]
             );
+
+            if (!paymentConcurrencySnapshotsMatch(additionalPaymentSnapshot, openPayments[0] || null)) {
+                await connection.rollback();
+                return res.status(409).json({
+                    error: 'Die Nachzahlung wurde gleichzeitig geändert. Bitte erneut laden.'
+                });
+            }
 
             if (openPayments.length === 0) {
                 return res.status(409).json({
@@ -5326,7 +6415,13 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
             }
 
             if (openAdditionalPayment.payment_method === 'online' && openAdditionalPayment.mollie_payment_id) {
-                const molliePayment = await getMolliePayment(openAdditionalPayment.mollie_payment_id);
+                if (!prefetchedAdditionalMolliePayment) {
+                    await connection.rollback();
+                    return res.status(503).json({
+                        error: 'Der Zahlungsstatus ist nicht verfügbar. Bitte erneut versuchen.'
+                    });
+                }
+                const molliePayment = prefetchedAdditionalMolliePayment;
                 const mollieStatus = mapMolliePaymentStatus(molliePayment.status);
 
                 if (mollieStatus === 'paid') {
@@ -5345,11 +6440,15 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
                 }
 
                 if (isOpenPaymentStatus(mollieStatus)) {
-                    await cancelMolliePayment(openAdditionalPayment.mollie_payment_id);
+                    await enqueueMollieCancellationIntent(
+                        connection,
+                        openAdditionalPayment.mollie_payment_id
+                    );
                 }
             }
         }
 
+        let receiptPaymentRecordId = null;
         if (['rental_adjustment', 'return_additional_charge'].includes(paymentType) && orderItemId) {
             if (openAdditionalPayment.payment_method === 'cash') {
                 await connection.execute(
@@ -5359,6 +6458,7 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
                      WHERE id = ?`,
                     [recordedByUserId, note || null, openAdditionalPayment.id]
                 );
+                receiptPaymentRecordId = openAdditionalPayment.id;
             } else {
                 await connection.execute(
                     `UPDATE rental_order_payments
@@ -5369,7 +6469,7 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
                      WHERE id = ?`,
                     [openAdditionalPayment.id]
                 );
-                await connection.execute(
+                const [cashReplacement] = await connection.execute(
                     `INSERT INTO rental_order_payments
                      (order_id, order_item_id, payment_type, payment_method, payment_status,
                       amount, paid_at, recorded_by_user_id, note)
@@ -5383,10 +6483,11 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
                         note || 'Online-Nachzahlung bar vor Ort beglichen'
                     ]
                 );
+                receiptPaymentRecordId = cashReplacement.insertId;
             }
 
         } else {
-            await connection.execute(
+            const [cashPayment] = await connection.execute(
                 `INSERT INTO rental_order_payments
          (order_id, order_item_id, payment_type, payment_method, payment_status, amount, paid_at, recorded_by_user_id, note)
          VALUES (?, ?, ?, 'cash', 'paid', ?, NOW(), ?, ?)`,
@@ -5399,6 +6500,7 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
                     note || null
                 ]
             );
+            receiptPaymentRecordId = cashPayment.insertId;
         }
 
         if (
@@ -5420,18 +6522,18 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
             );
         }
 
-        await connection.commit();
+        await sendPaymentReceiptEmail(orders[0], {
+            id: receiptPaymentRecordId,
+            amount: Number(amount),
+            payment_type: paymentType,
+            payment_method: 'cash',
+            note
+        }, {
+            connection,
+            operationKey: `mail-payment-receipt-${receiptPaymentRecordId}`
+        });
 
-        try {
-            await sendPaymentReceiptEmail(orders[0], {
-                amount: Number(amount),
-                payment_type: paymentType,
-                payment_method: 'cash',
-                note
-            });
-        } catch (mailError) {
-            console.error('Barzahlung gespeichert, aber Quittungsversand fehlgeschlagen:', mailError);
-        }
+        await connection.commit();
 
         res.json({ message: 'Barzahlung wurde erfasst.' });
 
@@ -5444,7 +6546,7 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
             }
         }
         console.error('Fehler beim Erfassen der Barzahlung:', error);
-        res.status(500).json({ error: 'Zahlung konnte nicht erfasst werden.' });
+        return sendTransactionFailure(res, error, 'Zahlung konnte nicht erfasst werden.');
     } finally {
         if (connection) await connection.end();
     }
@@ -5500,6 +6602,35 @@ app.post('/admin/order-payments/:id/retry-refund', checkAdmin, adminReturnMutati
             });
         }
 
+        const [existingRetryEffects] = await connection.execute(
+            `SELECT effect.operation_key AS operationKey, effect.status
+             FROM external_effects_outbox effect
+             WHERE effect.operation_key LIKE ?
+             ORDER BY effect.id DESC
+             LIMIT 1
+             FOR UPDATE`,
+            [`retry-refund-${failedRefund.id}-%`]
+        );
+        const existingRetry = existingRetryEffects[0] || null;
+
+        if (existingRetry && ['pending', 'processing', 'retry'].includes(existingRetry.status)) {
+            const operationKey = existingRetry.operationKey;
+            await connection.commit();
+
+            let refundStatus = 'pending';
+            try {
+                const refund = await processExternalEffectByKey(operationKey);
+                refundStatus = mapMollieRefundStatus(refund.status);
+            } catch (refundError) {
+                console.error('Bestehender Erstattungs-Retry wartet auf Recovery:', refundError.message);
+            }
+
+            return res.json({
+                message: 'Rückerstattung wurde bereits erneut bei Mollie vorgemerkt.',
+                paymentStatus: refundStatus
+            });
+        }
+
         const [sourceRows] = await connection.execute(
             `SELECT amount
              FROM rental_order_payments
@@ -5537,7 +6668,19 @@ app.post('/admin/order-payments/:id/retry-refund', checkAdmin, adminReturnMutati
             });
         }
 
-        const refund = await createMollieRefundForPayment({
+        const [retryCountRows] = await connection.execute(
+            `SELECT COUNT(*) AS retryCount
+             FROM external_effects_outbox
+             WHERE operation_key LIKE ?`,
+            [`retry-refund-${failedRefund.id}-%`]
+        );
+        const retryAttempt = Number(retryCountRows[0]?.retryCount || 0) + 1;
+        const operationKey = `retry-refund-${failedRefund.id}-${retryAttempt}`;
+        await persistOnlineRefundIntent(connection, {
+            operationKey,
+            orderId: failedRefund.order_id,
+            orderItemId: failedRefund.order_item_id,
+            paymentType: failedRefund.payment_type,
             paymentId: failedRefund.mollie_payment_id,
             amount: retryAmount,
             description: `Erneuter Erstattungsversuch ${failedRefund.order_no}`,
@@ -5547,41 +6690,8 @@ app.post('/admin/order-payments/:id/retry-refund', checkAdmin, adminReturnMutati
                 type: failedRefund.payment_type,
                 retryOfPaymentRecordId: String(failedRefund.id)
             },
-            idempotencyKey: `retry-refund-${failedRefund.id}`
+            note: `Erneuter Erstattungsversuch für Zahlungsdatensatz #${failedRefund.id}`
         });
-        const refundStatus = mapMollieRefundStatus(refund.status);
-
-        const [existingRetryRows] = await connection.execute(
-            `SELECT id, payment_status
-             FROM rental_order_payments
-             WHERE mollie_refund_id = ?
-             LIMIT 1
-             FOR UPDATE`,
-            [refund.id]
-        );
-
-        if (existingRetryRows.length === 0) {
-            await connection.execute(
-                `INSERT INTO rental_order_payments
-                 (order_id, order_item_id, payment_type, payment_method, payment_status,
-                  amount, mollie_payment_id, mollie_refund_id, note, paid_at)
-                 VALUES (?, ?, ?, 'online', ?, ?, ?, ?, ?,
-                    CASE WHEN ? = 'paid' THEN NOW() ELSE NULL END)`,
-                [
-                    failedRefund.order_id,
-                    failedRefund.order_item_id,
-                    failedRefund.payment_type,
-                    refundStatus,
-                    -Math.abs(retryAmount),
-                    failedRefund.mollie_payment_id,
-                    refund.id,
-                    `Erneuter Erstattungsversuch für Zahlungsdatensatz #${failedRefund.id}`,
-                    refundStatus
-                ]
-            );
-        }
-
-        await syncMollieRefundsForPayment(connection, failedRefund.mollie_payment_id);
 
         if (failedRefund.payment_type === 'order_cancellation_refund') {
             await refreshCancelledOrderPaymentStatus(connection, failedRefund.order_id);
@@ -5590,6 +6700,14 @@ app.post('/admin/order-payments/:id/retry-refund', checkAdmin, adminReturnMutati
         await refreshReturnCaseStatus(connection, failedRefund.order_id);
 
         await connection.commit();
+
+        let refundStatus = 'pending';
+        try {
+            const refund = await processExternalEffectByKey(operationKey);
+            refundStatus = mapMollieRefundStatus(refund.status);
+        } catch (refundError) {
+            console.error('Rückerstattung wird durch den Outbox-Worker erneut versucht:', refundError.message);
+        }
 
         return res.json({
             message: refundStatus === 'paid'
@@ -5608,7 +6726,7 @@ app.post('/admin/order-payments/:id/retry-refund', checkAdmin, adminReturnMutati
             }
         }
         console.error('Fehler beim erneuten Starten der Rückerstattung:', error);
-        return res.status(500).json({ error: 'Rückerstattung konnte nicht erneut gestartet werden.' });
+        return sendTransactionFailure(res, error, 'Rückerstattung konnte nicht erneut gestartet werden.');
     } finally {
         if (connection) await connection.end();
     }
@@ -5725,18 +6843,18 @@ app.post('/admin/order-payments/manual-refund', checkAdmin, adminReturnMutationL
 
             await refreshReturnCaseStatus(connection, orderId);
 
-            await connection.commit();
+            await sendPaymentReceiptEmail(orders[0], {
+                id: openRefunds[0].id,
+                amount: -Math.abs(Number(amount)),
+                payment_type: paymentType,
+                payment_method: 'cash',
+                note: note || 'Betrag bar an Kunden ausgezahlt'
+            }, {
+                connection,
+                operationKey: `mail-payment-receipt-${openRefunds[0].id}`
+            });
 
-            try {
-                await sendPaymentReceiptEmail(orders[0], {
-                    amount: -Math.abs(Number(amount)),
-                    payment_type: paymentType,
-                    payment_method: 'cash',
-                    note: note || 'Betrag bar an Kunden ausgezahlt'
-                });
-            } catch (mailError) {
-                console.error('Bar-Rückerstattung gespeichert, aber Belegversand fehlgeschlagen:', mailError);
-            }
+            await connection.commit();
 
             return res.json({ message: 'Bar-Rückerstattung wurde erfasst.' });
         }
@@ -5755,7 +6873,7 @@ app.post('/admin/order-payments/manual-refund', checkAdmin, adminReturnMutationL
             }
         }
         console.error('Fehler beim Erfassen der Bar-Rückerstattung:', error);
-        res.status(500).json({ error: 'Rückerstattung konnte nicht erfasst werden.' });
+        return sendTransactionFailure(res, error, 'Rückerstattung konnte nicht erfasst werden.');
     } finally {
         if (connection) await connection.end();
     }
@@ -5851,7 +6969,11 @@ async function refundEligibleDepositsAfterPaymentsSettled(connection, orderId) {
                 );
             }
 
-            const refund = await createMollieRefundForPayment({
+            await persistOnlineRefundIntent(connection, {
+                operationKey: `deposit-refund-${orderId}-${item.id}`,
+                orderId,
+                orderItemId: item.id,
+                paymentType: 'deposit_refund',
                 paymentId: originalPaymentId,
                 amount: refundAmount,
                 description: `Kautionsrückerstattung ${item.order_no} - ${item.title} (#${item.id})`,
@@ -5860,39 +6982,8 @@ async function refundEligibleDepositsAfterPaymentsSettled(connection, orderId) {
                     itemId: String(item.id),
                     type: 'deposit_refund'
                 },
-                idempotencyKey: `deposit-refund-${orderId}-${item.id}`
+                note: 'Kautionsrückerstattung nach Zahlung aller Ausstände vorgemerkt'
             });
-            const refundStatus = mapMollieRefundStatus(refund.status);
-
-            await connection.execute(
-                `INSERT INTO rental_order_payments
-                 (
-                    order_id,
-                    order_item_id,
-                    payment_type,
-                    payment_method,
-                    payment_status,
-                    amount,
-                    mollie_payment_id,
-                    mollie_refund_id,
-                    note,
-                    paid_at
-                 )
-                 VALUES (?, ?, 'deposit_refund', 'online', ?, ?, ?, ?, ?,
-                    CASE WHEN ? = 'paid' THEN NOW() ELSE NULL END)`,
-                [
-                    orderId,
-                    item.id,
-                    refundStatus,
-                    -Math.abs(refundAmount),
-                    originalPaymentId,
-                    refund.id,
-                    refundStatus === 'paid'
-                        ? 'Kaution automatisch nach Zahlung aller Ausstände erstattet'
-                        : 'Kautionsrückerstattung nach Zahlung aller Ausstände bei Mollie beauftragt',
-                    refundStatus
-                ]
-            );
         } else if (item.payment_method === 'cash') {
             await connection.execute(
                 `INSERT INTO rental_order_payments
@@ -5932,13 +7023,16 @@ app.post('/webhooks/mollie', async (req, res) => {
             return res.sendStatus(200);
         }
 
-        const payment = await getMolliePayment(paymentId);
+        const [payment, prefetchedRefunds] = await Promise.all([
+            getMolliePayment(paymentId),
+            listMollieRefundsForPayment(paymentId)
+        ]);
 
         connection = await mysql.createConnection(dbConfig);
         await connection.beginTransaction();
 
         const mappedPaymentStatus = mapMolliePaymentStatus(payment.status);
-        await syncMollieRefundsForPayment(connection, payment.id);
+        await syncMollieRefundsForPayment(connection, payment.id, prefetchedRefunds);
 
         let isDuplicateEvent = false;
         try {
@@ -6065,9 +7159,9 @@ app.post('/webhooks/mollie', async (req, res) => {
                         ? 'Onlinezahlung ging nach Verrechnung mit der Kaution ein und wurde automatisch erstattet'
                         : 'Onlinezahlung ging nach anderweitiger Begleichung ein und wurde automatisch erstattet'
                 );
-                await syncMollieRefundsForPayment(connection, payment.id);
+                await syncMollieRefundsForPayment(connection, payment.id, prefetchedRefunds);
             } else if (isOpenPaymentStatus(mappedPaymentStatus)) {
-                await cancelMolliePayment(payment.id);
+                await enqueueMollieCancellationIntent(connection, payment.id);
             }
 
             await connection.execute(
@@ -6117,7 +7211,7 @@ app.post('/webhooks/mollie', async (req, res) => {
                     await refreshCancelledOrderPaymentStatus(connection, paymentContext.order_id);
                 }
             } else if (isOpenPaymentStatus(mappedPaymentStatus)) {
-                await cancelMolliePayment(payment.id);
+                await enqueueMollieCancellationIntent(connection, payment.id);
                 await connection.execute(
                     `UPDATE rental_order_payments
                      SET payment_status = 'cancelled'
@@ -6191,6 +7285,9 @@ app.post('/webhooks/mollie', async (req, res) => {
          FROM rental_order_payments
          WHERE mollie_payment_id = ?
          AND payment_status = 'charged_back'
+         ORDER BY CASE WHEN payment_type = 'initial_payment' THEN 0 ELSE 1 END,
+                  ABS(amount) DESC,
+                  id ASC
          LIMIT 1`,
                 [payment.id]
             );
@@ -6259,7 +7356,7 @@ app.post('/webhooks/mollie', async (req, res) => {
             isOpenPaymentStatus(mappedPaymentStatus) &&
             paymentContext?.payment_type === 'initial_payment'
         ) {
-            await cancelMolliePayment(payment.id);
+            await enqueueMollieCancellationIntent(connection, payment.id);
             await connection.execute(
                 `UPDATE rental_order_payments
                  SET payment_status = 'cancelled'
@@ -6313,80 +7410,59 @@ app.post('/webhooks/mollie', async (req, res) => {
             );
         }
 
-        let shouldSendConfirmation = false;
-
         if (
             mappedPaymentStatus === 'paid' &&
             newOrderStatus === 'confirmed' &&
             !order.order_confirmation_sent_at
         ) {
-            shouldSendConfirmation = true;
+            const [paidOrders] = await connection.execute(
+                `SELECT confirmation_json, customer_email, customer_first_name, customer_last_name,
+                        customer_company, customer_phone, customer_address, customer_zip,
+                        customer_city, signature_data_url
+                 FROM rental_orders
+                 WHERE id = ?
+                 LIMIT 1`,
+                [order.id]
+            );
+
+            if (paidOrders.length > 0) {
+                const paidOrder = paidOrders[0];
+                const orderSummary = typeof paidOrder.confirmation_json === 'string'
+                    ? JSON.parse(paidOrder.confirmation_json || '{}')
+                    : (paidOrder.confirmation_json || {});
+                const uniqueRecipients = [...new Set([
+                    paidOrder.customer_email,
+                    'orders@segnitzbau.de'
+                ].filter(Boolean).map(email => email.trim().toLowerCase()))];
+
+                await sendOrderEmail(
+                    uniqueRecipients,
+                    { ...orderSummary, id: order.id },
+                    {
+                        firstName: paidOrder.customer_first_name,
+                        lastName: paidOrder.customer_last_name,
+                        company: paidOrder.customer_company,
+                        email: paidOrder.customer_email,
+                        phone: paidOrder.customer_phone,
+                        address: paidOrder.customer_address,
+                        zip: paidOrder.customer_zip,
+                        city: paidOrder.customer_city
+                    },
+                    paidOrder.signature_data_url,
+                    'Erfolgreich online gezahlt',
+                    {
+                        connection,
+                        operationKey: `mail-order-confirmation-${order.id}`,
+                        application: {
+                            kind: 'order_confirmation_mail',
+                            orderId: order.id
+                        }
+                    }
+                );
+            }
         }
 
         await connection.commit();
-
-        if (shouldSendConfirmation) {
-            const mailConnection = await mysql.createConnection(dbConfig);
-
-            try {
-                const [paidOrders] = await mailConnection.execute(
-                    `SELECT confirmation_json, customer_email, customer_first_name, customer_last_name,
-                            customer_company, customer_phone, customer_address, customer_zip,
-                            customer_city, signature_data_url
-                     FROM rental_orders
-                     WHERE id = ?
-                     LIMIT 1`,
-                    [order.id]
-                );
-
-                if (paidOrders.length > 0) {
-                    const paidOrder = paidOrders[0];
-
-                    const orderSummary =
-                        typeof paidOrder.confirmation_json === 'string'
-                            ? JSON.parse(paidOrder.confirmation_json || '{}')
-                            : (paidOrder.confirmation_json || {});
-
-                    const recipients = [
-                        paidOrder.customer_email,
-                        'orders@segnitzbau.de'
-                    ]
-                        .filter(Boolean)
-                        .map(e => e.trim().toLowerCase());
-
-                    const uniqueRecipients = [...new Set(recipients)];
-
-                    await sendOrderEmail(
-                        uniqueRecipients,
-                        {
-                            ...orderSummary,
-                            id: order.id
-                        },
-                        {
-                            firstName: paidOrder.customer_first_name,
-                            lastName: paidOrder.customer_last_name,
-                            company: paidOrder.customer_company,
-                            email: paidOrder.customer_email,
-                            phone: paidOrder.customer_phone,
-                            address: paidOrder.customer_address,
-                            zip: paidOrder.customer_zip,
-                            city: paidOrder.customer_city
-                        },
-                        paidOrder.signature_data_url,
-                        'Erfolgreich online gezahlt'
-                    );
-
-                    await mailConnection.execute(
-                        `UPDATE rental_orders
-                         SET order_confirmation_sent_at = NOW()
-                         WHERE id = ? AND order_confirmation_sent_at IS NULL`,
-                        [order.id]
-                    );
-                }
-            } finally {
-                await mailConnection.end();
-            }
-        }
 
         return res.sendStatus(200);
 
@@ -6408,28 +7484,57 @@ app.post('/webhooks/mollie', async (req, res) => {
     }
 });
 
-cleanupOnStartup();
-
+let cleanupTimer = null;
+const periodicCleanupRunner = createCleanupRunner(
+    () => mysql.createConnection(dbConfig)
+);
 if (process.env.DISABLE_PERIODIC_CLEANUP !== '1') {
-    setInterval(async () => {
-        let connection;
-
-        try {
-            connection = await mysql.createConnection(dbConfig);
-            await runDatabaseCleanup(connection);
-        } catch (error) {
-            console.error(`${new Date().toISOString()} - Fehler beim periodischen Datenbank-Cleanup:`, error);
-        } finally {
-            if (connection) {
-                await connection.end();
-            }
-        }
+    cleanupTimer = setInterval(() => {
+        periodicCleanupRunner.run();
     }, Number(process.env.CLEANUP_INTERVAL_MS || 60 * 1000));
+    cleanupTimer.unref?.();
 }
 
 const port = Number(process.env.PORT || 3000);
 
-app.listen(port, () => {
+const httpServer = app.listen(port, () => {
     console.log("*********** Segnitz Rental System ***********");
     console.log(`Server läuft auf Port ${port}`);
 });
+
+let applicationStopPromise = null;
+async function stopApplication() {
+    if (applicationStopPromise) return applicationStopPromise;
+
+    applicationStopPromise = (async () => {
+        if (cleanupTimer) clearInterval(cleanupTimer);
+        cleanupTimer = null;
+
+        await closeHttpServer(httpServer, {
+            graceMs: Number(process.env.APP_HTTP_SHUTDOWN_GRACE_MS || 8000)
+        });
+
+        const cleanupDrained = await withDeadline(
+            periodicCleanupRunner.waitForIdle(),
+            Number(process.env.APP_CLEANUP_SHUTDOWN_GRACE_MS || 5000)
+        );
+        if (!cleanupDrained) {
+            console.warn('Periodisches Datenbank-Cleanup überschritt die Shutdown-Deadline.');
+        }
+
+        if (typeof sessionStore.close === 'function') {
+            await withDeadline(
+                sessionStore.close(),
+                Number(process.env.APP_RESOURCE_SHUTDOWN_GRACE_MS || 3000)
+            );
+        }
+    })();
+
+    return applicationStopPromise;
+}
+
+module.exports = {
+    app,
+    httpServer,
+    stopApplication
+};
