@@ -10,6 +10,15 @@ const {
     createHelmetOptions,
     createSessionCookieOptions
 } = require('./config/security');
+const { initializeDatabase } = require('./database/bootstrap');
+const {
+    getInstallationState,
+    isSetupRequired
+} = require('./database/installationState');
+const {
+    createInitialAdmin,
+    getSetupStatus
+} = require('./services/setupService');
 
 assertSecurityEnvironment();
 app.use(helmet(createHelmetOptions()));
@@ -135,12 +144,46 @@ const uploadReturnImages = multer({
     fileFilter: imageFileFilter
 });
 
+async function startApplication() {
+const bootstrapResult = await initializeDatabase();
+
+if (bootstrapResult.databaseCreated) {
+    console.log(`${new Date().toISOString()} - Datenbank ${dbConfig.database} wurde erstellt`);
+}
+
+if (bootstrapResult.appliedMigrations.length > 0) {
+    console.log(
+        `${new Date().toISOString()} - Automatische Migrationen angewendet: ` +
+        bootstrapResult.appliedMigrations.join(', ')
+    );
+}
+
+if (bootstrapResult.status === 'setup_required') {
+    const setupUrl = process.env.BASE_URL
+        ? `${process.env.BASE_URL.replace(/\/$/, '')}/setup.html`
+        : '/setup.html';
+
+    console.warn('************************************************************');
+    console.warn('Segnitz Rental benötigt die Registrierung des ersten Admins.');
+    console.warn(`Setup-Seite: ${setupUrl}`);
+
+    if (bootstrapResult.setupTokenSource === 'generated') {
+        console.warn(`Einmaliger Setup-Code: ${bootstrapResult.setupToken}`);
+        console.warn('Der Code wird nach erfolgreicher Einrichtung ungültig.');
+    } else if (bootstrapResult.setupTokenSource === 'environment') {
+        console.warn('Als Setup-Code den Wert aus ADMIN_SETUP_TOKEN verwenden.');
+    } else {
+        console.warn(
+            'Der Setup-Code wurde bereits erzeugt. Falls er nicht mehr vorliegt, ' +
+            'ADMIN_SETUP_TOKEN setzen und den Container neu starten.'
+        );
+    }
+
+    console.warn('************************************************************');
+}
+
 const sessionStore = new MySQLStore({
-    host: process.env.DB_HOST,
-    port: Number(process.env.DB_PORT),
-    user: process.env.DB_USER,
-    password: process.env.DB_PW,
-    database: process.env.DB_NAME,
+    ...dbConfig,
 
     clearExpired: true,
     checkExpirationInterval: 15 * 60 * 1000,
@@ -199,6 +242,124 @@ function requireAdminCsrfToken(req, res, next) {
 
     return next();
 }
+
+const setupLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: {
+        error: 'Zu viele Einrichtungsversuche. Bitte in 15 Minuten erneut versuchen.'
+    }
+});
+
+function isSetupAssetPath(pathname) {
+    return pathname === '/setup.html' ||
+        pathname === '/setup-status' ||
+        pathname === '/setup-admin' ||
+        pathname === '/health' ||
+        pathname === '/favicon.ico' ||
+        pathname === '/js/setup_config.js' ||
+        pathname === '/js/bootstrap.bundle.min.js' ||
+        pathname.startsWith('/css/') ||
+        pathname.startsWith('/img/');
+}
+
+async function refreshSetupStateWhenRequired() {
+    return getSetupStatus();
+}
+
+app.get('/health', (req, res) => {
+    const installation = getInstallationState();
+
+    res.json({
+        status: installation === 'ready' ? 'ok' : 'setup_required',
+        database: 'ready',
+        installation
+    });
+});
+
+app.get('/setup-status', async (req, res) => {
+    try {
+        const installation = await refreshSetupStateWhenRequired();
+
+        return res.json({
+            setupRequired: installation === 'setup_required'
+        });
+    } catch (error) {
+        console.error('Installationsstatus konnte nicht geladen werden:', error);
+        return res.status(503).json({
+            error: 'Der Installationsstatus konnte nicht geladen werden.'
+        });
+    }
+});
+
+app.post('/setup-admin', setupLimiter, async (req, res) => {
+    try {
+        const admin = await createInitialAdmin(req.body || {});
+
+        await new Promise((resolve, reject) => {
+            req.session.regenerate(error => error ? reject(error) : resolve());
+        });
+
+        req.session.user = admin.email;
+        req.session.role = admin.role;
+        req.session.createdAt = Date.now();
+
+        await new Promise((resolve, reject) => {
+            req.session.save(error => error ? reject(error) : resolve());
+        });
+
+        console.log(
+            `${new Date().toISOString()} - Ersteinrichtung abgeschlossen: ` +
+            `globales Adminkonto ${admin.email} wurde erstellt`
+        );
+
+        return res.status(201).json({
+            message: 'Adminkonto wurde erstellt. Die Installation ist betriebsbereit.',
+            redirectTo: '/backend.html'
+        });
+    } catch (error) {
+        const statusCode = Number(error.statusCode) || 500;
+
+        if (statusCode >= 500) {
+            console.error('Fehler bei der Admin-Ersteinrichtung:', error);
+        }
+
+        return res.status(statusCode).json({
+            error: statusCode >= 500
+                ? 'Die Ersteinrichtung konnte nicht abgeschlossen werden.'
+                : error.message
+        });
+    }
+});
+
+app.use(async (req, res, next) => {
+    if (!isSetupRequired() || isSetupAssetPath(req.path)) return next();
+
+    try {
+        const installation = await refreshSetupStateWhenRequired();
+        if (installation === 'ready') return next();
+    } catch (error) {
+        console.error('Installationsstatus konnte nicht aktualisiert werden:', error);
+        return res.status(503).json({
+            error: 'Die Datenbankinitialisierung ist derzeit nicht verfügbar.'
+        });
+    }
+
+    const acceptsHtml = ['GET', 'HEAD'].includes(req.method) &&
+        String(req.get('accept') || '').includes('text/html');
+
+    if (acceptsHtml) {
+        return res.redirect(303, '/setup.html');
+    }
+
+    return res.status(503).json({
+        error: 'Die Anwendung muss zuerst eingerichtet werden.',
+        setupRequired: true,
+        setupUrl: '/setup.html'
+    });
+});
 
 app.use('/', productRoutes);
 app.use('/', cartRoutes);
@@ -6250,7 +6411,7 @@ app.post('/webhooks/mollie', async (req, res) => {
     }
 });
 
-cleanupOnStartup();
+await cleanupOnStartup();
 
 if (process.env.DISABLE_PERIODIC_CLEANUP !== '1') {
     setInterval(async () => {
@@ -6271,7 +6432,20 @@ if (process.env.DISABLE_PERIODIC_CLEANUP !== '1') {
 
 const port = Number(process.env.PORT || 3000);
 
-app.listen(port, () => {
+return app.listen(port, () => {
     console.log("*********** Segnitz Rental System ***********");
     console.log(`Server läuft auf Port ${port}`);
 });
+}
+
+if (require.main === module) {
+    startApplication().catch(error => {
+        console.error('Serverstart wegen eines Bootstrap-Fehlers abgebrochen:', error);
+        process.exitCode = 1;
+    });
+}
+
+module.exports = {
+    app,
+    startApplication
+};
