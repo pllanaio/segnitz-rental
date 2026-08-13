@@ -10,7 +10,6 @@ const {
     createHelmetOptions,
     createSessionCookieOptions
 } = require('./config/security');
-const { initializeDatabase } = require('./database/bootstrap');
 const {
     getInstallationState,
     isSetupRequired
@@ -144,46 +143,16 @@ const uploadReturnImages = multer({
     fileFilter: imageFileFilter
 });
 
-async function startApplication() {
-const bootstrapResult = await initializeDatabase();
-
-if (bootstrapResult.databaseCreated) {
-    console.log(`${new Date().toISOString()} - Datenbank ${dbConfig.database} wurde erstellt`);
-}
-
-if (bootstrapResult.appliedMigrations.length > 0) {
-    console.log(
-        `${new Date().toISOString()} - Automatische Migrationen angewendet: ` +
-        bootstrapResult.appliedMigrations.join(', ')
-    );
-}
-
-if (bootstrapResult.status === 'setup_required') {
-    const setupUrl = process.env.BASE_URL
-        ? `${process.env.BASE_URL.replace(/\/$/, '')}/setup.html`
-        : '/setup.html';
-
-    console.warn('************************************************************');
-    console.warn('Segnitz Rental benötigt die Registrierung des ersten Admins.');
-    console.warn(`Setup-Seite: ${setupUrl}`);
-
-    if (bootstrapResult.setupTokenSource === 'generated') {
-        console.warn(`Einmaliger Setup-Code: ${bootstrapResult.setupToken}`);
-        console.warn('Der Code wird nach erfolgreicher Einrichtung ungültig.');
-    } else if (bootstrapResult.setupTokenSource === 'environment') {
-        console.warn('Als Setup-Code den Wert aus ADMIN_SETUP_TOKEN verwenden.');
-    } else {
-        console.warn(
-            'Der Setup-Code wurde bereits erzeugt. Falls er nicht mehr vorliegt, ' +
-            'ADMIN_SETUP_TOKEN setzen und den Container neu starten.'
-        );
-    }
-
-    console.warn('************************************************************');
+if (getInstallationState() === 'starting') {
+    throw new Error('Die Anwendung muss über server.js mit Datenbank-Bootstrap gestartet werden.');
 }
 
 const sessionStore = new MySQLStore({
-    ...dbConfig,
+    host: process.env.DB_HOST,
+    port: Number(process.env.DB_PORT),
+    user: process.env.DB_USER,
+    password: process.env.DB_PW,
+    database: process.env.DB_NAME,
 
     clearExpired: true,
     checkExpirationInterval: 15 * 60 * 1000,
@@ -6411,7 +6380,7 @@ app.post('/webhooks/mollie', async (req, res) => {
     }
 });
 
-await cleanupOnStartup();
+cleanupOnStartup();
 
 if (process.env.DISABLE_PERIODIC_CLEANUP !== '1') {
     setInterval(async () => {
@@ -6432,20 +6401,7 @@ if (process.env.DISABLE_PERIODIC_CLEANUP !== '1') {
 
 const port = Number(process.env.PORT || 3000);
 
-return app.listen(port, () => {
+app.listen(port, () => {
     console.log("*********** Segnitz Rental System ***********");
     console.log(`Server läuft auf Port ${port}`);
 });
-}
-
-if (require.main === module) {
-    startApplication().catch(error => {
-        console.error('Serverstart wegen eines Bootstrap-Fehlers abgebrochen:', error);
-        process.exitCode = 1;
-    });
-}
-
-module.exports = {
-    app,
-    startApplication
-};

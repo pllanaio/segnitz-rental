@@ -2,9 +2,9 @@
   "name": "segnitz-rental",
   "description": "Schnell- und Langzeitmietverwaltung",
   "version": "1.0.0",
-  "main": "segnitz_rental.js",
+  "main": "server.js",
   "scripts": {
-    "start": "node segnitz_rental.js",
+    "start": "node server.js",
     "test": "npm run test:unit",
     "test:unit": "node --test test/*.test.js",
     "test:integration": "node --test --test-concurrency=1 test/integration/*.test.js",

@@ -69,7 +69,7 @@ async function waitForServer() {
 before(async () => {
     await resetTestDatabase();
 
-    serverProcess = spawn(process.execPath, ['segnitz_rental.js'], {
+    serverProcess = spawn(process.execPath, ['server.js'], {
         cwd: path.resolve(__dirname, '../..'),
         env: {
             ...process.env,
