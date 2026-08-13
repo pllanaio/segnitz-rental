@@ -176,14 +176,20 @@ function getOrCreateAdminCsrfToken(req) {
     return req.session.adminCsrfToken;
 }
 
-function requireAdminCsrfToken(req, res, next) {
-    const expectedToken = String(req.session?.adminCsrfToken || '');
-    const providedToken = String(req.get('X-CSRF-Token') || '');
+function adminCsrfTokensEqual(providedToken, expectedToken) {
     const expectedTokenBuffer = Buffer.from(expectedToken, 'utf8');
     const providedTokenBuffer = Buffer.from(providedToken, 'utf8');
-    const tokensMatch = expectedTokenBuffer.length > 0 &&
+
+    return expectedTokenBuffer.length > 0 &&
         providedTokenBuffer.length === expectedTokenBuffer.length &&
         crypto.timingSafeEqual(providedTokenBuffer, expectedTokenBuffer);
+}
+
+function requireAdminCsrfToken(req, res, next) {
+    const expectedToken = req.session && req.session.adminCsrfToken;
+    const providedToken = String(req.get('X-CSRF-Token') || '');
+    const tokensMatch = typeof expectedToken === 'string' &&
+        adminCsrfTokensEqual(providedToken, req.session.adminCsrfToken);
 
     if (!tokensMatch) {
         return res.status(403).json({
@@ -2915,7 +2921,7 @@ async function removeUploadedFiles(files = []) {
     );
 }
 
-app.post('/admin/order-items/:itemId/return-images', checkAdmin, requireAdminCsrfToken, uploadReturnImages.array('images', 10), async (req, res) => {
+app.post('/admin/order-items/:itemId/return-images', checkAdmin, requireAdminCsrfToken, adminReturnMutationLimiter, uploadReturnImages.array('images', 10), async (req, res) => {
     let connection;
     let committed = false;
     const uploadedFiles = Array.isArray(req.files) ? req.files : [];
@@ -5286,7 +5292,7 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
     }
 });
 
-app.post('/admin/order-payments/:id/retry-refund', checkAdmin, requireAdminCsrfToken, async (req, res) => {
+app.post('/admin/order-payments/:id/retry-refund', checkAdmin, requireAdminCsrfToken, adminReturnMutationLimiter, async (req, res) => {
     let connection;
 
     try {
@@ -5450,7 +5456,7 @@ app.post('/admin/order-payments/:id/retry-refund', checkAdmin, requireAdminCsrfT
     }
 });
 
-app.post('/admin/order-payments/manual-refund', checkAdmin, requireAdminCsrfToken, async (req, res) => {
+app.post('/admin/order-payments/manual-refund', checkAdmin, requireAdminCsrfToken, adminReturnMutationLimiter, async (req, res) => {
     const {
         orderId,
         orderItemId,
