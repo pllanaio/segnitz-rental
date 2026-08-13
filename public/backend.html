@@ -53,19 +53,19 @@
 
                 <nav class="nav flex-column mt-4">
                     <button class="btn btn-outline-light text-start mb-2 active" id="nav-products"
-                        onclick="switchBackendView('products')">
+                        data-backend-view="products">
                         <i class="bi bi-box-seam"></i>
                         Produkte
                     </button>
 
                     <button class="btn btn-outline-light text-start mb-2" id="nav-orders"
-                        onclick="switchBackendView('orders')">
+                        data-backend-view="orders">
                         <i class="bi bi-receipt"></i>
                         Bestellungen
                     </button>
 
                     <button class="btn btn-outline-light text-start mb-2" id="nav-opening-hours"
-                        onclick="switchBackendView('opening-hours')">
+                        data-backend-view="opening-hours">
                         <i class="bi bi-clock"></i>
                         Öffnungszeiten
                     </button>
@@ -78,12 +78,10 @@
                     </button>
                 </a>
 
-                <a href="#">
-                    <button type="button" class="btn btn-danger w-100 mt-2" onclick="logout()">
-                        <i class="bi bi-x-circle"></i>
-                        Abmelden
-                    </button>
-                </a>
+                <button type="button" class="btn btn-danger w-100 mt-2" id="backendLogoutButton">
+                    <i class="bi bi-x-circle"></i>
+                    Abmelden
+                </button>
             </aside>
 
             <main class="col-12 col-md-9 col-xl-10 p-4 p-lg-5">
@@ -249,7 +247,7 @@
                             <div class="card-body">
                                 <div id="openingHoursAdmin"></div>
 
-                                <button type="button" class="btn btn-primary mt-3" onclick="saveOpeningHours()">
+                                <button type="button" class="btn btn-primary mt-3" id="saveOpeningHoursButton">
                                     Öffnungszeiten speichern
                                 </button>
                             </div>
@@ -344,7 +342,7 @@
 
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Abbrechen</button>
-                    <button type="button" class="btn btn-primary" onclick="submitOrderItemRentalPeriod()">
+                    <button type="button" class="btn btn-primary" id="submitOrderItemRentalPeriodButton">
                         Verlängerung speichern
                     </button>
                 </div>
@@ -371,7 +369,7 @@
 
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Abbrechen</button>
-                    <button type="button" class="btn btn-danger" onclick="submitCancelOrderItem()">
+                    <button type="button" class="btn btn-danger" id="submitCancelOrderItemButton">
                         Artikel stornieren
                     </button>
                 </div>
@@ -449,13 +447,13 @@
 
                         <div class="col-12">
                             <label class="form-label">Rückgabefotos</label>
-                            <input type="file" class="form-control" id="returnImageUpload" accept="image/*" multiple onchange="renderSelectedReturnImagePreview()">
+                            <input type="file" class="form-control" id="returnImageUpload" accept="image/*" multiple>
                             <div id="returnSelectedImagePreview"></div>
                             <div id="returnExistingImages" class="row g-2 mt-2"></div>
                         </div>
 
                         <button type="button" class="btn btn-outline-primary btn-sm mt-2"
-                            onclick="uploadReturnImagesForCurrentReturn(document.getElementById('returnItemId').value)">
+                            id="uploadReturnImagesButton">
                             Fotos hochladen
                         </button>
 
@@ -469,7 +467,7 @@
 
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Abbrechen</button>
-                    <button type="button" class="btn btn-success" onclick="submitOrderItemReturn()">
+                    <button type="button" class="btn btn-success" id="submitOrderItemReturnButton">
                         Rückgabe speichern
                     </button>
                 </div>
@@ -508,7 +506,7 @@
 
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Abbrechen</button>
-                    <button type="button" class="btn btn-success" onclick="submitManualPayment()">
+                    <button type="button" class="btn btn-success" id="manualPaymentSubmitButton">
                         Zahlung erfassen
                     </button>
                 </div>

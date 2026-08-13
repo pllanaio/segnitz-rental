@@ -68,7 +68,7 @@
                     </a>
 
                     <a id="logout-button" href="#" style="display: none;">
-                        <button type="button" class="btn btn-danger sidebar-btn mt-2" onclick="logout()">
+                        <button type="button" class="btn btn-danger sidebar-btn mt-2" id="logoutActionButton">
                             <i class="bi bi-x-circle"></i>
                             Abmelden
                         </button>
@@ -93,7 +93,7 @@
                 </div>
 
                 <div id="qbox-container_form" class="flex-grow-1 w-100 p-4 p-lg-5">
-                    <form id="productSearchForm" onsubmit="return false;"></form>
+                    <form id="productSearchForm"></form>
                     <form class="needs-validation" id="form-wrapper" method="post" name="form-wrapper" novalidate="">
 
                         <div id="steps-container">
@@ -302,7 +302,7 @@
                                         <div class="row justify-content-center">
                                             <div class="col-md-auto">
                                                 <button id="clear-signature" class="btn btn-warning"
-                                                    onclick="clearCanvas()" type="button">Signaturfeld
+                                                    type="button">Signaturfeld
                                                     leeren</button>
                                             </div>
                                         </div>
@@ -581,7 +581,7 @@
                         </div>
 
                         <div class="text-end mt-3">
-                            <button type="button" class="btn btn-outline-danger btn-sm" onclick="clearCart()">
+                            <button type="button" class="btn btn-outline-danger btn-sm" id="clearCartButton">
                                 <i class="bi bi-trash"></i>
                                 Warenkorb leeren
                             </button>
@@ -593,7 +593,7 @@
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
                         Schließen
                     </button>
-                    <button type="button" class="btn btn-primary" id="cartModalNextBtn" onclick="goToNextStepFromCart()"
+                    <button type="button" class="btn btn-primary" id="cartModalNextBtn"
                         disabled>
                         Weiter
                     </button>
@@ -642,7 +642,7 @@
                         Abbrechen
                     </button>
 
-                    <button type="button" class="btn btn-primary" onclick="saveCartItemRentalPeriod()">
+                    <button type="button" class="btn btn-primary" id="saveCartItemRentalPeriodButton">
 
                         Zeitraum speichern
                     </button>

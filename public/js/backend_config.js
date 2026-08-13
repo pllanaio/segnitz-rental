@@ -2,6 +2,7 @@ let products = [];
 let filteredProducts = [];
 let orders = [];
 let currentOrderItems = [];
+let currentOrderPayments = [];
 let availableCategories = [];
 let currentOrderPage = 1;
 const ordersPerPage = 10;
@@ -18,6 +19,57 @@ document.addEventListener('DOMContentLoaded', () => {
     const form = document.getElementById('productForm');
     const cancelEditBtn = document.getElementById('cancelEditBtn');
     const orderSearchInput = document.getElementById('orderSearchInput');
+
+    document.addEventListener('click', handleBackendActionClick);
+
+    document.querySelectorAll('[data-backend-view]').forEach(button => {
+        button.addEventListener('click', () => switchBackendView(button.dataset.backendView));
+    });
+
+    document.getElementById('backendLogoutButton')?.addEventListener('click', logout);
+    document.getElementById('saveOpeningHoursButton')?.addEventListener('click', saveOpeningHours);
+    document.getElementById('submitOrderItemRentalPeriodButton')
+        ?.addEventListener('click', submitOrderItemRentalPeriod);
+    document.getElementById('submitCancelOrderItemButton')
+        ?.addEventListener('click', submitCancelOrderItem);
+    document.getElementById('submitOrderItemReturnButton')
+        ?.addEventListener('click', submitOrderItemReturn);
+    document.getElementById('uploadReturnImagesButton')?.addEventListener('click', () => {
+        const itemId = document.getElementById('returnItemId').value;
+        uploadReturnImagesForCurrentReturn(itemId);
+    });
+    document.getElementById('returnImageUpload')
+        ?.addEventListener('change', renderSelectedReturnImagePreview);
+
+    const manualPaymentSubmitButton = document.getElementById('manualPaymentSubmitButton');
+    manualPaymentSubmitButton?.addEventListener('click', () => {
+        if (manualPaymentSubmitButton.dataset.operation === 'refund') {
+            submitManualRefund();
+            return;
+        }
+
+        submitManualPayment();
+    });
+
+    document.getElementById('rentalPeriodEnd')?.addEventListener('input', updateRentalPeriodPreview);
+    document.getElementById('rentalPeriodEnd')?.addEventListener('change', updateRentalPeriodPreview);
+
+    [
+        'returnActualDate',
+        'returnAdjustedStart',
+        'returnAdjustedEnd',
+        'returnPricePerDay',
+        'returnStatus',
+        'returnDepositDecision',
+        'returnIsDamaged',
+        'returnIsLate',
+        'returnDepositDeductionPercent',
+        'returnAdditionalChargeAmount'
+    ].forEach(id => {
+        const element = document.getElementById(id);
+        element?.addEventListener('input', applyOrderItemReturnModalRules);
+        element?.addEventListener('change', applyOrderItemReturnModalRules);
+    });
     [
         'orderYearFilter',
         'orderMonthFilter',
@@ -74,6 +126,55 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 });
+
+function getOptionalNumber(value) {
+    if (value === undefined || value === null || value === '') {
+        return null;
+    }
+
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+}
+
+function handleBackendActionClick(event) {
+    const button = event.target.closest('[data-backend-action]');
+
+    if (!button || button.disabled) return;
+
+    const action = button.dataset.backendAction;
+    const orderId = getOptionalNumber(button.dataset.orderId);
+    const itemId = getOptionalNumber(button.dataset.itemId);
+    const paymentId = getOptionalNumber(button.dataset.paymentId);
+    const productId = getOptionalNumber(button.dataset.productId);
+    const amount = getOptionalNumber(button.dataset.amount) || 0;
+
+    const actions = {
+        'edit-product': () => editProduct(productId),
+        'delete-product': () => deleteProduct(productId),
+        'open-order-details': () => openOrderDetails(orderId),
+        'change-order-page': () => changeOrderPage(Number(button.dataset.direction)),
+        'cancel-order': () => cancelOrder(orderId),
+        'open-manual-payment': () => openManualPaymentModal(
+            orderId,
+            itemId,
+            button.dataset.paymentType,
+            amount
+        ),
+        'open-manual-refund': () => openManualRefundModal(
+            orderId,
+            itemId,
+            button.dataset.paymentType,
+            amount
+        ),
+        'retry-online-refund': () => retryOnlineRefund(paymentId, orderId),
+        'mark-item-picked-up': () => markOrderItemPickedUp(orderId, itemId),
+        'open-rental-period': () => openRentalPeriodModal(orderId, itemId),
+        'open-cancel-item': () => openCancelOrderItemModal(orderId, itemId),
+        'open-return-item': () => openOrderItemReturnModal(orderId, itemId)
+    };
+
+    actions[action]?.();
+}
 
 async function loadProducts() {
     const productList = document.getElementById('productList');
@@ -133,10 +234,12 @@ function createProductCard(product) {
                 </div>
 
                 <div class="col-12 col-md-2 text-md-end">
-                    <button type="button" class="btn btn-primary btn-sm mb-2 w-100" onclick="editProduct(${product.id})">
+                    <button type="button" class="btn btn-primary btn-sm mb-2 w-100"
+                        data-backend-action="edit-product" data-product-id="${product.id}">
                         Bearbeiten
                     </button>
-                    <button type="button" class="btn btn-danger btn-sm w-100" onclick="deleteProduct(${product.id})">
+                    <button type="button" class="btn btn-danger btn-sm w-100"
+                        data-backend-action="delete-product" data-product-id="${product.id}">
                         Löschen
                     </button>
                 </div>
@@ -623,7 +726,7 @@ function renderOrders() {
                     </div>
 
                     <button class="btn btn-primary btn-sm"
-                        onclick="openOrderDetails(${order.id})">
+                        data-backend-action="open-order-details" data-order-id="${order.id}">
                         Details
                     </button>
                 </div>
@@ -644,13 +747,13 @@ function renderOrders() {
     <div class="btn-group">
         <button type="button" class="btn btn-outline-primary btn-sm"
             ${currentOrderPage <= 1 ? 'disabled' : ''}
-            onclick="changeOrderPage(-1)">
+            data-backend-action="change-order-page" data-direction="-1">
             Zurück
         </button>
 
         <button type="button" class="btn btn-outline-primary btn-sm"
             ${currentOrderPage >= totalPages ? 'disabled' : ''}
-            onclick="changeOrderPage(1)">
+            data-backend-action="change-order-page" data-direction="1">
             Weiter
         </button>
     </div>
@@ -694,6 +797,7 @@ async function openOrderDetails(orderId) {
 function renderOrderDetails(order) {
     const body = document.getElementById('orderDetailsBody');
     currentOrderItems = order.items || [];
+    currentOrderPayments = order.payments || [];
 
     const status = String(order.status || '').trim().toLowerCase();
 
@@ -712,7 +816,7 @@ function renderOrderDetails(order) {
             </p>
 
             <button type="button" class="btn btn-danger"
-                onclick="cancelOrder(${order.id})">
+                data-backend-action="cancel-order" data-order-id="${order.id}">
                 Bestellung stornieren
             </button>
         </div>
@@ -762,7 +866,7 @@ function renderOrderDetails(order) {
 
             <div class="col-12">
                 <h5>Artikel</h5>
-                ${renderOrderCashActionPanel(order)}
+                ${renderOrderPaymentActionPanel(order)}
                 ${itemsHtml}
                 ${renderOrderFinancialSummary(order)}
             </div>
@@ -771,21 +875,13 @@ function renderOrderDetails(order) {
     `;
 }
 
-function renderOrderCashActionPanel(order) {
+function renderOrderPaymentActionPanel(order) {
     const payments = order.payments || [];
     const orderStatus = String(order.status || '').toLowerCase();
-    const paymentMethod = String(order.payment_method || '').toLowerCase();
     const paymentStatus = String(order.payment_status || '').toLowerCase();
 
-    if (paymentMethod !== 'cash') {
-        return '';
-    }
-
-    if (['cancelled', 'expired'].includes(orderStatus)) {
-        return '';
-    }
-
     const actions = [];
+    const orderIsClosed = ['cancelled', 'expired'].includes(orderStatus);
 
     const openInitialPayments = payments.filter(payment =>
         ['rental', 'deposit'].includes(payment.paymentType) &&
@@ -805,7 +901,7 @@ function renderOrderCashActionPanel(order) {
         payment.paymentStatus === 'paid'
     );
 
-    if (initialAmount > 0 && !initialPaid) {
+    if (!orderIsClosed && initialAmount > 0 && !initialPaid) {
         actions.push(`
             <div class="cash-action-row">
                 <div>
@@ -817,7 +913,11 @@ function renderOrderCashActionPanel(order) {
                     <strong>${initialAmount.toFixed(2)} €</strong>
                     <button type="button"
                         class="btn btn-success btn-sm"
-                        onclick="openManualPaymentModal(${order.id}, null, 'initial_payment', ${initialAmount})">
+                        data-backend-action="open-manual-payment"
+                        data-order-id="${order.id}"
+                        data-item-id=""
+                        data-payment-type="initial_payment"
+                        data-amount="${initialAmount}">
                         Miete und Kaution bar kassieren
                     </button>
                 </div>
@@ -826,6 +926,7 @@ function renderOrderCashActionPanel(order) {
     }
 
     const openRentalAdjustments = payments.filter(payment =>
+        !orderIsClosed &&
         payment.paymentType === 'rental_adjustment' &&
         payment.paymentMethod === 'cash' &&
         ['pending', 'open'].includes(payment.paymentStatus)
@@ -843,12 +944,11 @@ function renderOrderCashActionPanel(order) {
                     <strong>${Number(payment.amount || 0).toFixed(2)} €</strong>
                     <button type="button"
                         class="btn btn-success btn-sm"
-                        onclick="openManualPaymentModal(
-                            ${payment.orderId},
-                            ${payment.orderItemId || 'null'},
-                            'rental_adjustment',
-                            ${Number(payment.amount || 0)}
-                        )">
+                        data-backend-action="open-manual-payment"
+                        data-order-id="${payment.orderId}"
+                        data-item-id="${payment.orderItemId || ''}"
+                        data-payment-type="rental_adjustment"
+                        data-amount="${Number(payment.amount || 0)}">
                         Verlängerung bar kassieren
                     </button>
                 </div>
@@ -857,6 +957,7 @@ function renderOrderCashActionPanel(order) {
     });
 
     const openReturnCharges = payments.filter(payment =>
+        !orderIsClosed &&
         payment.paymentType === 'return_additional_charge' &&
         payment.paymentMethod === 'cash' &&
         ['pending', 'open'].includes(payment.paymentStatus)
@@ -874,12 +975,11 @@ function renderOrderCashActionPanel(order) {
                     <strong>${Number(payment.amount || 0).toFixed(2)} €</strong>
                     <button type="button"
                         class="btn btn-success btn-sm"
-                        onclick="openManualPaymentModal(
-                            ${payment.orderId},
-                            ${payment.orderItemId || 'null'},
-                            'return_additional_charge',
-                            ${Number(payment.amount || 0)}
-                        )">
+                        data-backend-action="open-manual-payment"
+                        data-order-id="${payment.orderId}"
+                        data-item-id="${payment.orderItemId || ''}"
+                        data-payment-type="return_additional_charge"
+                        data-amount="${Number(payment.amount || 0)}">
                         Nachzahlung bar kassieren
                     </button>
                 </div>
@@ -905,18 +1005,93 @@ function renderOrderCashActionPanel(order) {
                     <strong>${Math.abs(Number(payment.amount || 0)).toFixed(2)} €</strong>
                     <button type="button"
                         class="btn btn-outline-danger btn-sm"
-                        onclick="openManualRefundModal(
-                            ${payment.orderId},
-                            ${payment.orderItemId || 'null'},
-                            'deposit_refund',
-                            ${Math.abs(Number(payment.amount || 0))}
-                        )">
+                        data-backend-action="open-manual-refund"
+                        data-order-id="${payment.orderId}"
+                        data-item-id="${payment.orderItemId || ''}"
+                        data-payment-type="deposit_refund"
+                        data-amount="${Math.abs(Number(payment.amount || 0))}">
                         Kaution bar erstatten
                     </button>
                 </div>
             </div>
         `);
     });
+
+    const openCancellationRefunds = payments.filter(payment =>
+        payment.paymentType === 'order_cancellation_refund' &&
+        payment.paymentMethod === 'cash' &&
+        ['pending', 'open'].includes(payment.paymentStatus)
+    );
+
+    openCancellationRefunds.forEach(payment => {
+        actions.push(`
+            <div class="cash-action-row">
+                <div>
+                    <div class="cash-action-title">Storno-Rückerstattung</div>
+                    <div class="small text-muted">Der bereits kassierte Betrag ist bar zurückzuzahlen.</div>
+                </div>
+
+                <div class="cash-action-controls">
+                    <strong>${Math.abs(Number(payment.amount || 0)).toFixed(2)} €</strong>
+                    <button type="button"
+                        class="btn btn-outline-danger btn-sm"
+                        data-backend-action="open-manual-refund"
+                        data-order-id="${payment.orderId}"
+                        data-item-id="${payment.orderItemId || ''}"
+                        data-payment-type="order_cancellation_refund"
+                        data-amount="${Math.abs(Number(payment.amount || 0))}">
+                        Storno bar erstatten
+                    </button>
+                </div>
+            </div>
+        `);
+    });
+
+    const retryableRefundTypes = new Set([
+        'deposit_refund',
+        'order_cancellation_refund',
+        'duplicate_payment_refund'
+    ]);
+    const latestOnlineRefundByTarget = new Map();
+
+    payments
+        .filter(payment =>
+            retryableRefundTypes.has(payment.paymentType) &&
+            payment.paymentMethod === 'online'
+        )
+        .sort((a, b) => Number(a.id || 0) - Number(b.id || 0))
+        .forEach(payment => {
+            const key = [
+                payment.paymentType,
+                payment.orderItemId || 'order',
+                payment.molliePaymentId || 'unknown'
+            ].join(':');
+            latestOnlineRefundByTarget.set(key, payment);
+        });
+
+    [...latestOnlineRefundByTarget.values()]
+        .filter(payment => ['failed', 'cancelled'].includes(payment.paymentStatus))
+        .forEach(payment => {
+            actions.push(`
+                <div class="cash-action-row">
+                    <div>
+                        <div class="cash-action-title">Online-Erstattung fehlgeschlagen</div>
+                        <div class="small text-muted">${formatPaymentType(payment.paymentType)} muss erneut bei Mollie beauftragt werden.</div>
+                    </div>
+
+                    <div class="cash-action-controls">
+                        <strong>${Math.abs(Number(payment.amount || 0)).toFixed(2)} €</strong>
+                        <button type="button"
+                            class="btn btn-outline-warning btn-sm"
+                            data-backend-action="retry-online-refund"
+                            data-payment-id="${payment.id}"
+                            data-order-id="${order.id}">
+                            Erstattung erneut versuchen
+                        </button>
+                    </div>
+                </div>
+            `);
+        });
 
     if (actions.length === 0) {
         return '';
@@ -926,7 +1101,7 @@ function renderOrderCashActionPanel(order) {
         <div class="col-12">
             <div class="card checkout-summary mb-3">
                 <div class="card-body">
-                    <h5 class="mb-3">Offene Barvorgänge</h5>
+                    <h5 class="mb-3">Offene Zahlungs- und Erstattungsvorgänge</h5>
                     ${actions.join('')}
                 </div>
             </div>
@@ -949,9 +1124,13 @@ function renderOrderItemCard(order, item) {
     const isCancelled = itemStatus === 'cancelled';
     const isReturned = String(itemStatus).startsWith('returned_');
     const orderStatus = String(order.status || '').trim().toLowerCase();
+    const orderPaymentIsPaid = String(order.payment_status || '').toLowerCase() === 'paid';
     const isExpired = orderStatus === 'expired';
-    const canEdit = ['active', 'picked_up'].includes(itemStatus) && !isExpired;
-    const canCancelItem = itemStatus === 'active' && !isExpired;
+    const canEdit = ['active', 'picked_up'].includes(itemStatus) && !isExpired && orderPaymentIsPaid;
+    const canCancelItem = itemStatus === 'active' && !isExpired && !(
+        String(order.payment_method || '').toLowerCase() === 'online' && !orderPaymentIsPaid
+    );
+    const canPickUp = itemStatus === 'active' && !isExpired && orderPaymentIsPaid;
     const isPickedUp = itemStatus === 'picked_up';
     const canReturn = itemStatus === 'picked_up' && !isCancelled && !isReturned && !isExpired;
 
@@ -1000,28 +1179,32 @@ function renderOrderItemCard(order, item) {
                     <div class="d-flex gap-2 flex-wrap align-items-start">
                         <button type="button"
                             class="btn btn-outline-success btn-sm"
-                            ${itemStatus === 'active' ? '' : 'disabled'}
-                            onclick="markOrderItemPickedUp(${order.id}, ${item.id})">
+                            ${canPickUp ? '' : 'disabled'}
+                            data-backend-action="mark-item-picked-up"
+                            data-order-id="${order.id}" data-item-id="${item.id}">
                             Als abgeholt markieren
                         </button>
                         <button type="button"
                             class="btn btn-outline-primary btn-sm"
                             ${canEdit ? '' : 'disabled'}
-                            onclick="openRentalPeriodModal(${order.id}, ${item.id})">
+                            data-backend-action="open-rental-period"
+                            data-order-id="${order.id}" data-item-id="${item.id}">
                             Mietzeitraum verlängern
                         </button>
 
                         <button type="button"
                             class="btn btn-outline-danger btn-sm"
                             ${canCancelItem ? '' : 'disabled'}
-                            onclick="openCancelOrderItemModal(${order.id}, ${item.id})">
+                            data-backend-action="open-cancel-item"
+                            data-order-id="${order.id}" data-item-id="${item.id}">
                             Artikel stornieren
                         </button>
 
                         <button type="button"
                             class="btn btn-success btn-sm"
                             ${canReturn ? '' : 'disabled'}
-                            onclick="openOrderItemReturnModal(${order.id}, ${item.id})">
+                            data-backend-action="open-return-item"
+                            data-order-id="${order.id}" data-item-id="${item.id}">
                             Rückgabe
                         </button>
                     </div>
@@ -1341,7 +1524,10 @@ function getOrderItemStatusBadge(item) {
         returned_late: 'warning',
         returned_damaged: 'danger',
         returned_late_damaged: 'danger',
-        picked_up: 'info'
+        picked_up: 'info',
+        pending_payment: 'warning',
+        payment_failed: 'danger',
+        payment_dispute: 'danger'
     };
 
     const labels = {
@@ -1351,7 +1537,10 @@ function getOrderItemStatusBadge(item) {
         returned_late: 'Verspätet zurück',
         returned_damaged: 'Beschädigt zurück',
         returned_late_damaged: 'Verspätet + beschädigt',
-        picked_up: 'Abgeholt'
+        picked_up: 'Abgeholt',
+        pending_payment: 'Zahlung ausstehend',
+        payment_failed: 'Zahlung fehlgeschlagen',
+        payment_dispute: 'Zahlung strittig'
     };
 
     return `<span class="badge bg-${map[status] || 'secondary'}">${labels[status] || status || '-'}</span>`;
@@ -1373,16 +1562,30 @@ function getPaymentBadge(status) {
         paid: 'success',
         unpaid: 'warning',
         pending: 'warning',
+        open: 'warning',
+        authorized: 'info',
         failed: 'danger',
-        refunded: 'secondary'
+        cancelled: 'dark',
+        expired: 'dark',
+        refunded: 'secondary',
+        refund_pending: 'warning',
+        refund_failed: 'danger',
+        charged_back: 'danger'
     };
 
     const labels = {
         paid: 'Bezahlt',
         unpaid: 'Unbezahlt',
         pending: 'Ausstehend',
+        open: 'Ausstehend',
+        authorized: 'Autorisiert',
         failed: 'Fehlgeschlagen',
-        refunded: 'Erstattet'
+        cancelled: 'Storniert',
+        expired: 'Abgelaufen',
+        refunded: 'Erstattet',
+        refund_pending: 'Erstattung läuft',
+        refund_failed: 'Erstattung fehlgeschlagen',
+        charged_back: 'Rückbelastet'
     };
 
     return `<span class="badge bg-${map[status] || 'secondary'} me-1">
@@ -1535,7 +1738,6 @@ function renderItemPayments(order, item) {
 
     const orderStatus = String(order.status || '').toLowerCase();
     const canAcceptPayments = !['cancelled', 'expired'].includes(orderStatus);
-    const isCashOrder = String(order.payment_method || '').toLowerCase() === 'cash';
 
     const payments = order.payments || [];
 
@@ -1555,7 +1757,7 @@ function renderItemPayments(order, item) {
     const openRentalAdjustment = itemPayments
         .filter(payment =>
             payment.paymentType === 'rental_adjustment' &&
-            payment.paymentStatus !== 'paid'
+            ['pending', 'open', 'authorized', 'failed', 'cancelled', 'expired'].includes(payment.paymentStatus)
         )
         .sort((a, b) => Number(b.id || 0) - Number(a.id || 0))[0];
 
@@ -1623,15 +1825,14 @@ ${rentalPaid
         }
         <br>
 
-            ${canAcceptPayments && isCashOrder && openRentalAdjustment ? `
+            ${canAcceptPayments && openRentalAdjustment ? `
                 <button type="button"
                     class="btn btn-outline-success btn-sm ms-2"
-                    onclick="openManualPaymentModal(
-                    ${openRentalAdjustment.orderId},
-                    ${openRentalAdjustment.orderItemId || 'null'},
-                    '${openRentalAdjustment.paymentType}',
-                    ${Number(openRentalAdjustment.amount || 0)}
-                )">
+                    data-backend-action="open-manual-payment"
+                    data-order-id="${openRentalAdjustment.orderId}"
+                    data-item-id="${openRentalAdjustment.orderItemId || ''}"
+                    data-payment-type="${openRentalAdjustment.paymentType}"
+                    data-amount="${Number(openRentalAdjustment.amount || 0)}">
                     Barzahlung erfassen
                 </button>
             ` : ''}
@@ -1656,27 +1857,25 @@ ${rentalPaid
             ${openCashDepositRefund && !hasCashDepositRefund ? `
                 <button type="button"
                     class="btn btn-outline-danger btn-sm ms-2"
-                    onclick="openManualRefundModal(
-                        ${order.id},
-                        ${item.id},
-                        'deposit_refund',
-                        ${Math.abs(Number(openCashDepositRefund.amount || 0))}
-                    )">
+                    data-backend-action="open-manual-refund"
+                    data-order-id="${order.id}"
+                    data-item-id="${item.id}"
+                    data-payment-type="deposit_refund"
+                    data-amount="${Math.abs(Number(openCashDepositRefund.amount || 0))}">
                     Kaution bar erstatten
                 </button>
             ` : ''}
 
 
 
-            ${canAcceptPayments && isCashOrder && returnCharge && !hasPaidPayment('return_additional_charge') ? `
+            ${canAcceptPayments && returnCharge && !hasPaidPayment('return_additional_charge') ? `
                 <button type="button"
                     class="btn btn-outline-success btn-sm ms-2"
-                    onclick="openManualPaymentModal(
-                        ${returnCharge.orderId},
-                        ${returnCharge.orderItemId || 'null'},
-                        '${returnCharge.paymentType}',
-                        ${Number(returnCharge.amount || 0)}
-                    )">
+                    data-backend-action="open-manual-payment"
+                    data-order-id="${returnCharge.orderId}"
+                    data-item-id="${returnCharge.orderItemId || ''}"
+                    data-payment-type="${returnCharge.paymentType}"
+                    data-amount="${Number(returnCharge.amount || 0)}">
                     Barzahlung erfassen
                 </button>
             ` : ''}
@@ -1686,8 +1885,9 @@ ${rentalPaid
 
 function openManualPaymentModal(orderId, orderItemId, paymentType, amount) {
     document.querySelector('#manualPaymentModal .modal-title').textContent = 'Barzahlung erfassen';
-    document.querySelector('#manualPaymentModal .btn-success').textContent = 'Zahlung erfassen';
-    document.querySelector('#manualPaymentModal .btn-success').onclick = submitManualPayment;
+    const submitButton = document.getElementById('manualPaymentSubmitButton');
+    submitButton.textContent = 'Zahlung erfassen';
+    submitButton.dataset.operation = 'payment';
     document.getElementById('manualPaymentOrderId').value = orderId;
     document.getElementById('manualPaymentOrderItemId').value = orderItemId || '';
     document.getElementById('manualPaymentType').value = paymentType;
@@ -1706,8 +1906,9 @@ function openManualRefundModal(orderId, orderItemId, paymentType, amount) {
     document.getElementById('manualPaymentNote').value = 'Bar-Rückerstattung an Kunden ausgezahlt';
 
     document.querySelector('#manualPaymentModal .modal-title').textContent = 'Bar-Rückerstattung erfassen';
-    document.querySelector('#manualPaymentModal .btn-success').textContent = 'Rückerstattung erfassen';
-    document.querySelector('#manualPaymentModal .btn-success').onclick = submitManualRefund;
+    const submitButton = document.getElementById('manualPaymentSubmitButton');
+    submitButton.textContent = 'Rückerstattung erfassen';
+    submitButton.dataset.operation = 'refund';
 
     new bootstrap.Modal(document.getElementById('manualPaymentModal')).show();
 }
@@ -1818,6 +2019,44 @@ async function submitManualRefund() {
     }
 }
 
+async function retryOnlineRefund(paymentId, orderId) {
+    const confirmed = await showConfirm(
+        'Soll die fehlgeschlagene Online-Erstattung erneut bei Mollie beauftragt werden?',
+        'Erstattung erneut versuchen'
+    );
+
+    if (!confirmed) return;
+
+    try {
+        const response = await fetch(`/admin/order-payments/${paymentId}/retry-refund`, {
+            method: 'POST'
+        });
+        const result = await response.json();
+
+        if (!response.ok) {
+            showAlert(result.error || 'Erstattung konnte nicht erneut gestartet werden.', 'danger');
+            return;
+        }
+
+        showAlert(
+            result.message || 'Erstattung wurde erneut gestartet.',
+            result.paymentStatus === 'failed' ? 'warning' : 'success'
+        );
+
+        const detailsResponse = await fetch(`/admin/orders/${orderId}`);
+        const updatedOrder = await detailsResponse.json();
+
+        if (detailsResponse.ok) {
+            renderOrderDetails(updatedOrder);
+        }
+
+        await loadOrders();
+    } catch (error) {
+        console.error('Fehler beim erneuten Starten der Online-Erstattung:', error);
+        showAlert('Erstattung konnte nicht erneut gestartet werden.', 'danger');
+    }
+}
+
 function formatPaymentType(type) {
     const labels = {
         initial_payment: 'Initialzahlung',
@@ -1826,7 +2065,8 @@ function formatPaymentType(type) {
         rental_adjustment: 'Nachzahlung Mietzeitraum',
         return_additional_charge: 'Nachzahlung Rückgabe',
         deposit_refund: 'Kautionsrückerstattung',
-        order_cancellation_refund: 'Storno-Rückerstattung'
+        order_cancellation_refund: 'Storno-Rückerstattung',
+        duplicate_payment_refund: 'Erstattung einer Doppelzahlung'
     };
 
     return labels[type] || type || '-';
@@ -1835,18 +2075,34 @@ function formatPaymentType(type) {
 function formatPaymentStatusBadge(status) {
     const map = {
         pending: 'warning',
+        open: 'warning',
+        authorized: 'info',
         paid: 'success',
         failed: 'danger',
         cancelled: 'dark',
-        expired: 'secondary'
+        expired: 'secondary',
+        replaced: 'info',
+        offset: 'info',
+        refunded: 'secondary',
+        refund_pending: 'warning',
+        refund_failed: 'danger',
+        charged_back: 'danger'
     };
 
     const labels = {
         pending: 'Offen',
+        open: 'Offen',
+        authorized: 'Autorisiert',
         paid: 'Bezahlt',
         failed: 'Fehlgeschlagen',
         cancelled: 'Abgebrochen',
-        expired: 'Abgelaufen'
+        expired: 'Abgelaufen',
+        replaced: 'Durch Barzahlung ersetzt',
+        offset: 'Mit Kaution verrechnet',
+        refunded: 'Erstattet',
+        refund_pending: 'Erstattung läuft',
+        refund_failed: 'Erstattung fehlgeschlagen',
+        charged_back: 'Rückbelastet'
     };
 
     return `<span class="badge bg-${map[status] || 'secondary'}">${labels[status] || status || '-'}</span>`;
@@ -2012,28 +2268,17 @@ function openRentalPeriodModal(orderId, itemId) {
 
     document.getElementById('rentalPeriodOrderId').value = orderId;
     document.getElementById('rentalPeriodItemId').value = itemId;
-    const isPickedUp = (item.itemStatus || item.item_status) === 'picked_up';
-    const pickedUpDate = item.pickedUpAt || item.picked_up_at || todayDateString();
     document.getElementById('rentalPeriodPaymentMethod').value = 'online';
 
     const rentalPeriodStartInput = document.getElementById('rentalPeriodStart');
 
-    rentalPeriodStartInput.value = isPickedUp
-        ? pickedUpDate.slice(0, 10)
-        : item.adjustedRentalStart || item.rentalStart || '';
-
-    rentalPeriodStartInput.disabled = isPickedUp;
+    rentalPeriodStartInput.value = item.adjustedRentalStart || item.rentalStart || '';
+    rentalPeriodStartInput.disabled = true;
 
     document.getElementById('rentalPeriodEnd').value = item.adjustedRentalEnd || item.rentalEnd || '';
     document.getElementById('rentalPeriodPricePerDay').value = item.adjustedPricePerDay || item.pricePerDay || '';
 
     updateRentalPeriodPreview();
-
-    ['rentalPeriodEnd'].forEach(id => {
-        const element = document.getElementById(id);
-        element.oninput = updateRentalPeriodPreview;
-        element.onchange = updateRentalPeriodPreview;
-    });
 
     new bootstrap.Modal(document.getElementById('orderItemRentalPeriodModal')).show();
 }
@@ -2148,18 +2393,13 @@ function openOrderItemReturnModal(orderId, itemId) {
     document.getElementById('returnOrderId').value = orderId;
     document.getElementById('returnItemId').value = itemId;
     document.getElementById('returnActualDate').value = item.actualReturnDate || todayDateString();
-    const isPickedUp = (item.itemStatus || item.item_status) === 'picked_up';
-    const pickedUpDate = item.pickedUpAt || item.picked_up_at || item.adjustedRentalStart || item.rentalStart || '';
-
     const returnAdjustedStartInput = document.getElementById('returnAdjustedStart');
+    const returnAdjustedEndInput = document.getElementById('returnAdjustedEnd');
 
-    returnAdjustedStartInput.value = isPickedUp
-        ? pickedUpDate.slice(0, 10)
-        : item.adjustedRentalStart || item.rentalStart || '';
-
-    returnAdjustedStartInput.disabled = isPickedUp;
-
-    document.getElementById('returnAdjustedEnd').value = item.adjustedRentalEnd || item.actualReturnDate || item.rentalEnd || '';
+    returnAdjustedStartInput.value = item.adjustedRentalStart || item.rentalStart || '';
+    returnAdjustedStartInput.disabled = true;
+    returnAdjustedEndInput.value = item.adjustedRentalEnd || item.rentalEnd || '';
+    returnAdjustedEndInput.disabled = true;
     document.getElementById('returnPricePerDay').value = item.adjustedPricePerDay || item.pricePerDay || '';
     document.getElementById('returnStatus').value = item.returnStatus || 'returned_ok';
     document.getElementById('returnDepositDecision').value = item.depositDecision || 'pending';
@@ -2182,23 +2422,6 @@ function openOrderItemReturnModal(orderId, itemId) {
         </a>
     </div>
 `).join('');
-
-    [
-        'returnActualDate',
-        'returnAdjustedStart',
-        'returnAdjustedEnd',
-        'returnPricePerDay',
-        'returnStatus',
-        'returnDepositDecision',
-        'returnIsDamaged',
-        'returnIsLate',
-        'returnDepositDeductionPercent',
-        'returnAdditionalChargeAmount'
-    ].forEach(id => {
-        const element = document.getElementById(id);
-        element.oninput = applyOrderItemReturnModalRules;
-        element.onchange = applyOrderItemReturnModalRules;
-    });
 
     applyOrderItemReturnModalRules();
 
@@ -2225,9 +2448,7 @@ function applyOrderItemReturnModalRules(triggerSource = 'auto') {
     const pricePerDay = Number(item.adjustedPricePerDay || item.pricePerDay || 0);
     const lateFee = lateDays * pricePerDay;
 
-    if (lateDays > 0) {
-        isLateInput.checked = true;
-    }
+    isLateInput.checked = lateDays > 0;
 
     const isLate = isLateInput.checked;
     const isDamaged = isDamagedInput.checked;
@@ -2235,6 +2456,14 @@ function applyOrderItemReturnModalRules(triggerSource = 'auto') {
         normalizeDecimalInput(document.getElementById('returnAdditionalChargeAmount').value) || 0
     );
     const deposit = Number(item.deposit || 0);
+    const openRentalAdjustment = currentOrderPayments
+        .filter(payment =>
+            Number(payment.orderItemId) === Number(item.id) &&
+            payment.paymentType === 'rental_adjustment' &&
+            ['pending', 'open', 'authorized', 'failed', 'cancelled', 'expired'].includes(payment.paymentStatus)
+        )
+        .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+    const totalObligations = repairCosts + lateFee + openRentalAdjustment;
 
     let returnStatus = 'returned_ok';
 
@@ -2246,26 +2475,25 @@ function applyOrderItemReturnModalRules(triggerSource = 'auto') {
         returnStatus = 'returned_late';
     }
 
-    const refundAmount = isDamaged
-        ? Math.max(deposit - repairCosts, 0)
-        : deposit;
-
+    const refundAmount = Math.max(deposit - totalObligations, 0);
     const retainedAmount = Math.max(deposit - refundAmount, 0);
-    const customerAdditionalDue = (
-        isDamaged
-            ? Math.max(repairCosts - deposit, 0)
-            : repairCosts
-    ) + lateFee;
+    const customerAdditionalDue = Math.max(totalObligations - deposit, 0);
 
     returnStatusInput.value = returnStatus;
-    depositDecisionInput.value = refundAmount > 0 ? 'full_refund' : 'no_refund';
+    depositDecisionInput.value = refundAmount >= deposit && deposit > 0
+        ? 'full_refund'
+        : refundAmount > 0
+            ? 'partial_refund'
+            : 'no_refund';
     refundAmountInput.value = refundAmount.toFixed(2);
     deductionPercentInput.value = deposit > 0
         ? ((retainedAmount / deposit) * 100).toFixed(2)
         : 0;
-    deductionReasonInput.value = isDamaged
-        ? 'Reparaturkosten mit Kaution verrechnet'
-        : '';
+    deductionReasonInput.value = [
+        repairCosts > 0 ? 'Zusatzkosten mit Kaution verrechnet' : '',
+        openRentalAdjustment > 0 ? 'Offene Mietverlängerung mit Kaution verrechnet' : '',
+        lateFee > 0 ? 'Verspätungskosten mit Kaution verrechnet' : ''
+    ].filter(Boolean).join(' | ');
 
     document.getElementById('returnPricePerDay').value =
         Number(item.adjustedPricePerDay || item.pricePerDay || 0).toFixed(2);
@@ -2288,6 +2516,13 @@ function applyOrderItemReturnModalRules(triggerSource = 'auto') {
             <div class="checkout-summary-row">
                 <span>Verspätungskosten</span>
                 <strong class="text-danger">${lateFee.toFixed(2)} €</strong>
+            </div>
+        ` : ''}
+
+        ${openRentalAdjustment > 0 ? `
+            <div class="checkout-summary-row">
+                <span>Offene Mietverlängerung</span>
+                <strong class="text-danger">${openRentalAdjustment.toFixed(2)} €</strong>
             </div>
         ` : ''}
 
@@ -2574,12 +2809,13 @@ function calculateOrderItemFinancials(item) {
     const rentalAdjustment = rentalTotal - originalRentalTotal;
 
     const deposit = Number(item.deposit || 0);
-    const depositRefund = Number(item.depositRefundAmount ?? deposit);
-    const depositRetained = Math.max(deposit - depositRefund, 0);
+    const isReturned = String(item.itemStatus || '').startsWith('returned_') || Boolean(item.returnedAt);
+    const depositRefund = isReturned ? Number(item.depositRefundAmount || 0) : 0;
+    const depositRetained = isReturned ? Math.max(deposit - depositRefund, 0) : 0;
     const repairCharge = Number(item.additionalChargeAmount || 0);
     const additionalCharge = repairCharge + lateFee;
     const grossTotalWithDeposit = rentalTotal + deposit;
-    const customerAdditionalDue = Math.max(repairCharge - deposit, 0) + lateFee;
+    const customerAdditionalDue = Math.max(repairCharge + lateFee - deposit, 0);
     const customerCredit = depositRefund;
 
     return {
@@ -2606,6 +2842,7 @@ function calculateOrderItemFinancials(item) {
 
 function renderOrderFinancialSummary(order) {
     const items = order.items || [];
+    const financialItems = items.filter(item => String(item.itemStatus || 'active') !== 'cancelled');
 
     const payments = order.payments || [];
 
@@ -2623,7 +2860,7 @@ function renderOrderFinancialSummary(order) {
         )
         .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
 
-    const totals = items.reduce((sum, item) => {
+    const totals = financialItems.reduce((sum, item) => {
         const f = calculateOrderItemFinancials(item);
 
         sum.rentalTotal += f.rentalTotal;
@@ -2651,16 +2888,45 @@ function renderOrderFinancialSummary(order) {
     const openRentalAdjustments = payments
         .filter(payment =>
             payment.paymentType === 'rental_adjustment' &&
-            ['pending', 'open', 'authorized'].includes(payment.paymentStatus)
+            ['pending', 'open', 'authorized', 'failed', 'cancelled', 'expired'].includes(payment.paymentStatus)
         )
         .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
 
     const chargeableRentalAdjustment = Math.max(openRentalAdjustments, 0);
+    const unsettledReturnAdditionalCharges = payments
+        .filter(payment =>
+            payment.paymentType === 'return_additional_charge' &&
+            ['pending', 'open', 'authorized', 'failed', 'cancelled', 'expired'].includes(payment.paymentStatus)
+        )
+        .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
 
     const paidDepositRefunds = payments
         .filter(payment =>
             payment.paymentType === 'deposit_refund' &&
             payment.paymentStatus === 'paid'
+        )
+        .reduce((sum, payment) => sum + Math.abs(Number(payment.amount || 0)), 0);
+    const latestCancellationRefundsByTarget = new Map();
+    payments
+        .filter(payment =>
+            ['order_cancellation_refund', 'duplicate_payment_refund'].includes(payment.paymentType)
+        )
+        .sort((a, b) => Number(a.id || 0) - Number(b.id || 0))
+        .forEach(payment => {
+            const key = [
+                payment.paymentType,
+                payment.orderItemId || 'order',
+                payment.molliePaymentId || payment.paymentMethod || 'cash'
+            ].join(':');
+            latestCancellationRefundsByTarget.set(key, payment);
+        });
+    const latestCancellationRefunds = [...latestCancellationRefundsByTarget.values()];
+    const paidCancellationRefunds = latestCancellationRefunds
+        .filter(payment => payment.paymentStatus === 'paid')
+        .reduce((sum, payment) => sum + Math.abs(Number(payment.amount || 0)), 0);
+    const outstandingCancellationRefunds = latestCancellationRefunds
+        .filter(payment =>
+            ['pending', 'open', 'authorized', 'failed', 'cancelled'].includes(payment.paymentStatus)
         )
         .reduce((sum, payment) => sum + Math.abs(Number(payment.amount || 0)), 0);
 
@@ -2669,20 +2935,20 @@ function renderOrderFinancialSummary(order) {
         0
     );
 
+    const legacyReturnAdditionalDue = unsettledReturnAdditionalCharges > 0
+        ? 0
+        : Math.max(totals.customerAdditionalDue - paidReturnAdditionalCharges, 0);
     const totalAdditionalDue =
         chargeableRentalAdjustment +
-        totals.customerAdditionalDue;
+        unsettledReturnAdditionalCharges +
+        legacyReturnAdditionalDue;
 
-    const totalPaidAdditionalCharges = paidReturnAdditionalCharges;
-
-    const remainingAdditionalDue = Math.max(
-        totalAdditionalDue - totalPaidAdditionalCharges,
-        0
-    );
+    const remainingAdditionalDue = Math.max(totalAdditionalDue, 0);
 
     const finalBalance =
         remainingAdditionalDue -
-        refundableDeposit;
+        refundableDeposit -
+        outstandingCancellationRefunds;
 
     const finalBalanceClass =
         finalBalance > 0
@@ -2770,6 +3036,34 @@ function renderOrderFinancialSummary(order) {
                     ${paidReturnAdditionalCharges.toFixed(2)} €
                 </strong>
             </div>
+
+            ${chargeableRentalAdjustment > 0 ? `
+                <div class="checkout-summary-row">
+                    <span>Noch auszugleichende Mietverlängerungen</span>
+                    <strong class="text-danger">${chargeableRentalAdjustment.toFixed(2)} €</strong>
+                </div>
+            ` : ''}
+
+            ${unsettledReturnAdditionalCharges > 0 ? `
+                <div class="checkout-summary-row">
+                    <span>Noch auszugleichende Rückgabe-Nachzahlungen</span>
+                    <strong class="text-danger">${unsettledReturnAdditionalCharges.toFixed(2)} €</strong>
+                </div>
+            ` : ''}
+
+            ${paidCancellationRefunds > 0 ? `
+                <div class="checkout-summary-row">
+                    <span>Ausgezahlte Storno-/Doppelzahlungs-Erstattungen</span>
+                    <strong class="text-success">${paidCancellationRefunds.toFixed(2)} €</strong>
+                </div>
+            ` : ''}
+
+            ${outstandingCancellationRefunds > 0 ? `
+                <div class="checkout-summary-row">
+                    <span>Noch auszuzahlende Erstattungen</span>
+                    <strong class="text-warning">${outstandingCancellationRefunds.toFixed(2)} €</strong>
+                </div>
+            ` : ''}
 
             <div class="checkout-summary-total-row mt-3">
                 <span>${finalBalanceLabel}</span>

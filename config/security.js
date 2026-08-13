@@ -32,16 +32,20 @@ function createHelmetOptions(environment = process.env) {
         objectSrc: ["'none'"],
         frameAncestors: ["'none'"],
         formAction: ["'self'"],
-        scriptSrc: ["'self'", "'unsafe-inline'", 'https:'],
-        styleSrc: ["'self'", "'unsafe-inline'", 'https:'],
-        imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
-        fontSrc: ["'self'", 'data:', 'https:'],
-        connectSrc: ["'self'", 'https:']
+        scriptSrc: ["'self'", 'https://cdn.jsdelivr.net'],
+        scriptSrcAttr: ["'none'"],
+        styleSrc: [
+            "'self'",
+            "'unsafe-inline'",
+            'https://cdn.jsdelivr.net',
+            'https://fonts.googleapis.com'
+        ],
+        imgSrc: ["'self'", 'data:', 'blob:'],
+        fontSrc: ["'self'", 'data:', 'https://fonts.gstatic.com'],
+        connectSrc: ["'self'"]
     };
 
-    if (isProduction(environment)) {
-        directives.upgradeInsecureRequests = [];
-    }
+    directives.upgradeInsecureRequests = isProduction(environment) ? [] : null;
 
     return {
         contentSecurityPolicy: { directives },

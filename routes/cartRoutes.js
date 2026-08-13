@@ -5,6 +5,7 @@ const mysql = require('mysql2/promise');
 const dbConfig = require('../config/db');
 const { runDatabaseCleanup } = require('../utils/cleanup');
 const { checkProductAvailability } = require('../utils/availability');
+const { isStrictIsoDate } = require('../services/paymentStateService');
 
 const {
     getOrCreateActiveCart,
@@ -74,7 +75,21 @@ router.post('/cart/items', async (req, res) => {
         });
     }
 
-    if (new Date(rentalEnd) < new Date(rentalStart)) {
+    if (!isStrictIsoDate(rentalStart) || !isStrictIsoDate(rentalEnd)) {
+        return res.status(400).json({
+            error: 'Mietbeginn und Mietende müssen gültige Datumswerte sein.'
+        });
+    }
+
+    const today = new Date().toLocaleDateString('sv-SE');
+
+    if (rentalStart < today) {
+        return res.status(400).json({
+            error: 'Der Mietbeginn darf nicht in der Vergangenheit liegen.'
+        });
+    }
+
+    if (rentalEnd < rentalStart) {
         return res.status(400).json({
             error: 'Das Mietende darf nicht vor dem Mietbeginn liegen.'
         });
@@ -168,7 +183,21 @@ router.put('/cart/items/:id', async (req, res) => {
         });
     }
 
-    if (new Date(rentalEnd) < new Date(rentalStart)) {
+    if (!isStrictIsoDate(rentalStart) || !isStrictIsoDate(rentalEnd)) {
+        return res.status(400).json({
+            error: 'Mietbeginn und Mietende müssen gültige Datumswerte sein.'
+        });
+    }
+
+    const today = new Date().toLocaleDateString('sv-SE');
+
+    if (rentalStart < today) {
+        return res.status(400).json({
+            error: 'Der Mietbeginn darf nicht in der Vergangenheit liegen.'
+        });
+    }
+
+    if (rentalEnd < rentalStart) {
         return res.status(400).json({
             error: 'Das Mietende darf nicht vor dem Mietbeginn liegen.'
         });
@@ -359,4 +388,3 @@ router.delete('/cart', async (req, res) => {
         }
     }
 });
-
