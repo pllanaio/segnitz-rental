@@ -78,13 +78,25 @@ test('enables a restrictive baseline CSP', () => {
   );
 });
 
-test('rate limits item cancellation and return mutations after admin authorization', () => {
+test('protects changed return mutations with CSRF validation and rate limiting', () => {
   assert.match(
     serverSource,
-    /app\.put\(\s*'\/admin\/order-items\/:itemId\/cancel',\s*checkAdmin,\s*adminReturnMutationLimiter,/
+    /app\.put\(\s*'\/admin\/order-items\/:itemId\/cancel',\s*checkAdmin,\s*requireAdminCsrfToken,\s*adminReturnMutationLimiter,/
   );
   assert.match(
     serverSource,
-    /app\.put\(\s*'\/admin\/order-items\/:itemId\/return',\s*checkAdmin,\s*adminReturnMutationLimiter,/
+    /app\.post\(\s*'\/admin\/order-items\/:itemId\/return-images',\s*checkAdmin,\s*requireAdminCsrfToken,/
+  );
+  assert.match(
+    serverSource,
+    /app\.put\(\s*'\/admin\/order-items\/:itemId\/return',\s*checkAdmin,\s*requireAdminCsrfToken,\s*adminReturnMutationLimiter,/
+  );
+  assert.match(
+    serverSource,
+    /app\.post\(\s*'\/admin\/order-payments\/:id\/retry-refund',\s*checkAdmin,\s*requireAdminCsrfToken,/
+  );
+  assert.match(
+    serverSource,
+    /app\.post\(\s*'\/admin\/order-payments\/manual-refund',\s*checkAdmin,\s*requireAdminCsrfToken,/
   );
 });

@@ -275,6 +275,7 @@ test('führt die Rückgabemaske mit Schadensdokumentation und wählbarem Zahlung
     const returnRequest = await returnRequestPromise;
     const payload = returnRequest.postDataJSON();
 
+    expect(returnRequest.headers()['x-csrf-token']).toMatch(/^[a-f0-9]{64}$/);
     expect(payload.isDamaged).toBe(true);
     expect(payload.damageDescription).toBe('Hydraulikleitung gerissen');
     expect(payload.additionalChargeReason).toBe('Reparatur der Hydraulikleitung');

@@ -168,6 +168,32 @@ app.use(session({
     cookie: createSessionCookieOptions()
 }));
 
+function getOrCreateAdminCsrfToken(req) {
+    if (!req.session.adminCsrfToken) {
+        req.session.adminCsrfToken = crypto.randomBytes(32).toString('hex');
+    }
+
+    return req.session.adminCsrfToken;
+}
+
+function requireAdminCsrfToken(req, res, next) {
+    const expectedToken = String(req.session?.adminCsrfToken || '');
+    const providedToken = String(req.get('X-CSRF-Token') || '');
+    const expectedTokenBuffer = Buffer.from(expectedToken, 'utf8');
+    const providedTokenBuffer = Buffer.from(providedToken, 'utf8');
+    const tokensMatch = expectedTokenBuffer.length > 0 &&
+        providedTokenBuffer.length === expectedTokenBuffer.length &&
+        crypto.timingSafeEqual(providedTokenBuffer, expectedTokenBuffer);
+
+    if (!tokensMatch) {
+        return res.status(403).json({
+            error: 'Ungültiges oder fehlendes CSRF-Token.'
+        });
+    }
+
+    return next();
+}
+
 app.use('/', productRoutes);
 app.use('/', cartRoutes);
 
@@ -177,10 +203,15 @@ app.get('/', (req, res) => {
 });
 
 app.get('/auth-status', (req, res) => {
+    const csrfToken = req.session.user && req.session.role === 'global_admin'
+        ? getOrCreateAdminCsrfToken(req)
+        : null;
+
     res.json({
         loggedIn: !!req.session.user,
         user: req.session.user || null,
-        role: req.session.role || null
+        role: req.session.role || null,
+        ...(csrfToken ? { csrfToken } : {})
     });
 });
 
@@ -302,7 +333,10 @@ app.post('/login', loginLimiter, async (req, res) => {
                         rows[0].role === 'global_admin'
                             ? '/backend.html'
                             : '/index.html'
-                    )
+                    ),
+                    ...(rows[0].role === 'global_admin'
+                        ? { csrfToken: getOrCreateAdminCsrfToken(req) }
+                        : {})
                 });
             } catch (sessionError) {
 
@@ -2585,7 +2619,7 @@ app.put('/admin/orders/:id/cancel', checkAdmin, async (req, res) => {
     }
 });
 
-app.put('/admin/order-items/:itemId/cancel', checkAdmin, adminReturnMutationLimiter, async (req, res) => {
+app.put('/admin/order-items/:itemId/cancel', checkAdmin, requireAdminCsrfToken, adminReturnMutationLimiter, async (req, res) => {
     let connection;
 
     try {
@@ -2881,7 +2915,7 @@ async function removeUploadedFiles(files = []) {
     );
 }
 
-app.post('/admin/order-items/:itemId/return-images', checkAdmin, uploadReturnImages.array('images', 10), async (req, res) => {
+app.post('/admin/order-items/:itemId/return-images', checkAdmin, requireAdminCsrfToken, uploadReturnImages.array('images', 10), async (req, res) => {
     let connection;
     let committed = false;
     const uploadedFiles = Array.isArray(req.files) ? req.files : [];
@@ -3390,7 +3424,7 @@ function calculateLateDays(actualReturnDate, plannedReturnDate) {
     return Math.ceil((actual - planned) / (1000 * 60 * 60 * 24));
 }
 
-app.put('/admin/order-items/:itemId/return', checkAdmin, adminReturnMutationLimiter, async (req, res) => {
+app.put('/admin/order-items/:itemId/return', checkAdmin, requireAdminCsrfToken, adminReturnMutationLimiter, async (req, res) => {
     let connection;
 
     try {
@@ -5252,7 +5286,7 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
     }
 });
 
-app.post('/admin/order-payments/:id/retry-refund', checkAdmin, async (req, res) => {
+app.post('/admin/order-payments/:id/retry-refund', checkAdmin, requireAdminCsrfToken, async (req, res) => {
     let connection;
 
     try {
@@ -5416,7 +5450,7 @@ app.post('/admin/order-payments/:id/retry-refund', checkAdmin, async (req, res) 
     }
 });
 
-app.post('/admin/order-payments/manual-refund', checkAdmin, async (req, res) => {
+app.post('/admin/order-payments/manual-refund', checkAdmin, requireAdminCsrfToken, async (req, res) => {
     const {
         orderId,
         orderItemId,

@@ -5,6 +5,8 @@ let currentOrderItems = [];
 let currentOrderPayments = [];
 let availableCategories = [];
 let currentOrderPage = 1;
+let adminCsrfToken = '';
+let backendUserRequest = null;
 const ordersPerPage = 10;
 let orderPagination = {
     page: 1,
@@ -1333,20 +1335,59 @@ ${renderItemPayments(order, item)}
     `;
 }
 
-function loadBackendUser() {
+async function loadBackendUser() {
     const backendLoginStatus = document.getElementById('backend-login-status');
 
-    if (!backendLoginStatus) return;
+    if (backendUserRequest) {
+        return backendUserRequest;
+    }
 
-    fetch('/auth-status')
-        .then(res => res.json())
-        .then(data => {
-            backendLoginStatus.textContent = `Angemeldet als: ${data.user}`;
-        })
-        .catch(err => {
-            console.error('Auth-Status Fehler:', err);
-            backendLoginStatus.textContent = 'Benutzer konnte nicht geladen werden';
-        });
+    backendUserRequest = (async () => {
+        try {
+            const response = await fetch('/auth-status');
+
+            if (!response.ok) {
+                throw new Error(`Auth-Status konnte nicht geladen werden (${response.status}).`);
+            }
+
+            const data = await response.json();
+            adminCsrfToken = String(data.csrfToken || '');
+
+            if (backendLoginStatus) {
+                backendLoginStatus.textContent = `Angemeldet als: ${data.user}`;
+            }
+
+            return data;
+        } catch (error) {
+            adminCsrfToken = '';
+            console.error('Auth-Status Fehler:', error);
+
+            if (backendLoginStatus) {
+                backendLoginStatus.textContent = 'Benutzer konnte nicht geladen werden';
+            }
+
+            return null;
+        } finally {
+            backendUserRequest = null;
+        }
+    })();
+
+    return backendUserRequest;
+}
+
+async function getAdminCsrfHeaders(headers = {}) {
+    if (!adminCsrfToken) {
+        await loadBackendUser();
+    }
+
+    if (!adminCsrfToken) {
+        throw new Error('Das CSRF-Token der Admin-Sitzung konnte nicht geladen werden.');
+    }
+
+    return {
+        ...headers,
+        'X-CSRF-Token': adminCsrfToken
+    };
 }
 
 async function uploadProductImages(productId) {
@@ -2065,9 +2106,9 @@ async function submitManualRefund() {
     try {
         const response = await fetch('/admin/order-payments/manual-refund', {
             method: 'POST',
-            headers: {
+            headers: await getAdminCsrfHeaders({
                 'Content-Type': 'application/json'
-            },
+            }),
             body: JSON.stringify({
                 orderId,
                 orderItemId: orderItemId || null,
@@ -2113,7 +2154,8 @@ async function retryOnlineRefund(paymentId, orderId) {
 
     try {
         const response = await fetch(`/admin/order-payments/${paymentId}/retry-refund`, {
-            method: 'POST'
+            method: 'POST',
+            headers: await getAdminCsrfHeaders()
         });
         const result = await response.json();
 
@@ -2435,9 +2477,9 @@ async function submitCancelOrderItem() {
     try {
         const response = await fetch(`/admin/order-items/${itemId}/cancel`, {
             method: 'PUT',
-            headers: {
+            headers: await getAdminCsrfHeaders({
                 'Content-Type': 'application/json'
-            },
+            }),
             body: JSON.stringify({})
         });
 
@@ -2759,9 +2801,9 @@ async function saveOrderItemReturn(itemId, orderId) {
     try {
         const response = await fetch(`/admin/order-items/${itemId}/return`, {
             method: 'PUT',
-            headers: {
+            headers: await getAdminCsrfHeaders({
                 'Content-Type': 'application/json'
-            },
+            }),
             body: JSON.stringify(payload)
         });
 
@@ -2883,6 +2925,7 @@ async function uploadReturnImagesForCurrentReturn(itemId) {
 
     const response = await fetch(`/admin/order-items/${itemId}/return-images`, {
         method: 'POST',
+        headers: await getAdminCsrfHeaders(),
         body: formData
     });
 
