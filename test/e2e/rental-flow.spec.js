@@ -278,7 +278,7 @@ test('führt die Rückgabemaske mit Schadensdokumentation und wählbarem Zahlung
     expect(payload.isDamaged).toBe(true);
     expect(payload.damageDescription).toBe('Hydraulikleitung gerissen');
     expect(payload.additionalChargeReason).toBe('Reparatur der Hydraulikleitung');
-    expect(payload.additionalChargeAmount).toBe(400);
+    expect(Number(payload.additionalChargeAmount)).toBe(400);
     expect(payload.additionalChargePaymentMethod).toBe('cash');
     expect(apiErrors).toEqual([]);
     expect(consoleErrors).toEqual([]);

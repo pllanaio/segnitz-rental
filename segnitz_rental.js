@@ -137,15 +137,6 @@ const uploadReturnImages = multer({
     fileFilter: imageFileFilter
 });
 
-async function removeUploadedFiles(files = []) {
-    await Promise.allSettled(
-        files
-            .map(file => file?.path)
-            .filter(Boolean)
-            .map(filePath => fsp.unlink(filePath))
-    );
-}
-
 const sessionStore = new MySQLStore({
     host: process.env.DB_HOST,
     port: Number(process.env.DB_PORT),
@@ -2882,6 +2873,15 @@ FOR UPDATE`,
         if (connection) await connection.end();
     }
 });
+
+async function removeUploadedFiles(files = []) {
+    await Promise.allSettled(
+        files
+            .map(file => file?.path)
+            .filter(Boolean)
+            .map(filePath => fsp.unlink(filePath))
+    );
+}
 
 app.post('/admin/order-items/:itemId/return-images', checkAdmin, uploadReturnImages.array('images', 10), async (req, res) => {
     let connection;
