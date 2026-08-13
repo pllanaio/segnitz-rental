@@ -25,12 +25,35 @@ let serverOutput = '';
 class SessionClient {
     constructor() {
         this.cookie = '';
+        this.csrfToken = '';
     }
 
     async request(pathname, options = {}) {
         const headers = new Headers(options.headers || {});
+        const method = String(options.method || 'GET').toUpperCase();
+        const csrfExempt = pathname === '/setup-admin' || pathname === '/webhooks/mollie';
+
+        if (
+            this.csrfToken === '' &&
+            !csrfExempt &&
+            !['GET', 'HEAD', 'OPTIONS'].includes(method)
+        ) {
+            const csrfHeaders = this.cookie ? { cookie: this.cookie } : {};
+            const csrfResponse = await fetch(`${BASE_URL}/csrf-token`, {
+                headers: csrfHeaders
+            });
+            const csrfCookie = csrfResponse.headers.get('set-cookie');
+            if (csrfCookie) this.cookie = csrfCookie.split(';', 1)[0];
+
+            const csrfResult = await csrfResponse.json();
+            assert.equal(csrfResponse.status, 200, JSON.stringify(csrfResult));
+            this.csrfToken = String(csrfResult.csrfToken || '');
+        }
 
         if (this.cookie) headers.set('cookie', this.cookie);
+        if (this.csrfToken && !['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+            headers.set('x-csrf-token', this.csrfToken);
+        }
 
         const response = await fetch(`${BASE_URL}${pathname}`, {
             ...options,
@@ -39,6 +62,8 @@ class SessionClient {
         const setCookie = response.headers.get('set-cookie');
 
         if (setCookie) this.cookie = setCookie.split(';', 1)[0];
+        const responseCsrfToken = response.headers.get('x-csrf-token');
+        if (responseCsrfToken) this.csrfToken = responseCsrfToken;
         return response;
     }
 }
