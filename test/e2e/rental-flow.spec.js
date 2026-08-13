@@ -98,6 +98,189 @@ test('führt Admin-Navigation und dynamische Produktaktionen ohne Inline-Handler
     await expect(page.locator('#openingHoursAdmin')).toContainText('Montag');
 });
 
+test('führt die Rückgabemaske mit Schadensdokumentation und wählbarem Zahlungsweg aus', async ({ page }) => {
+    const rentalStart = futureDate(20);
+    const rentalEnd = futureDate(21);
+    const apiErrors = [];
+    const consoleErrors = [];
+    page.on('pageerror', error => apiErrors.push(error.message));
+    page.on('console', message => {
+        if (message.type() === 'error') consoleErrors.push(message.text());
+    });
+
+    await page.route('**/admin/orders?*', route => route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+            items: [
+                {
+                    id: 77,
+                    order_no: 'R202600077',
+                    status: 'picked_up',
+                    payment_status: 'paid',
+                    payment_method: 'online',
+                    return_status: 'pending',
+                    return_case_status: 'open',
+                    items: [{ id: 771, itemStatus: 'picked_up', returnStatus: 'pending' }]
+                },
+                {
+                    id: 78,
+                    order_no: 'R202600078',
+                    status: 'picked_up',
+                    payment_status: 'paid',
+                    payment_method: 'cash',
+                    return_status: 'returned_ok',
+                    return_case_status: 'refund_pending',
+                    items: [
+                        { id: 781, itemStatus: 'returned_ok', returnStatus: 'returned_ok' },
+                        { id: 782, itemStatus: 'cancelled', returnStatus: 'pending' }
+                    ]
+                }
+            ],
+            pagination: { page: 1, limit: 10, total: 2, totalPages: 1 },
+            filterOptions: {
+                years: ['2026'],
+                months: ['08'],
+                statuses: ['picked_up'],
+                returnStatuses: ['pending', 'returned_ok'],
+                paymentStatuses: ['paid']
+            }
+        })
+    }));
+
+    const orderDetails = {
+        id: 77,
+        order_no: 'R202600077',
+        status: 'picked_up',
+        payment_status: 'paid',
+        payment_method: 'online',
+        return_status: 'pending',
+        return_case_status: 'open',
+        customer_first_name: 'Test',
+        customer_last_name: 'Kunde',
+        customer_email: TEST_USER.email,
+        items: [{
+            id: 771,
+            productId: TEST_PRODUCT.id,
+            title: TEST_PRODUCT.title,
+            rentalStart,
+            rentalEnd,
+            adjustedRentalStart: null,
+            adjustedRentalEnd: null,
+            pricePerDay: 80,
+            deposit: 300,
+            itemStatus: 'picked_up',
+            returnStatus: 'pending',
+            isDamaged: 0,
+            isLate: 0,
+            returnImages: [{
+                id: 7799,
+                imagePath: 'img/returns/return-test.png'
+            }]
+        }],
+        payments: [{
+            id: 7701,
+            orderId: 77,
+            orderItemId: 771,
+            paymentType: 'rental_adjustment',
+            paymentMethod: 'online',
+            paymentStatus: 'pending',
+            amount: 80,
+            checkoutUrl: 'https://checkout.test.mollie.local/tr_test_open_7701'
+        }]
+    };
+
+    await page.route('**/admin/orders/77', route => route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(orderDetails)
+    }));
+    await page.route('**/img/returns/return-test.png', route => route.fulfill({
+        status: 200,
+        contentType: 'image/png',
+        body: Buffer.from(
+            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2nU8AAAAASUVORK5CYII=',
+            'base64'
+        )
+    }));
+    await page.route('**/admin/return-images/7799', route => route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ message: 'Foto gelöscht.' })
+    }));
+    await page.route('**/admin/order-items/771/return', async route => {
+        await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({ message: 'Rückgabe gespeichert.' })
+        });
+    });
+    await page.route('**/admin/order-items/771/send-return-summary', route => route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ message: 'Abschlussmail versendet.' })
+    }));
+
+    await page.goto('/login.html');
+    await page.locator('#username').fill(TEST_ADMIN.email);
+    await page.locator('#password').fill(TEST_ADMIN.password);
+    await page.getByRole('button', { name: 'Einloggen' }).click();
+    await page.goto('/backend.html');
+    await expect(page).toHaveTitle('Segnitz Rental - Backend');
+    await expect(page).toHaveURL(/\/backend\.html$/);
+    await page.getByRole('button', { name: 'Bestellungen' }).click();
+
+    const completedCard = page.locator('#orderList .card', { hasText: 'R202600078' });
+    await expect(completedCard).toContainText('Zurückgegeben');
+    await expect(completedCard).not.toContainText('Teilweise zurückgegeben');
+    await expect(completedCard).toContainText('Erstattung offen');
+
+    const openCard = page.locator('#orderList .card', { hasText: 'R202600077' });
+    await openCard.getByRole('button', { name: 'Details' }).click();
+    await expect(page.getByRole('link', { name: 'Zahlungslink öffnen' })).toHaveAttribute(
+        'href',
+        'https://checkout.test.mollie.local/tr_test_open_7701'
+    );
+
+    const deleteRequestPromise = page.waitForRequest(request =>
+        request.method() === 'DELETE' && request.url().endsWith('/admin/return-images/7799')
+    );
+    await page.getByRole('button', { name: 'Foto löschen' }).click();
+    await page.locator('#confirmModalConfirmBtn').click();
+    await deleteRequestPromise;
+
+    await page.getByRole('button', { name: 'Rückgabe', exact: true }).click();
+
+    await expect(page.locator('#returnIsLate')).toBeDisabled();
+    await expect(page.locator('#returnDamageDescriptionGroup')).toBeHidden();
+    await page.locator('#returnIsDamaged').check();
+    await expect(page.locator('#returnDamageDescriptionGroup')).toBeVisible();
+    await page.locator('#returnDamageDescription').fill('Hydraulikleitung gerissen');
+    await page.locator('#returnAdditionalChargeReason').fill('Reparatur der Hydraulikleitung');
+    await page.locator('#returnAdditionalChargeAmount').fill('400');
+    await expect(page.locator('#returnAdditionalChargePaymentMethodGroup')).toBeVisible();
+    await expect(page.locator('#returnAdditionalChargePaymentMethod')).toHaveValue('online');
+    await page.locator('#returnAdditionalChargePaymentMethod').selectOption('cash');
+    const screenshot = await page.screenshot();
+    expect(screenshot.byteLength).toBeGreaterThan(10_000);
+
+    const returnRequestPromise = page.waitForRequest(request =>
+        request.method() === 'PUT' && request.url().endsWith('/admin/order-items/771/return')
+    );
+    await page.getByRole('button', { name: 'Rückgabe speichern' }).click();
+    await page.locator('#confirmModalConfirmBtn').click();
+    const returnRequest = await returnRequestPromise;
+    const payload = returnRequest.postDataJSON();
+
+    expect(payload.isDamaged).toBe(true);
+    expect(payload.damageDescription).toBe('Hydraulikleitung gerissen');
+    expect(payload.additionalChargeReason).toBe('Reparatur der Hydraulikleitung');
+    expect(payload.additionalChargeAmount).toBe(400);
+    expect(payload.additionalChargePaymentMethod).toBe('cash');
+    expect(apiErrors).toEqual([]);
+    expect(consoleErrors).toEqual([]);
+});
+
 test('verarbeitet den paginierten Kundenauftrags-Vertrag und zeigt vor Rückgabe keine fiktive Kautionserstattung', async ({ page }) => {
     const apiErrors = [];
     page.on('pageerror', error => apiErrors.push(error.message));

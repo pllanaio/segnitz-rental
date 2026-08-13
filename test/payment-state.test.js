@@ -4,7 +4,9 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const {
     calculateReturnSettlement,
+    deriveAggregateReturnStatus,
     deriveOrderStatusFromInitialPayment,
+    deriveReturnCaseStatus,
     isDuplicateKeyError,
     isStrictIsoDate,
     mapMolliePaymentStatus,
@@ -58,6 +60,55 @@ test('verrechnet Schäden, Verlängerung und Verspätung gemeinsam mit der Kauti
         openRentalAdjustmentAmount: 20,
         lateFee: 30
     }).customerAdditionalDue, 100);
+});
+
+test('fasst getrennte verspätete und beschädigte Positionen vollständig zusammen', () => {
+    assert.equal(
+        deriveAggregateReturnStatus(['returned_late', 'returned_damaged']),
+        'returned_late_damaged'
+    );
+    assert.equal(
+        deriveAggregateReturnStatus(['returned_ok', 'returned_late']),
+        'returned_late'
+    );
+    assert.equal(deriveAggregateReturnStatus(['cancelled']), null);
+});
+
+test('hält Rückgabefälle bis zur letzten Zahlung oder Erstattung offen', () => {
+    const returnedCase = {
+        orderStatus: 'returned',
+        orderPaymentStatus: 'paid',
+        returnedCount: 1
+    };
+
+    assert.equal(deriveReturnCaseStatus(returnedCase), 'closed');
+    assert.equal(deriveReturnCaseStatus({
+        ...returnedCase,
+        pendingPaymentCount: 1
+    }), 'payment_pending');
+    assert.equal(deriveReturnCaseStatus({
+        ...returnedCase,
+        failedPaymentCount: 1
+    }), 'payment_failed');
+    assert.equal(deriveReturnCaseStatus({
+        ...returnedCase,
+        pendingRefundCount: 1
+    }), 'refund_pending');
+    assert.equal(deriveReturnCaseStatus({
+        ...returnedCase,
+        failedRefundCount: 1
+    }), 'refund_failed');
+    assert.equal(deriveReturnCaseStatus({
+        ...returnedCase,
+        orderPaymentStatus: 'charged_back',
+        pendingRefundCount: 1
+    }), 'payment_dispute');
+    assert.equal(deriveReturnCaseStatus({
+        orderStatus: 'picked_up',
+        orderPaymentStatus: 'paid',
+        pickedUpCount: 1,
+        returnedCount: 1
+    }), 'partial');
 });
 
 test('validiert echte ISO-Kalendertage und erkennt nur echte Duplicate Keys', () => {
