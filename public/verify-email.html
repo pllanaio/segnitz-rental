@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="de">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="referrer" content="no-referrer">
+    <meta http-equiv="Cache-Control" content="no-store">
+    <title>E-Mail bestätigen – Segnitz Rental</title>
+    <link rel="stylesheet" href="/css/bootstrap.min.css">
+    <link rel="stylesheet" href="/css/style.css">
+    <link rel="stylesheet" href="/css/bootstrap-icons-1.11.3/font/bootstrap-icons.min.css">
+</head>
+
+<body>
+    <main class="container min-vh-100 d-flex align-items-center justify-content-center">
+        <section class="card shadow-sm" style="max-width: 520px; width: 100%;">
+            <div class="card-body text-center p-5">
+                <i class="bi bi-envelope-check text-primary" style="font-size: 4rem;"></i>
+                <h1 class="h3 mt-3">E-Mail-Adresse bestätigen</h1>
+                <p class="text-muted mt-3" id="verificationMessage">
+                    Klicken Sie auf „E-Mail bestätigen“, um die Registrierung abzuschließen.
+                </p>
+                <button type="button" id="completeVerification" class="btn btn-primary w-100 mt-3">
+                    E-Mail bestätigen
+                </button>
+                <a href="/index.html" class="btn btn-outline-secondary w-100 mt-2">
+                    Zur Startseite
+                </a>
+            </div>
+        </section>
+    </main>
+
+    <script src="/js/csrf.js"></script>
+    <script src="/js/verify_email_config.js"></script>
+</body>
+
+</html>

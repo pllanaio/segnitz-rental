@@ -46,8 +46,13 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    const params = new URLSearchParams(window.location.search);
-    const resetToken = params.get('resetToken');
+    const queryParams = new URLSearchParams(window.location.search);
+    const fragmentParams = new URLSearchParams(window.location.hash.slice(1));
+    const resetToken = fragmentParams.get('resetToken') || queryParams.get('resetToken');
+
+    if (resetToken) {
+        window.history.replaceState({}, document.title, '/login.html');
+    }
 
     if (resetToken && passwordResetModal) {
         document.getElementById('resetToken').value = resetToken;

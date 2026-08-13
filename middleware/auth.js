@@ -10,6 +10,7 @@ function isApiRequest(req) {
         originalUrl.startsWith('/api/') ||
         !['GET', 'HEAD'].includes(method) ||
         acceptHeader.includes('application/json') ||
+        !acceptHeader.includes('text/html') ||
         req.xhr === true
     );
 }

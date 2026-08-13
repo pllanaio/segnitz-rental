@@ -8,6 +8,10 @@ const { migrations } = require('./migrations/automatic');
 const { readSqlStatements } = require('./sql');
 const { setInstallationState } = require('./installationState');
 const { hashSetupToken } = require('../services/setupService');
+const { parseCanonicalSchema, verifyCanonicalSchema } = require('./schemaContract');
+const {
+    assertNoUnknownAppliedMigrations
+} = require('./migrationState');
 
 const schemaPath = path.join(__dirname, 'schema.sql');
 const bootstrapLockTimeoutSeconds = 60;
@@ -84,6 +88,10 @@ async function getExistingTableNames(connection) {
     return new Set(rows.map(row => row.tableName));
 }
 
+function hasExistingApplicationTables(existingTables, canonicalSchema = parseCanonicalSchema()) {
+    return [...canonicalSchema.keys()].some(tableName => existingTables.has(tableName));
+}
+
 async function isDatabaseUnpopulated(connection, existingTables) {
     for (const tableName of populationTables) {
         if (!existingTables.has(tableName)) continue;
@@ -110,27 +118,76 @@ async function ensureCanonicalTables(connection) {
 }
 
 function migrationChecksum(migration) {
+    const checksumPayload = JSON.stringify({
+        checksumVersion: migration.checksumVersion || 2,
+        dependencies: (migration.checksumDependencies || []).map(dependency =>
+            Function.prototype.toString.call(dependency)
+        ),
+        source: migration.checksumSource,
+        up: Function.prototype.toString.call(migration.up),
+        version: migration.version
+    });
+
+    return crypto
+        .createHash('sha256')
+        .update(checksumPayload, 'utf8')
+        .digest('hex');
+}
+
+function legacyMigrationChecksum(migration) {
     return crypto
         .createHash('sha256')
         .update(migration.checksumSource, 'utf8')
         .digest('hex');
 }
 
-async function runAutomaticMigrations(connection) {
+function buildMigrationManifest(migrationList = migrations) {
+    return migrationList.map(migration => ({
+        checksum: migrationChecksum(migration),
+        version: migration.version
+    }));
+}
+
+async function readAppliedMigrationRows(connection) {
+    const [rows] = await connection.execute(
+        `SELECT version, checksum
+         FROM app_schema_migrations
+         ORDER BY version`
+    );
+
+    return rows;
+}
+
+async function assertDatabaseHasNoUnknownMigrations(connection, migrationList = migrations) {
+    const appliedRows = await readAppliedMigrationRows(connection);
+    assertNoUnknownAppliedMigrations(appliedRows, buildMigrationManifest(migrationList));
+    return appliedRows;
+}
+
+async function runAutomaticMigrations(connection, migrationList = migrations) {
     const appliedVersions = [];
+    const appliedRows = await assertDatabaseHasNoUnknownMigrations(connection, migrationList);
+    const appliedByVersion = new Map(appliedRows.map(row => [row.version, row]));
 
-    for (const migration of migrations) {
+    for (const migration of migrationList) {
         const checksum = migrationChecksum(migration);
-        const [rows] = await connection.execute(
-            `SELECT checksum
-             FROM app_schema_migrations
-             WHERE version = ?
-             LIMIT 1`,
-            [migration.version]
-        );
+        const appliedMigration = appliedByVersion.get(migration.version);
 
-        if (rows.length > 0) {
-            if (rows[0].checksum !== checksum) {
+        if (appliedMigration) {
+            if (appliedMigration.checksum !== checksum) {
+                if (
+                    (migration.legacyChecksums || []).includes(appliedMigration.checksum) &&
+                    legacyMigrationChecksum(migration) === appliedMigration.checksum
+                ) {
+                    await connection.execute(
+                        `UPDATE app_schema_migrations
+                         SET checksum = ?
+                         WHERE version = ? AND checksum = ?`,
+                        [checksum, migration.version, appliedMigration.checksum]
+                    );
+                    continue;
+                }
+
                 throw new Error(
                     `Migration ${migration.version} wurde nachträglich verändert. ` +
                     'Der Serverstart wurde zum Schutz der Datenbank abgebrochen.'
@@ -152,6 +209,45 @@ async function runAutomaticMigrations(connection) {
     }
 
     return appliedVersions;
+}
+
+async function recordFreshSchemaMigrations(connection, migrationList = migrations) {
+    const appliedVersions = [];
+
+    for (const migration of migrationList) {
+        const checksum = migrationChecksum(migration);
+        await connection.execute(
+            `INSERT INTO app_schema_migrations (version, checksum)
+             VALUES (?, ?)
+             ON DUPLICATE KEY UPDATE checksum = VALUES(checksum)`,
+            [migration.version, checksum]
+        );
+        appliedVersions.push(migration.version);
+    }
+
+    return appliedVersions;
+}
+
+async function seedCanonicalDefaults(connection) {
+    const invariantMigration = migrations.find(
+        migration => migration.version === '20260813_03_schema_invariants_and_opening_hours'
+    );
+
+    if (!invariantMigration) {
+        throw new Error('Kanonische Standarddaten-Migration fehlt.');
+    }
+
+    for (const statement of readSqlStatements(
+        path.join(__dirname, 'migrations', '20260813_schema_invariants_and_opening_hours.sql')
+    )) {
+        await connection.query(statement);
+    }
+}
+
+async function initializeFreshSchema(connection) {
+    await ensureCanonicalTables(connection);
+    await seedCanonicalDefaults(connection);
+    return recordFreshSchemaMigrations(connection);
 }
 
 function validateConfiguredSetupToken(token) {
@@ -285,15 +381,31 @@ async function initializeDatabase() {
         lockName = await acquireBootstrapLock(connection);
         const existingTables = await getExistingTableNames(connection);
         const databaseWasUnpopulated = await isDatabaseUnpopulated(connection, existingTables);
+        const applicationTablesExist = hasExistingApplicationTables(existingTables);
 
-        await ensureCanonicalTables(connection);
-        const appliedMigrations = await runAutomaticMigrations(connection);
+        let appliedMigrations;
+
+        if (!applicationTablesExist) {
+            appliedMigrations = await initializeFreshSchema(connection);
+        } else {
+            if (existingTables.has('app_schema_migrations')) {
+                // A downgrade must fail before canonical table creation can mutate
+                // a schema that belongs to a newer application version.
+                await assertDatabaseHasNoUnknownMigrations(connection);
+            }
+            await ensureCanonicalTables(connection);
+            appliedMigrations = await runAutomaticMigrations(connection);
+        }
+        const schema = await verifyCanonicalSchema(connection);
         const installation = await initializeInstallation(connection);
+        const migrationManifest = buildMigrationManifest();
 
         return {
             appliedMigrations,
             databaseCreated,
             databaseWasUnpopulated,
+            migrationManifest,
+            schema,
             ...installation
         };
     } finally {
@@ -310,12 +422,19 @@ async function initializeDatabase() {
 }
 
 module.exports = {
+    assertDatabaseHasNoUnknownMigrations,
+    buildMigrationManifest,
     ensureCanonicalTables,
+    hasExistingApplicationTables,
+    initializeFreshSchema,
     initializeDatabase,
+    legacyMigrationChecksum,
     makeCreateTableIdempotent,
     migrationChecksum,
     quoteIdentifier,
+    recordFreshSchemaMigrations,
     runAutomaticMigrations,
+    seedCanonicalDefaults,
     validateConfiguredSetupToken,
     validateDatabaseConfig
 };

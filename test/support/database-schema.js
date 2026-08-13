@@ -7,6 +7,8 @@ const schemaPath = path.resolve(__dirname, '../../database/schema.sql');
 
 const tableNames = Object.freeze([
     'user_sessions',
+    'external_effects_outbox',
+    'customer_number_sequences',
     'mollie_webhook_events',
     'rental_order_return_images',
     'rental_order_payments',

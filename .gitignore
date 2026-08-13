@@ -9,6 +9,7 @@ test-results/
 .DS_Store
 public/img/products/
 public/img/returns/
+uploads/
 public/json/
 public/pdf/
 public/templates/

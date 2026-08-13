@@ -191,7 +191,7 @@ async function loadMyOrders() {
         const result = await response.json();
 
         if (!response.ok) {
-            container.innerHTML = `<div class="alert alert-warning">${result.error || 'Bestellungen konnten nicht geladen werden.'}</div>`;
+            container.innerHTML = `<div class="alert alert-warning">${escapeHtml(result.error || 'Bestellungen konnten nicht geladen werden.')}</div>`;
             return;
         }
 
@@ -228,7 +228,7 @@ function renderMyOrders() {
         <div class="card mb-2">
             <div class="card-body d-flex justify-content-between align-items-center gap-3">
                 <div>
-                    <strong>${order.order_no}</strong><br>
+                    <strong>${escapeHtml(order.order_no)}</strong><br>
                     ${getStatusBadge(order.status)}
                     ${getPaymentBadge(order.payment_status)}
                     ${getReturnBadge(deriveMyOrderReturnStatus(order), order.status)}
@@ -342,11 +342,11 @@ function renderMyOrderDetails(order) {
             <div class="col-12 col-lg-6">
                 <h5>Bestellung</h5>
                 <p>
-                    <strong>Bestellnummer:</strong> ${order.order_no}<br>
+                    <strong>Bestellnummer:</strong> ${escapeHtml(order.order_no)}<br>
                     <strong>Status:</strong> ${getStatusBadge(order.status)}<br>
 
                     ${order.status === 'cancelled' ? `
-                        <strong>Storniert am:</strong> ${order.cancelled_at || '-'}<br>
+                        <strong>Storniert am:</strong> ${escapeHtml(order.cancelled_at || '-')}<br>
                         ${order.cancel_reason ? `
                             <strong>Stornogrund:</strong><br>
                             <span class="text-danger">${formatTextValue(order.cancel_reason)}</span><br>
@@ -362,11 +362,11 @@ function renderMyOrderDetails(order) {
             <div class="col-12 col-lg-6">
                 <h5>Kunde</h5>
                 <p>
-                    <strong>${order.customer_first_name || ''} ${order.customer_last_name || ''}</strong><br>
-                    ${order.customer_email || ''}<br>
-                    ${order.customer_phone || ''}<br>
-                    ${order.customer_address || ''}<br>
-                    ${order.customer_zip || ''} ${order.customer_city || ''}
+                    <strong>${escapeHtml(order.customer_first_name || '')} ${escapeHtml(order.customer_last_name || '')}</strong><br>
+                    ${escapeHtml(order.customer_email || '')}<br>
+                    ${escapeHtml(order.customer_phone || '')}<br>
+                    ${escapeHtml(order.customer_address || '')}<br>
+                    ${escapeHtml(order.customer_zip || '')} ${escapeHtml(order.customer_city || '')}
                 </p>
             </div>
 
@@ -394,7 +394,7 @@ function renderReviewCard(item, orderId) {
         return `
             <div class="card mt-3">
                 <div class="card-body">
-                    <h6>Ihre Bewertung für ${item.title}</h6>
+                    <h6>Ihre Bewertung für ${escapeHtml(item.title)}</h6>
                     <div class="mb-2">
                         <strong>Sterne:</strong>
                         ${'★'.repeat(Number(item.review.rating))}
@@ -403,11 +403,13 @@ function renderReviewCard(item, orderId) {
                     <div class="mb-2">
                         <strong>Kommentar:</strong><br>
                         <div class="border rounded p-2 bg-light">
-                            ${item.review.reviewText || '<span class="text-muted">Kein Kommentar</span>'}
+                            ${item.review.reviewText
+                                ? escapeHtml(item.review.reviewText)
+                                : '<span class="text-muted">Kein Kommentar</span>'}
                         </div>
                     </div>
                     <div class="text-muted small">
-                        Bewertet am: ${item.review.createdAt || '-'}
+                        Bewertet am: ${escapeHtml(item.review.createdAt || '-')}
                     </div>
                 </div>
             </div>
@@ -417,7 +419,7 @@ function renderReviewCard(item, orderId) {
     return `
         <div class="card mt-3">
             <div class="card-body">
-                <h6>Bewertung für ${item.title}</h6>
+                <h6>Bewertung für ${escapeHtml(item.title)}</h6>
 
                 <div class="mb-2">
                     <label class="form-label" for="rating-${item.productId}">
@@ -438,7 +440,11 @@ function renderReviewCard(item, orderId) {
                         Kommentar
                     </label>
                     <textarea class="form-control form-control-sm"
-                        id="reviewText-${item.productId}" rows="2"></textarea>
+                        id="reviewText-${item.productId}" rows="2" maxlength="2000"></textarea>
+                    <div class="form-text">
+                        Maximal 2000 Zeichen. Öffentlich erscheinen Ihr Vorname und nur der
+                        Anfangsbuchstabe Ihres Nachnamens.
+                    </div>
                 </div>
 
                 <button type="button"
@@ -464,8 +470,8 @@ function renderMyOrderItemCard(item, order) {
             <div class="row g-2 mt-2">
                 ${(item.returnImages || []).map(image => `
                     <div class="col-6 col-md-3">
-                        <a href="/${image.imagePath}" target="_blank">
-                            <img src="/${image.imagePath}" class="img-fluid rounded border"
+                        <a href="/${escapeHtml(image.imagePath)}" target="_blank" rel="noopener noreferrer">
+                            <img src="/${escapeHtml(image.imagePath)}" class="img-fluid rounded border"
                                 style="height: 120px; object-fit: cover; width: 100%;">
                         </a>
                     </div>
@@ -478,20 +484,20 @@ function renderMyOrderItemCard(item, order) {
         <div class="card-body">
     <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-2">
         <div>
-            <h6 class="mb-1">${item.title}</h6>
-            <div class="small text-muted">Position #${item.id}</div>
+            <h6 class="mb-1">${escapeHtml(item.title)}</h6>
+            <div class="small text-muted">Position #${escapeHtml(item.id)}</div>
         </div>
     </div>
                 <div>
                     <strong>Mietzeitraum:</strong>
-                    ${item.rentalStart || '-'} bis ${item.rentalEnd || '-'}
+                    ${escapeHtml(item.rentalStart || '-')} bis ${escapeHtml(item.rentalEnd || '-')}
                 </div>
 
                 ${(item.adjustedRentalStart || item.adjustedRentalEnd || item.actualReturnDate) ? `
                     <div>
                         <strong>Aktueller Zeitraum:</strong>
-                        ${item.adjustedRentalStart || item.rentalStart || '-'} bis
-                        ${item.adjustedRentalEnd || item.actualReturnDate || item.rentalEnd || '-'}
+                        ${escapeHtml(item.adjustedRentalStart || item.rentalStart || '-')} bis
+                        ${escapeHtml(item.adjustedRentalEnd || item.actualReturnDate || item.rentalEnd || '-')}
                     </div>
                 ` : ''}
 
@@ -542,7 +548,7 @@ function renderMyOrderItemCard(item, order) {
         ${item.actualReturnDate ? `
             <div class="checkout-summary-row">
                 <span>Rückgabedatum</span>
-                <strong>${item.actualReturnDate}</strong>
+                <strong>${escapeHtml(item.actualReturnDate)}</strong>
             </div>
         ` : ''}
 
@@ -691,7 +697,7 @@ function renderMyOrderFinancialSummary(order) {
 
         return `
             <div class="border-bottom py-2">
-                <strong>${item.title}</strong><br>
+                <strong>${escapeHtml(item.title)}</strong><br>
                 Miettage: ${f.effectiveDays}<br>
                 Tagespreis: ${f.pricePerDay.toFixed(2)} € inkl. MwSt.<br>
                 Miete gesamt: ${f.rentalTotal.toFixed(2)} € inkl. MwSt.<br>
@@ -1228,14 +1234,14 @@ function formatTextValue(value) {
     }
 
     if (typeof value === 'object') {
-        if (value.message) return value.message;
-        if (value.reason) return value.reason;
-        if (value.text) return value.text;
+        if (value.message) return escapeHtml(value.message);
+        if (value.reason) return escapeHtml(value.reason);
+        if (value.text) return escapeHtml(value.text);
 
-        return JSON.stringify(value);
+        return escapeHtml(JSON.stringify(value));
     }
 
-    return String(value);
+    return escapeHtml(value);
 }
 
 function getSafeCheckoutUrl(value) {
@@ -1284,6 +1290,11 @@ async function submitProductReview(productId, orderId) {
 
     if (!rating) {
         showAlert('Bitte wählen Sie eine Sternebewertung aus.', 'warning');
+        return;
+    }
+
+    if (reviewText.length > 2000) {
+        showAlert('Der Bewertungstext darf maximal 2000 Zeichen lang sein.', 'warning');
         return;
     }
 

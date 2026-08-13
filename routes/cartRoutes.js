@@ -3,24 +3,72 @@ const router = express.Router();
 const mysql = require('mysql2/promise');
 
 const dbConfig = require('../config/db');
-const { runDatabaseCleanup } = require('../utils/cleanup');
 const { checkProductAvailability } = require('../utils/availability');
+const {
+    isRetryableTransactionError,
+    runInTransactionWithRetry
+} = require('../utils/dbRetry');
 const { isStrictIsoDate } = require('../services/paymentStateService');
 
 const {
     getOrCreateActiveCart,
     getActiveCart,
-    checkCartItemConflict
+    checkCartItemConflict,
+    isDuplicateKeyError
 } = require('../services/cartService');
 
 module.exports = router;
+
+function businessError(statusCode, message) {
+    const error = new Error(message);
+    error.statusCode = statusCode;
+    return error;
+}
+
+function sendCartMutationError(res, error, fallbackMessage) {
+    if (Number.isInteger(error?.statusCode)) {
+        return res.status(error.statusCode).json({ error: error.message });
+    }
+
+    if (isDuplicateKeyError(error)) {
+        return res.status(409).json({
+            error: 'Dieses Produkt befindet sich für diesen Zeitraum bereits im Warenkorb.'
+        });
+    }
+
+    if (isRetryableTransactionError(error)) {
+        res.set('Retry-After', '1');
+        return res.status(503).json({
+            error: 'Der Warenkorb wurde gleichzeitig geändert. Bitte erneut versuchen.'
+        });
+    }
+
+    console.error(fallbackMessage, error);
+    return res.status(500).json({ error: fallbackMessage });
+}
+
+async function lockActiveProduct(connection, productId) {
+    const [products] = await connection.execute(
+        `SELECT id, is_active
+         FROM rental_products
+         WHERE id = ?
+         LIMIT 1
+         FOR UPDATE`,
+        [productId]
+    );
+
+    if (products.length === 0 || Number(products[0].is_active) !== 1) {
+        throw businessError(404, 'Produkt wurde nicht gefunden oder ist nicht aktiv.');
+    }
+
+    return products[0];
+}
 
 router.get('/cart', async (req, res) => {
     let connection;
 
     try {
         connection = await mysql.createConnection(dbConfig);
-        await runDatabaseCleanup(connection);
         const cartId = await getActiveCart(connection, req);
 
         if (!cartId) {
@@ -95,82 +143,73 @@ router.post('/cart/items', async (req, res) => {
         });
     }
 
-    let connection;
-
     try {
-        connection = await mysql.createConnection(dbConfig);
-        await runDatabaseCleanup(connection);
+        const result = await runInTransactionWithRetry(
+            () => mysql.createConnection(dbConfig),
+            async connection => {
+                // Einheitliche Sperrreihenfolge für Cart-Mutationen: Cart -> Produkt -> Positionen.
+                const cartId = await getOrCreateActiveCart(connection, req, { forUpdate: true });
+                await lockActiveProduct(connection, productId);
 
-        const [products] = await connection.execute(
-            `SELECT id
-             FROM rental_products
-             WHERE id = ?
-             AND is_active = 1`,
-            [productId]
-        );
+                const isAvailable = await checkProductAvailability(
+                    connection,
+                    productId,
+                    rentalStart,
+                    rentalEnd,
+                    null,
+                    true
+                );
 
-        if (products.length === 0) {
-            return res.status(404).json({
-                error: 'Produkt wurde nicht gefunden oder ist nicht aktiv.'
-            });
-        }
+                if (!isAvailable) {
+                    throw businessError(
+                        409,
+                        'Das Produkt ist im ausgewählten Zeitraum nicht verfügbar.'
+                    );
+                }
 
-        const isAvailable = await checkProductAvailability(
-            connection,
-            productId,
-            rentalStart,
-            rentalEnd
-        );
+                const cartConflict = await checkCartItemConflict(
+                    connection,
+                    cartId,
+                    productId,
+                    rentalStart,
+                    rentalEnd
+                );
 
-        if (!isAvailable) {
-            return res.status(409).json({
-                error: 'Das Produkt ist im ausgewählten Zeitraum nicht verfügbar.'
-            });
-        }
+                if (cartConflict) {
+                    throw businessError(
+                        409,
+                        'Dieses Produkt befindet sich für diesen Zeitraum bereits im Warenkorb.'
+                    );
+                }
 
-        const cartId = await getOrCreateActiveCart(connection, req);
+                const [insertResult] = await connection.execute(
+                    `INSERT INTO rental_cart_items
+                     (cart_id, product_id, rental_start, rental_end, quantity)
+                     VALUES (?, ?, ?, ?, 1)`,
+                    [cartId, productId, rentalStart, rentalEnd]
+                );
 
-        const cartConflict = await checkCartItemConflict(
-            connection,
-            cartId,
-            productId,
-            rentalStart,
-            rentalEnd
-        );
+                await connection.execute(
+                    `UPDATE rental_carts
+                     SET updated_at = NOW()
+                     WHERE id = ?`,
+                    [cartId]
+                );
 
-        if (cartConflict) {
-            return res.status(409).json({
-                error: 'Dieses Produkt befindet sich für diesen Zeitraum bereits im Warenkorb.'
-            });
-        }
-
-        const [result] = await connection.execute(
-            `INSERT INTO rental_cart_items
-             (cart_id, product_id, rental_start, rental_end, quantity)
-             VALUES (?, ?, ?, ?, 1)`,
-            [cartId, productId, rentalStart, rentalEnd]
-        );
-
-        await connection.execute(
-            `UPDATE rental_carts
-             SET updated_at = NOW()
-             WHERE id = ?`,
-            [cartId]
+                return { itemId: insertResult.insertId };
+            }
         );
 
         res.status(201).json({
             message: 'Produkt wurde zum Warenkorb hinzugefügt.',
-            itemId: result.insertId
+            itemId: result.itemId
         });
     } catch (error) {
-        console.error('Fehler beim Hinzufügen zum Warenkorb:', error);
-        res.status(500).json({
-            error: 'Produkt konnte nicht zum Warenkorb hinzugefügt werden.'
-        });
-    } finally {
-        if (connection) {
-            await connection.end();
-        }
+        return sendCartMutationError(
+            res,
+            error,
+            'Produkt konnte nicht zum Warenkorb hinzugefügt werden.'
+        );
     }
 });
 
@@ -203,188 +242,185 @@ router.put('/cart/items/:id', async (req, res) => {
         });
     }
 
-    let connection;
-
     try {
-        connection = await mysql.createConnection(dbConfig);
-        await runDatabaseCleanup(connection);
+        await runInTransactionWithRetry(
+            () => mysql.createConnection(dbConfig),
+            async connection => {
+                const cartId = await getActiveCart(connection, req, { forUpdate: true });
 
-        const cartId = await getOrCreateActiveCart(connection, req);
+                if (!cartId) {
+                    throw businessError(404, 'Warenkorbposition wurde nicht gefunden.');
+                }
 
-        const [items] = await connection.execute(
-            `SELECT id, product_id
-             FROM rental_cart_items
-             WHERE id = ?
-             AND cart_id = ?`,
-            [req.params.id, cartId]
-        );
+                const [items] = await connection.execute(
+                    `SELECT id, product_id
+                     FROM rental_cart_items
+                     WHERE id = ?
+                     AND cart_id = ?
+                     LIMIT 1`,
+                    [req.params.id, cartId]
+                );
 
-        if (items.length === 0) {
-            return res.status(404).json({
-                error: 'Warenkorbposition wurde nicht gefunden.'
-            });
-        }
+                if (items.length === 0) {
+                    throw businessError(404, 'Warenkorbposition wurde nicht gefunden.');
+                }
 
-        const cartConflict = await checkCartItemConflict(
-            connection,
-            cartId,
-            items[0].product_id,
-            rentalStart,
-            rentalEnd,
-            req.params.id
-        );
+                await lockActiveProduct(connection, items[0].product_id);
 
-        if (cartConflict) {
-            return res.status(409).json({
-                error: 'Dieses Produkt befindet sich für diesen Zeitraum bereits im Warenkorb.'
-            });
-        }
+                const cartConflict = await checkCartItemConflict(
+                    connection,
+                    cartId,
+                    items[0].product_id,
+                    rentalStart,
+                    rentalEnd,
+                    req.params.id
+                );
 
-        const isAvailable = await checkProductAvailability(
-            connection,
-            items[0].product_id,
-            rentalStart,
-            rentalEnd
-        );
+                if (cartConflict) {
+                    throw businessError(
+                        409,
+                        'Dieses Produkt befindet sich für diesen Zeitraum bereits im Warenkorb.'
+                    );
+                }
 
-        if (!isAvailable) {
-            return res.status(409).json({
-                error: 'Das Produkt ist im ausgewählten Zeitraum nicht verfügbar.'
-            });
-        }
+                const isAvailable = await checkProductAvailability(
+                    connection,
+                    items[0].product_id,
+                    rentalStart,
+                    rentalEnd,
+                    null,
+                    true
+                );
 
-        await connection.execute(
-            `UPDATE rental_cart_items
-             SET rental_start = ?, rental_end = ?
-             WHERE id = ?
-             AND cart_id = ?`,
-            [rentalStart, rentalEnd, req.params.id, cartId]
-        );
+                if (!isAvailable) {
+                    throw businessError(
+                        409,
+                        'Das Produkt ist im ausgewählten Zeitraum nicht verfügbar.'
+                    );
+                }
 
-        await connection.execute(
-            `UPDATE rental_carts
-             SET updated_at = NOW()
-             WHERE id = ?`,
-            [cartId]
+                await connection.execute(
+                    `UPDATE rental_cart_items
+                     SET rental_start = ?, rental_end = ?
+                     WHERE id = ?
+                     AND cart_id = ?`,
+                    [rentalStart, rentalEnd, req.params.id, cartId]
+                );
+
+                await connection.execute(
+                    `UPDATE rental_carts
+                     SET updated_at = NOW()
+                     WHERE id = ?`,
+                    [cartId]
+                );
+            }
         );
 
         res.json({
             message: 'Warenkorbposition wurde aktualisiert.'
         });
     } catch (error) {
-        console.error('Fehler beim Aktualisieren der Warenkorbposition:', error);
-        res.status(500).json({
-            error: 'Warenkorbposition konnte nicht aktualisiert werden.'
-        });
-    } finally {
-        if (connection) {
-            await connection.end();
-        }
+        return sendCartMutationError(
+            res,
+            error,
+            'Warenkorbposition konnte nicht aktualisiert werden.'
+        );
     }
 });
 
 router.delete('/cart/items/:id', async (req, res) => {
-    let connection;
-
     try {
-        connection = await mysql.createConnection(dbConfig);
-        await runDatabaseCleanup(connection);
+        const result = await runInTransactionWithRetry(
+            () => mysql.createConnection(dbConfig),
+            async connection => {
+                const cartId = await getActiveCart(connection, req, { forUpdate: true });
 
-        const cartId = await getOrCreateActiveCart(connection, req);
+                if (!cartId) {
+                    throw businessError(404, 'Warenkorbposition wurde nicht gefunden.');
+                }
 
-        const [result] = await connection.execute(
-            `DELETE FROM rental_cart_items
-             WHERE id = ?
-             AND cart_id = ?`,
-            [req.params.id, cartId]
+                const [deleteResult] = await connection.execute(
+                    `DELETE FROM rental_cart_items
+                     WHERE id = ?
+                     AND cart_id = ?`,
+                    [req.params.id, cartId]
+                );
+
+                if (deleteResult.affectedRows === 0) {
+                    throw businessError(404, 'Warenkorbposition wurde nicht gefunden.');
+                }
+
+                const [remainingItems] = await connection.execute(
+                    `SELECT COUNT(*) AS count
+                     FROM rental_cart_items
+                     WHERE cart_id = ?`,
+                    [cartId]
+                );
+                const cartDeleted = Number(remainingItems[0]?.count || 0) === 0;
+
+                if (cartDeleted) {
+                    await connection.execute(
+                        'DELETE FROM rental_carts WHERE id = ?',
+                        [cartId]
+                    );
+                } else {
+                    await connection.execute(
+                        `UPDATE rental_carts
+                         SET updated_at = NOW()
+                         WHERE id = ?`,
+                        [cartId]
+                    );
+                }
+
+                return { cartDeleted, cartId };
+            }
         );
 
-        if (result.affectedRows === 0) {
-            return res.status(404).json({
-                error: 'Warenkorbposition wurde nicht gefunden.'
-            });
-        }
-
-        const [remainingItems] = await connection.execute(
-            `SELECT COUNT(*) AS count
-             FROM rental_cart_items
-             WHERE cart_id = ?`,
-            [cartId]
-        );
-
-        if (remainingItems[0].count === 0) {
-            await connection.execute(
-                `DELETE FROM rental_carts
-                 WHERE id = ?`,
-                [cartId]
-            );
-
+        if (result.cartDeleted) {
             delete req.session.cartKey;
-
-            console.log(
-                `${new Date().toISOString()} - Warenkorb ${cartId} wurde gelöscht.`
-            )
-        } else {
-            await connection.execute(
-                `UPDATE rental_carts
-                 SET updated_at = NOW()
-                 WHERE id = ?`,
-                [cartId]
-            );
+            console.log(`${new Date().toISOString()} - Warenkorb ${result.cartId} wurde gelöscht.`);
         }
 
         res.json({
             message: 'Warenkorbposition wurde gelöscht.'
         });
     } catch (error) {
-        console.error('Fehler beim Löschen der Warenkorbposition:', error);
-        res.status(500).json({
-            error: 'Warenkorbposition konnte nicht gelöscht werden.'
-        });
-    } finally {
-        if (connection) {
-            await connection.end();
-        }
+        return sendCartMutationError(
+            res,
+            error,
+            'Warenkorbposition konnte nicht gelöscht werden.'
+        );
     }
 });
 
 router.delete('/cart', async (req, res) => {
-    let connection;
-
     try {
-        connection = await mysql.createConnection(dbConfig);
-        await runDatabaseCleanup(connection);
+        const result = await runInTransactionWithRetry(
+            () => mysql.createConnection(dbConfig),
+            async connection => {
+                const cartId = await getActiveCart(connection, req, { forUpdate: true });
 
-        const cartId = await getActiveCart(connection, req);
+                if (!cartId) return { cartId: null };
 
-        if (!cartId) {
-            return res.json({
-                message: 'Warenkorb ist bereits leer.'
-            });
-        }
-
-        await connection.execute(
-            `DELETE FROM rental_carts WHERE id = ?`,
-            [cartId]
+                await connection.execute('DELETE FROM rental_carts WHERE id = ?', [cartId]);
+                return { cartId };
+            }
         );
+
+        if (!result.cartId) {
+            return res.json({ message: 'Warenkorb ist bereits leer.' });
+        }
 
         delete req.session.cartKey;
 
         console.log(
-            `${new Date().toISOString()} - Warenkorb ${cartId} wurde vollständig geleert.`
+            `${new Date().toISOString()} - Warenkorb ${result.cartId} wurde vollständig geleert.`
         );
 
         res.json({
             message: 'Warenkorb wurde geleert.'
         });
     } catch (error) {
-        console.error('Fehler beim Leeren des Warenkorbs:', error);
-        res.status(500).json({
-            error: 'Warenkorb konnte nicht geleert werden.'
-        });
-    } finally {
-        if (connection) {
-            await connection.end();
-        }
+        return sendCartMutationError(res, error, 'Warenkorb konnte nicht geleert werden.');
     }
 });

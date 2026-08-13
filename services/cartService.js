@@ -1,111 +1,43 @@
 const crypto = require('crypto');
 
+function isDuplicateKeyError(error) {
+    return error?.code === 'ER_DUP_ENTRY' || Number(error?.errno) === 1062;
+}
+
 function getCartSessionKey(req) {
     if (!req.session.cartKey) {
-        req.session.cartKey = crypto.randomUUID();
+        if (typeof req.sessionID !== 'string' || req.sessionID.length === 0) {
+            throw new TypeError('Warenkorb kann nicht ohne Session-ID gebunden werden.');
+        }
+
+        const sessionHash = crypto
+            .createHash('sha256')
+            .update(req.sessionID, 'utf8')
+            .digest('hex');
+
+        // Der stabile Hash konvergiert auch bei parallelen ersten Requests, ohne
+        // die rohe (und damit authentifizierende) Session-ID in der DB abzulegen.
+        req.session.cartKey = `guest:v1:${sessionHash}`;
     }
 
     return req.session.cartKey;
 }
 
-async function getOrCreateActiveCart(connection, req) {
-    const userEmail = req.session.user || null;
-
-    if (userEmail) {
-        const [existingUserCart] = await connection.execute(
-            `SELECT id
-             FROM rental_carts
-             WHERE status = 'active'
-             AND user_email = ?
-             ORDER BY updated_at DESC, id DESC
-             LIMIT 1`,
-            [userEmail]
-        );
-
-        if (existingUserCart.length > 0) {
-            return existingUserCart[0].id;
-        }
-
-        const sessionKey = getCartSessionKey(req);
-
-        const [guestCart] = await connection.execute(
-            `SELECT id
-             FROM rental_carts
-             WHERE status = 'active'
-             AND session_id = ?
-             AND user_email IS NULL
-             ORDER BY updated_at DESC, id DESC
-             LIMIT 1`,
-            [sessionKey]
-        );
-
-        if (guestCart.length > 0) {
-            await connection.execute(
-                `UPDATE rental_carts
-                 SET user_email = ?, updated_at = NOW()
-                 WHERE id = ?`,
-                [userEmail, guestCart[0].id]
-            );
-
-            return guestCart[0].id;
-        }
-
-        const [result] = await connection.execute(
-            `INSERT INTO rental_carts (session_id, user_email, status)
-             VALUES (?, ?, 'active')`,
-            [sessionKey, userEmail]
-        );
-
-        return result.insertId;
-    }
-
-    const sessionKey = getCartSessionKey(req);
-
-    const [existingGuestCart] = await connection.execute(
+async function selectActiveUserCart(connection, userEmail, forUpdate = false) {
+    const [rows] = await connection.execute(
         `SELECT id
          FROM rental_carts
          WHERE status = 'active'
-         AND session_id = ?
-         AND user_email IS NULL
+         AND user_email = ?
          ORDER BY updated_at DESC, id DESC
-         LIMIT 1`,
-        [sessionKey]
+         LIMIT 1${forUpdate ? ' FOR UPDATE' : ''}`,
+        [userEmail]
     );
 
-    if (existingGuestCart.length > 0) {
-        return existingGuestCart[0].id;
-    }
-
-    const [result] = await connection.execute(
-        `INSERT INTO rental_carts (session_id, user_email, status)
-         VALUES (?, NULL, 'active')`,
-        [sessionKey]
-    );
-
-    return result.insertId;
+    return rows[0]?.id || null;
 }
 
-async function getActiveCart(connection, req) {
-    const userEmail = req.session.user || null;
-
-    if (userEmail) {
-        const [rows] = await connection.execute(
-            `SELECT id
-             FROM rental_carts
-             WHERE status = 'active'
-             AND user_email = ?
-             ORDER BY updated_at DESC, id DESC
-             LIMIT 1`,
-            [userEmail]
-        );
-
-        return rows.length > 0 ? rows[0].id : null;
-    }
-
-    if (!req.session.cartKey) {
-        return null;
-    }
-
+async function selectActiveGuestCart(connection, sessionKey, forUpdate = false) {
     const [rows] = await connection.execute(
         `SELECT id
          FROM rental_carts
@@ -113,11 +45,123 @@ async function getActiveCart(connection, req) {
          AND session_id = ?
          AND user_email IS NULL
          ORDER BY updated_at DESC, id DESC
-         LIMIT 1`,
-        [req.session.cartKey]
+         LIMIT 1${forUpdate ? ' FOR UPDATE' : ''}`,
+        [sessionKey]
     );
 
-    return rows.length > 0 ? rows[0].id : null;
+    return rows[0]?.id || null;
+}
+
+async function getOrCreateActiveCart(connection, req, options = {}) {
+    const userEmail = req.session.user || null;
+    const forUpdate = options.forUpdate === true;
+
+    if (userEmail) {
+        const existingUserCartId = await selectActiveUserCart(
+            connection,
+            userEmail,
+            forUpdate
+        );
+
+        if (existingUserCartId) {
+            return existingUserCartId;
+        }
+
+        const sessionKey = getCartSessionKey(req);
+        const guestCartId = await selectActiveGuestCart(
+            connection,
+            sessionKey,
+            forUpdate
+        );
+
+        if (guestCartId) {
+            try {
+                await connection.execute(
+                    `UPDATE rental_carts
+                     SET user_email = ?, updated_at = NOW()
+                     WHERE id = ?`,
+                    [userEmail, guestCartId]
+                );
+                return guestCartId;
+            } catch (error) {
+                if (!isDuplicateKeyError(error)) throw error;
+
+                const concurrentUserCartId = await selectActiveUserCart(
+                    connection,
+                    userEmail,
+                    forUpdate
+                );
+                if (concurrentUserCartId) return concurrentUserCartId;
+                throw error;
+            }
+        }
+
+        try {
+            const [result] = await connection.execute(
+                `INSERT INTO rental_carts (session_id, user_email, status)
+                 VALUES (?, ?, 'active')`,
+                [sessionKey, userEmail]
+            );
+
+            return result.insertId;
+        } catch (error) {
+            if (!isDuplicateKeyError(error)) throw error;
+
+            const concurrentUserCartId = await selectActiveUserCart(
+                connection,
+                userEmail,
+                true
+            );
+            if (concurrentUserCartId) return concurrentUserCartId;
+            throw error;
+        }
+    }
+
+    const sessionKey = getCartSessionKey(req);
+    const existingGuestCartId = await selectActiveGuestCart(
+        connection,
+        sessionKey,
+        forUpdate
+    );
+
+    if (existingGuestCartId) {
+        return existingGuestCartId;
+    }
+
+    try {
+        const [result] = await connection.execute(
+            `INSERT INTO rental_carts (session_id, user_email, status)
+             VALUES (?, NULL, 'active')`,
+            [sessionKey]
+        );
+
+        return result.insertId;
+    } catch (error) {
+        if (!isDuplicateKeyError(error)) throw error;
+
+        const concurrentGuestCartId = await selectActiveGuestCart(
+            connection,
+            sessionKey,
+            true
+        );
+        if (concurrentGuestCartId) return concurrentGuestCartId;
+        throw error;
+    }
+}
+
+async function getActiveCart(connection, req, options = {}) {
+    const userEmail = req.session.user || null;
+    const forUpdate = options.forUpdate === true;
+
+    if (userEmail) {
+        return selectActiveUserCart(connection, userEmail, forUpdate);
+    }
+
+    if (!req.session.cartKey) {
+        return null;
+    }
+
+    return selectActiveGuestCart(connection, req.session.cartKey, forUpdate);
 }
 
 async function mergeGuestCartIntoUserCart(connection, req, userEmail) {
@@ -127,47 +171,30 @@ async function mergeGuestCartIntoUserCart(connection, req, userEmail) {
         return;
     }
 
-    const [guestCarts] = await connection.execute(
-        `SELECT id
-         FROM rental_carts
-         WHERE status = 'active'
-         AND session_id = ?
-         AND user_email IS NULL
-         ORDER BY updated_at DESC, id DESC
-         LIMIT 1`,
-        [sessionKey]
-    );
+    // Einheitliche Sperrreihenfolge für Login/Get-or-create: Benutzer-Cart vor Gast-Cart.
+    let userCartId = await selectActiveUserCart(connection, userEmail, true);
+    const guestCartId = await selectActiveGuestCart(connection, sessionKey, true);
 
-    if (guestCarts.length === 0) {
-        return;
+    if (!guestCartId) return userCartId;
+
+    if (!userCartId) {
+        try {
+            await connection.execute(
+                `UPDATE rental_carts
+                 SET user_email = ?, updated_at = NOW()
+                 WHERE id = ?`,
+                [userEmail, guestCartId]
+            );
+            return guestCartId;
+        } catch (error) {
+            if (!isDuplicateKeyError(error)) throw error;
+            userCartId = await selectActiveUserCart(connection, userEmail, true);
+            if (!userCartId) throw error;
+        }
     }
-
-    const guestCartId = guestCarts[0].id;
-
-    const [userCarts] = await connection.execute(
-        `SELECT id
-         FROM rental_carts
-         WHERE status = 'active'
-         AND user_email = ?
-         ORDER BY updated_at DESC, id DESC
-         LIMIT 1`,
-        [userEmail]
-    );
-
-    if (userCarts.length === 0) {
-        await connection.execute(
-            `UPDATE rental_carts
-             SET user_email = ?, updated_at = NOW()
-             WHERE id = ?`,
-            [userEmail, guestCartId]
-        );
-        return;
-    }
-
-    const userCartId = userCarts[0].id;
 
     if (userCartId === guestCartId) {
-        return;
+        return userCartId;
     }
 
     const [guestItems] = await connection.execute(
@@ -187,18 +214,22 @@ async function mergeGuestCartIntoUserCart(connection, req, userEmail) {
         );
 
         if (!conflict) {
-            await connection.execute(
-                `INSERT INTO rental_cart_items
-                 (cart_id, product_id, rental_start, rental_end, quantity)
-                 VALUES (?, ?, ?, ?, ?)`,
-                [
-                    userCartId,
-                    item.product_id,
-                    item.rental_start,
-                    item.rental_end,
-                    item.quantity || 1
-                ]
-            );
+            try {
+                await connection.execute(
+                    `INSERT INTO rental_cart_items
+                     (cart_id, product_id, rental_start, rental_end, quantity)
+                     VALUES (?, ?, ?, ?, ?)`,
+                    [
+                        userCartId,
+                        item.product_id,
+                        item.rental_start,
+                        item.rental_end,
+                        item.quantity || 1
+                    ]
+                );
+            } catch (error) {
+                if (!isDuplicateKeyError(error)) throw error;
+            }
         }
     }
 
@@ -214,6 +245,8 @@ async function mergeGuestCartIntoUserCart(connection, req, userEmail) {
          WHERE id = ?`,
         [userCartId]
     );
+
+    return userCartId;
 }
 
 async function checkCartItemConflict(connection, cartId, productId, rentalStart, rentalEnd, excludeCartItemId = null) {
@@ -268,5 +301,8 @@ module.exports = {
     getActiveCart,
     mergeGuestCartIntoUserCart,
     checkCartItemConflict,
-    getCartItemsForOrder
+    getCartItemsForOrder,
+    isDuplicateKeyError,
+    selectActiveGuestCart,
+    selectActiveUserCart
 };

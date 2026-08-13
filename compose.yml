@@ -1,0 +1,44 @@
+name: segnitz-rental
+
+services:
+  app:
+    image: ${SEGNITZ_IMAGE:-pllanaio/segnitz-rental:latest}
+    pull_policy: always
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      BUSINESS_TIME_ZONE: ${BUSINESS_TIME_ZONE:-Europe/Berlin}
+      TZ: ${BUSINESS_TIME_ZONE:-Europe/Berlin}
+      MOLLIE_TEST_MODE: ${MOLLIE_TEST_MODE:-0}
+      DISABLE_EMAILS: ${DISABLE_EMAILS:-0}
+    ports:
+      - "${APP_BIND_ADDRESS:-127.0.0.1}:${APP_PORT:-3000}:3000"
+    volumes:
+      - product-images:/app/public/img/products
+      - return-images:/app/uploads/returns
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    init: true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    restart: unless-stopped
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+
+volumes:
+  product-images:
+  return-images:

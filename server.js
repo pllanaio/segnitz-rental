@@ -3,8 +3,52 @@
 require('dotenv').config();
 
 const dbConfig = require('./config/db');
+const mysql = require('mysql2/promise');
 const { assertSecurityEnvironment } = require('./config/security');
 const { initializeDatabase } = require('./database/bootstrap');
+const { runCoordinatedDatabaseCleanup } = require('./utils/cleanup');
+const { primeSchemaReadiness } = require('./database/readiness');
+const {
+    startExternalEffectsWorker,
+    stopExternalEffectsWorker
+} = require('./services/externalEffectsWorker');
+
+let shutdownPromise;
+let applicationRuntime = null;
+
+async function stopRuntime(signal = 'shutdown') {
+    if (shutdownPromise) return shutdownPromise;
+
+    shutdownPromise = (async () => {
+        console.log(`${new Date().toISOString()} - ${signal}: Hintergrunddienste werden beendet`);
+        if (applicationRuntime) await applicationRuntime.stopApplication();
+        await stopExternalEffectsWorker();
+    })();
+
+    return shutdownPromise;
+}
+
+function installShutdownHandlers() {
+    for (const signal of ['SIGINT', 'SIGTERM']) {
+        process.once(signal, () => {
+            const hardDeadline = setTimeout(() => {
+                console.error('Shutdown-Deadline überschritten; Prozess wird beendet.');
+                process.exit(1);
+            }, Number(process.env.APP_SHUTDOWN_HARD_DEADLINE_MS || 25000));
+
+            stopRuntime(signal)
+                .then(() => {
+                    clearTimeout(hardDeadline);
+                    process.exit(0);
+                })
+                .catch(error => {
+                    clearTimeout(hardDeadline);
+                    console.error('Geordneter Shutdown fehlgeschlagen:', error);
+                    process.exit(1);
+                });
+        });
+    }
+}
 
 function logBootstrapResult(bootstrapResult) {
     if (bootstrapResult.databaseCreated) {
@@ -46,10 +90,29 @@ function logBootstrapResult(bootstrapResult) {
 async function startServer() {
     assertSecurityEnvironment();
     const bootstrapResult = await initializeDatabase();
+    primeSchemaReadiness(bootstrapResult.schema, bootstrapResult.migrationManifest);
     logBootstrapResult(bootstrapResult);
 
+    const cleanupConnection = await mysql.createConnection(dbConfig);
+
+    try {
+        const cleanup = await runCoordinatedDatabaseCleanup(cleanupConnection, {
+            lockTimeoutSeconds: 10
+        });
+
+        if (cleanup.acquired) {
+            console.log(`${new Date().toISOString()} - Koordiniertes Startup-Cleanup abgeschlossen`);
+        } else {
+            console.log(`${new Date().toISOString()} - Startup-Cleanup läuft bereits in einer anderen Replik`);
+        }
+    } finally {
+        await cleanupConnection.end();
+    }
+
     process.env.DB_PORT = String(dbConfig.port);
-    require('./segnitz_rental');
+    applicationRuntime = require('./segnitz_rental');
+    await startExternalEffectsWorker();
+    installShutdownHandlers();
 }
 
 if (require.main === module) {
@@ -61,5 +124,6 @@ if (require.main === module) {
 
 module.exports = {
     logBootstrapResult,
+    stopRuntime,
     startServer
 };

@@ -32,6 +32,7 @@ CREATE TABLE users (
     city VARCHAR(100) NULL,
     customer_no VARCHAR(30) NULL,
     email_verified TINYINT(1) NOT NULL DEFAULT 0,
+    auth_version INT UNSIGNED NOT NULL DEFAULT 1,
     verification_token VARCHAR(128) NULL,
     verification_expires DATETIME NULL,
     reset_token VARCHAR(255) NULL,
@@ -43,7 +44,8 @@ CREATE TABLE users (
     UNIQUE KEY uq_users_username (username),
     UNIQUE KEY uq_users_customer_no (customer_no),
     KEY idx_users_verification_token (verification_token),
-    KEY idx_users_reset_token (reset_token)
+    KEY idx_users_reset_token (reset_token),
+    CONSTRAINT chk_users_email_verified CHECK (email_verified IN (0, 1))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE guest_verifications (
@@ -56,7 +58,15 @@ CREATE TABLE guest_verifications (
     PRIMARY KEY (id),
     UNIQUE KEY uq_guest_verifications_token (verification_token),
     KEY idx_guest_verifications_email (email),
-    KEY idx_guest_verifications_expiry (expires_at)
+    KEY idx_guest_verifications_expiry (expires_at),
+    CONSTRAINT chk_guest_verifications_verified CHECK (verified IN (0, 1))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE customer_number_sequences (
+    sequence_year SMALLINT UNSIGNED NOT NULL,
+    sequence_value INT UNSIGNED NOT NULL DEFAULT 0,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (sequence_year)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE rental_products (
@@ -74,7 +84,10 @@ CREATE TABLE rental_products (
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     UNIQUE KEY uq_rental_products_product_key (product_key),
-    KEY idx_rental_products_active_popular (is_active, times_ordered)
+    KEY idx_rental_products_active_popular (is_active, times_ordered),
+    CONSTRAINT chk_rental_products_values CHECK (
+        price_per_day >= 0 AND deposit >= 0 AND is_active IN (0, 1)
+    )
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE rental_categories (
@@ -114,12 +127,21 @@ CREATE TABLE rental_carts (
     session_id VARCHAR(255) NOT NULL,
     user_email VARCHAR(255) NULL,
     status VARCHAR(50) NOT NULL DEFAULT 'active',
+    active_guest_session_id VARCHAR(255) GENERATED ALWAYS AS (
+        CASE WHEN status = 'active' AND user_email IS NULL THEN session_id ELSE NULL END
+    ) STORED,
+    active_user_email VARCHAR(255) GENERATED ALWAYS AS (
+        CASE WHEN status = 'active' AND user_email IS NOT NULL THEN LOWER(user_email) ELSE NULL END
+    ) STORED,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     KEY idx_rental_carts_session_status (session_id, status),
     KEY idx_rental_carts_user_status (user_email, status),
-    KEY idx_rental_carts_status_updated (status, updated_at)
+    KEY idx_rental_carts_status_updated (status, updated_at),
+    UNIQUE KEY uq_rental_carts_active_guest (active_guest_session_id),
+    UNIQUE KEY uq_rental_carts_active_user (active_user_email),
+    CONSTRAINT chk_rental_carts_status CHECK (status IN ('active', 'converted'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE rental_cart_items (
@@ -131,12 +153,16 @@ CREATE TABLE rental_cart_items (
     quantity INT UNSIGNED NOT NULL DEFAULT 1,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
+    UNIQUE KEY uq_rental_cart_items_exact_period (cart_id, product_id, rental_start, rental_end),
     KEY idx_rental_cart_items_cart (cart_id),
     KEY idx_rental_cart_items_product_period (product_id, rental_start, rental_end),
     CONSTRAINT fk_rci_cart FOREIGN KEY (cart_id)
         REFERENCES rental_carts (id) ON DELETE CASCADE,
     CONSTRAINT fk_rci_product FOREIGN KEY (product_id)
-        REFERENCES rental_products (id) ON DELETE RESTRICT
+        REFERENCES rental_products (id) ON DELETE RESTRICT,
+    CONSTRAINT chk_rental_cart_items_period_quantity CHECK (
+        rental_end >= rental_start AND quantity > 0
+    )
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE rental_orders (
@@ -177,6 +203,8 @@ CREATE TABLE rental_orders (
     cancelled_by_user_id INT NULL,
     cancelled_by_name VARCHAR(255) NULL,
     cancel_reason TEXT NULL,
+    guest_access_token_hash CHAR(64) NULL,
+    guest_access_token_expires_at DATETIME NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     UNIQUE KEY uq_rental_orders_order_no (order_no),
@@ -188,6 +216,7 @@ CREATE TABLE rental_orders (
     KEY idx_rental_orders_return_created (return_status, created_at),
     KEY idx_rental_orders_reserved (status, reserved_until),
     KEY idx_rental_orders_mollie_payment (mollie_payment_id),
+    KEY idx_rental_orders_guest_access_expiry (guest_access_token_expires_at),
     CONSTRAINT fk_ro_cart FOREIGN KEY (cart_id)
         REFERENCES rental_carts (id) ON DELETE SET NULL,
     CONSTRAINT fk_ro_user FOREIGN KEY (user_id)
@@ -197,7 +226,27 @@ CREATE TABLE rental_orders (
     CONSTRAINT fk_ro_return_processed_by FOREIGN KEY (return_processed_by_user_id)
         REFERENCES users (id) ON DELETE SET NULL,
     CONSTRAINT fk_ro_cancelled_by FOREIGN KEY (cancelled_by_user_id)
-        REFERENCES users (id) ON DELETE SET NULL
+        REFERENCES users (id) ON DELETE SET NULL,
+    CONSTRAINT chk_rental_orders_total_amount CHECK (total_amount >= 0),
+    CONSTRAINT chk_rental_orders_lifecycle CHECK (
+        status IN (
+            'reserved', 'pending_payment', 'payment_failed', 'paid', 'confirmed',
+            'active', 'picked_up', 'returned', 'partially_returned', 'cancelled',
+            'partially_cancelled', 'expired', 'payment_dispute'
+        )
+        AND (payment_status IS NULL OR payment_status IN (
+            'pending', 'open', 'authorized', 'paid', 'failed', 'cancelled',
+            'expired', 'charged_back', 'refunded', 'refund_pending', 'refund_failed'
+        ))
+        AND (return_status IS NULL OR return_status IN (
+            'pending', 'not_required', 'returned_ok', 'returned_damaged',
+            'returned_late', 'returned_late_damaged'
+        ))
+        AND (return_case_status IS NULL OR return_case_status IN (
+            'open', 'partial', 'closed', 'payment_failed', 'payment_pending',
+            'refund_failed', 'refund_pending', 'payment_dispute'
+        ))
+    )
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE rental_order_items (
@@ -237,6 +286,7 @@ CREATE TABLE rental_order_items (
     cancelled_by_name VARCHAR(255) NULL,
     cancel_reason TEXT NULL,
     PRIMARY KEY (id),
+    UNIQUE KEY uq_rental_order_items_id_order (id, order_id),
     KEY idx_rental_order_items_order (order_id),
     KEY idx_rental_order_items_product_period (product_id, rental_start, rental_end),
     KEY idx_rental_order_items_status (item_status, return_status),
@@ -249,7 +299,35 @@ CREATE TABLE rental_order_items (
     CONSTRAINT fk_roi_return_processed_by FOREIGN KEY (return_processed_by_user_id)
         REFERENCES users (id) ON DELETE SET NULL,
     CONSTRAINT fk_roi_cancelled_by FOREIGN KEY (cancelled_by_user_id)
-        REFERENCES users (id) ON DELETE SET NULL
+        REFERENCES users (id) ON DELETE SET NULL,
+    CONSTRAINT chk_rental_order_items_values CHECK (
+        rental_end >= rental_start
+        AND price_per_day >= 0
+        AND deposit >= 0
+        AND is_damaged IN (0, 1)
+        AND is_late IN (0, 1)
+        AND (adjusted_rental_start IS NULL) = (adjusted_rental_end IS NULL)
+        AND (adjusted_rental_end IS NULL OR adjusted_rental_end >= adjusted_rental_start)
+        AND (adjusted_price_per_day IS NULL OR adjusted_price_per_day >= 0)
+        AND (adjusted_rental_total IS NULL OR adjusted_rental_total >= 0)
+        AND (deposit_deduction_percent IS NULL OR deposit_deduction_percent BETWEEN 0 AND 100)
+        AND (deposit_deduction_amount IS NULL OR deposit_deduction_amount >= 0)
+        AND (deposit_refund_amount IS NULL OR deposit_refund_amount >= 0)
+        AND (additional_charge_amount IS NULL OR additional_charge_amount >= 0)
+    ),
+    CONSTRAINT chk_rental_order_items_lifecycle CHECK (
+        (item_status IS NULL OR item_status IN (
+            'active', 'picked_up', 'cancelled', 'expired', 'returned_ok',
+            'returned_damaged', 'returned_late', 'returned_late_damaged'
+        ))
+        AND (return_status IS NULL OR return_status IN (
+            'pending', 'not_required', 'returned_ok', 'returned_damaged',
+            'returned_late', 'returned_late_damaged'
+        ))
+        AND (deposit_decision IS NULL OR deposit_decision IN (
+            'no_refund', 'full_refund', 'partial_refund'
+        ))
+    )
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE rental_order_payments (
@@ -266,11 +344,13 @@ CREATE TABLE rental_order_payments (
     mollie_customer_id VARCHAR(255) NULL,
     mollie_mandate_id VARCHAR(255) NULL,
     sequence_type VARCHAR(50) NULL,
+    external_operation_key VARCHAR(191) NULL,
     paid_at DATETIME NULL,
     recorded_by_user_id INT NULL,
     note TEXT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
+    UNIQUE KEY uq_rental_order_payments_external_operation (external_operation_key),
     KEY idx_rental_order_payments_order_type_status (order_id, payment_type, payment_status),
     KEY idx_rental_order_payments_item (order_item_id),
     KEY idx_rental_order_payments_mollie_payment (mollie_payment_id),
@@ -279,8 +359,22 @@ CREATE TABLE rental_order_payments (
         REFERENCES rental_orders (id) ON DELETE CASCADE,
     CONSTRAINT fk_rop_item FOREIGN KEY (order_item_id)
         REFERENCES rental_order_items (id) ON DELETE CASCADE,
+    CONSTRAINT fk_rop_item_order FOREIGN KEY (order_item_id, order_id)
+        REFERENCES rental_order_items (id, order_id) ON DELETE CASCADE,
     CONSTRAINT fk_rop_recorded_by FOREIGN KEY (recorded_by_user_id)
-        REFERENCES users (id) ON DELETE SET NULL
+        REFERENCES users (id) ON DELETE SET NULL,
+    CONSTRAINT chk_rental_order_payments_lifecycle CHECK (
+        payment_type IN (
+            'initial_payment', 'rental', 'deposit', 'rental_adjustment',
+            'return_additional_charge', 'deposit_refund',
+            'order_cancellation_refund', 'duplicate_payment_refund',
+            'chargeback', 'refund_record'
+        )
+        AND payment_status IN (
+            'pending', 'open', 'authorized', 'paid', 'failed', 'cancelled',
+            'expired', 'charged_back', 'offset', 'replaced', 'refunded'
+        )
+    )
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE rental_order_return_images (
@@ -297,6 +391,8 @@ CREATE TABLE rental_order_return_images (
         REFERENCES rental_orders (id) ON DELETE CASCADE,
     CONSTRAINT fk_rori_item FOREIGN KEY (order_item_id)
         REFERENCES rental_order_items (id) ON DELETE CASCADE,
+    CONSTRAINT fk_rori_item_order FOREIGN KEY (order_item_id, order_id)
+        REFERENCES rental_order_items (id, order_id) ON DELETE CASCADE,
     CONSTRAINT fk_rori_uploaded_by FOREIGN KEY (uploaded_by_user_id)
         REFERENCES users (id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
@@ -308,6 +404,34 @@ CREATE TABLE mollie_webhook_events (
     processed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     UNIQUE KEY uq_mollie_webhook_events_payment_status (mollie_payment_id, mollie_status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE external_effects_outbox (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    operation_key VARCHAR(191) NOT NULL,
+    effect_type VARCHAR(80) NOT NULL,
+    payload_json JSON NOT NULL,
+    payload_hash CHAR(64) NOT NULL,
+    status VARCHAR(32) NOT NULL DEFAULT 'pending',
+    attempt_count INT UNSIGNED NOT NULL DEFAULT 0,
+    max_attempts INT UNSIGNED NOT NULL DEFAULT 8,
+    available_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    locked_at DATETIME NULL,
+    locked_by VARCHAR(128) NULL,
+    result_json JSON NULL,
+    last_error TEXT NULL,
+    completed_at DATETIME NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_external_effects_operation_key (operation_key),
+    KEY idx_external_effects_ready (status, available_at, id),
+    KEY idx_external_effects_lease (status, locked_at),
+    KEY idx_external_effects_retention (status, completed_at),
+    CONSTRAINT chk_external_effects_attempts CHECK (attempt_count <= max_attempts),
+    CONSTRAINT chk_external_effects_status CHECK (
+        status IN ('pending', 'processing', 'retry', 'succeeded', 'dead')
+    )
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE product_reviews (
@@ -338,7 +462,12 @@ CREATE TABLE opening_hours (
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     UNIQUE KEY uq_opening_hours_weekday (weekday),
-    CONSTRAINT chk_opening_hours_weekday CHECK (weekday BETWEEN 0 AND 6)
+    CONSTRAINT chk_opening_hours_weekday CHECK (weekday BETWEEN 0 AND 6),
+    CONSTRAINT chk_opening_hours_values CHECK (
+        (is_open = 0 AND open_time IS NULL AND close_time IS NULL)
+        OR
+        (is_open = 1 AND open_time IS NOT NULL AND close_time IS NOT NULL AND open_time < close_time)
+    )
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE user_sessions (

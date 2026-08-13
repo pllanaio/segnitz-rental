@@ -11,10 +11,17 @@ function showAlert(message, type = 'info', timeout = 4000) {
     alertBox.className = `alert alert-${type} alert-dismissible fade show shadow`;
     alertBox.role = 'alert';
 
-    alertBox.innerHTML = `
-        ${message}
-        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-    `;
+    const messageNode = document.createElement('span');
+    messageNode.textContent = String(message ?? '');
+
+    const closeButton = document.createElement('button');
+    closeButton.type = 'button';
+    closeButton.className = 'btn-close';
+    closeButton.dataset.bsDismiss = 'alert';
+    closeButton.setAttribute('aria-label', 'Hinweis schließen');
+
+    alertBox.appendChild(messageNode);
+    alertBox.appendChild(closeButton);
 
     container.appendChild(alertBox);
 

@@ -1,7 +1,22 @@
+const crypto = require('node:crypto');
 const fetch = require('node-fetch');
+const {
+    EFFECT_TYPES,
+    createOperationKey,
+    enqueueExternalEffect
+} = require('./externalEffectsOutbox');
 
 let cachedGraphToken = null;
 let cachedGraphTokenExpiresAt = 0;
+
+function getGraphRequestSignal() {
+    const configuredTimeout = Number(process.env.GRAPH_REQUEST_TIMEOUT_MS || 10000);
+    const timeoutMs = Number.isFinite(configuredTimeout)
+        ? Math.min(Math.max(configuredTimeout, 1000), 30000)
+        : 10000;
+
+    return AbortSignal.timeout(timeoutMs);
+}
 
 function escapeHtml(value) {
     return String(value || '')
@@ -59,7 +74,8 @@ async function getGraphAccessToken() {
                 client_secret: clientSecret,
                 scope: 'https://graph.microsoft.com/.default',
                 grant_type: 'client_credentials'
-            })
+            }),
+            signal: getGraphRequestSignal()
         }
     );
 
@@ -88,7 +104,7 @@ function normalizeRecipients(value) {
         }));
 }
 
-async function sendGraphMail({ to, cc, bcc, subject, html, text }) {
+async function deliverGraphMail({ to, cc, bcc, subject, html, text, operationKey }) {
     if (process.env.DISABLE_EMAILS === '1') {
         return { disabled: true };
     }
@@ -113,10 +129,17 @@ async function sendGraphMail({ to, cc, bcc, subject, html, text }) {
                     },
                     toRecipients: normalizeRecipients(to),
                     ccRecipients: normalizeRecipients(cc),
-                    bccRecipients: normalizeRecipients(bcc)
+                    bccRecipients: normalizeRecipients(bcc),
+                    ...(operationKey ? {
+                        internetMessageHeaders: [{
+                            name: 'x-segnitz-operation-key',
+                            value: operationKey
+                        }]
+                    } : {})
                 },
                 saveToSentItems: true
-            })
+            }),
+            signal: getGraphRequestSignal()
         }
     );
 
@@ -126,7 +149,36 @@ async function sendGraphMail({ to, cc, bcc, subject, html, text }) {
     }
 }
 
-async function sendOrderEmail(recipients, orderSummary, customer, signatureDataUrl, paymentMethodText) {
+async function sendGraphMail(message, options = {}) {
+    const operationKey = options.operationKey || message.operationKey || `mail:${crypto.randomUUID()}`;
+    const durableMessage = {
+        ...message,
+        operationKey
+    };
+    const payload = { message: durableMessage };
+    if (options.application) payload.application = options.application;
+
+    await enqueueExternalEffect({
+        operationKey,
+        effectType: EFFECT_TYPES.MAIL_SEND,
+        payload,
+        maxAttempts: 8
+    }, { connection: options.connection });
+
+    return {
+        queued: true,
+        operationKey
+    };
+}
+
+async function sendOrderEmail(
+    recipients,
+    orderSummary,
+    customer,
+    signatureDataUrl,
+    paymentMethodText,
+    deliveryOptions = {}
+) {
     if (!recipients || recipients.length === 0) {
         return false;
     }
@@ -204,18 +256,29 @@ async function sendOrderEmail(recipients, orderSummary, customer, signatureDataU
         bcc: internalRecipient,
         subject: `Mietauftrag ${orderSummary.orderNo}`,
         html
+    }, {
+        ...deliveryOptions,
+        operationKey: deliveryOptions.operationKey || createOperationKey(
+            'mail-order',
+            { orderId: orderSummary.id || null, orderNo: orderSummary.orderNo }
+        )
     });
 
     return true;
 }
 
-async function sendVerificationEmail(email, token) {
+async function sendVerificationEmail(email, token, options = {}) {
     const verificationUrl = `${getBaseUrl()}/verify-email?token=${token}`;
+    const isGuestOrder = ['guest_order', 'guest_cash_order'].includes(options.purpose);
+    const verificationWindowMinutes = Number(options.verificationWindowMinutes) || 15;
+    const followUpText = isGuestOrder
+        ? ` Nach der Bestätigung haben Sie ${verificationWindowMinutes} Minuten Zeit, die Bestellung erneut abzusenden.`
+        : '';
 
     await sendGraphMail({
         to: email,
         subject: 'E-Mail-Adresse bestätigen',
-        text: `Bitte bestätigen Sie Ihre E-Mail-Adresse über diesen Link: ${verificationUrl}`,
+        text: `Bitte bestätigen Sie Ihre E-Mail-Adresse über diesen Link: ${verificationUrl}\n\nDer Link ist 24 Stunden gültig.${followUpText}`,
         html: `
             <p>Bitte bestätigen Sie Ihre E-Mail-Adresse.</p>
             <p>
@@ -223,16 +286,22 @@ async function sendVerificationEmail(email, token) {
                     E-Mail-Adresse bestätigen
                 </a>
             </p>
-            <p>Der Link ist 24 Stunden gültig.</p>
+            <p>Der Link ist 24 Stunden gültig.${followUpText}</p>
         `
+    }, {
+        connection: options.connection,
+        operationKey: options.operationKey || createOperationKey(
+            'mail-verify',
+            { email, token }
+        )
     });
 
-    console.log('Verification-Mail gesendet:', {
+    console.log('Verification-Mail vorgemerkt:', {
         to: email
     });
 }
 
-async function sendPasswordChangedEmail(email) {
+async function sendPasswordChangedEmail(email, deliveryOptions = {}) {
     await sendGraphMail({
         to: email,
         subject: 'Ihr Passwort wurde geändert',
@@ -244,10 +313,10 @@ async function sendPasswordChangedEmail(email) {
                 kontaktieren Sie uns bitte umgehend.
             </p>
         `
-    });
+    }, deliveryOptions);
 }
 
-async function sendPasswordResetEmail(email, resetUrl) {
+async function sendPasswordResetEmail(email, resetUrl, deliveryOptions = {}) {
     await sendGraphMail({
         to: email,
         subject: 'Passwort zurücksetzen',
@@ -272,10 +341,16 @@ Falls Sie diese Anfrage nicht gestellt haben, ignorieren Sie diese E-Mail.`,
                 ignorieren Sie diese E-Mail.
             </p>
         `
+    }, {
+        ...deliveryOptions,
+        operationKey: deliveryOptions.operationKey || createOperationKey(
+            'mail-password-reset',
+            { email, resetUrl }
+        )
     });
 }
 
-async function sendPickedUpEmail(order) {
+async function sendPickedUpEmail(order, deliveryOptions = {}) {
     await sendGraphMail({
         to: order.customer_email,
         subject: `Mietauftrag ${order.order_no} wurde abgeholt`,
@@ -284,10 +359,16 @@ async function sendPickedUpEmail(order) {
             <p>Ihr Mietauftrag <strong>${escapeHtml(order.order_no)}</strong> wurde als abgeholt markiert.</p>
             <p>Bitte bringen Sie die Artikel zum vereinbarten Rückgabetermin zurück.</p>
         `
+    }, {
+        ...deliveryOptions,
+        operationKey: deliveryOptions.operationKey || createOperationKey(
+            'mail-picked-up',
+            { orderId: order.id || null, orderNo: order.order_no }
+        )
     });
 }
 
-async function sendOrderCancelledEmail(order, reason = null) {
+async function sendOrderCancelledEmail(order, reason = null, deliveryOptions = {}) {
     await sendGraphMail({
         to: order.customer_email,
         subject: `Mietauftrag ${order.order_no} wurde storniert`,
@@ -296,10 +377,16 @@ async function sendOrderCancelledEmail(order, reason = null) {
             <p>Ihr Mietauftrag <strong>${escapeHtml(order.order_no)}</strong> wurde storniert.</p>
             ${reason ? `<p><strong>Grund:</strong> ${escapeHtml(reason)}</p>` : ''}
         `
+    }, {
+        ...deliveryOptions,
+        operationKey: deliveryOptions.operationKey || createOperationKey(
+            'mail-order-cancelled',
+            { orderId: order.id || null, orderNo: order.order_no }
+        )
     });
 }
 
-async function sendItemCancelledEmail(order, item) {
+async function sendItemCancelledEmail(order, item, deliveryOptions = {}) {
     await sendGraphMail({
         to: order.customer_email,
         subject: `Artikel aus Mietauftrag ${order.order_no} wurde storniert`,
@@ -308,10 +395,22 @@ async function sendItemCancelledEmail(order, item) {
             <p>Aus Ihrem Mietauftrag <strong>${escapeHtml(order.order_no)}</strong> wurde folgender Artikel storniert:</p>
             <p><strong>${escapeHtml(item.title)}</strong></p>
         `
+    }, {
+        ...deliveryOptions,
+        operationKey: deliveryOptions.operationKey || createOperationKey(
+            'mail-item-cancelled',
+            { orderId: order.id || null, orderNo: order.order_no, itemId: item.id }
+        )
     });
 }
 
-async function sendRentalAdjustmentEmailWithPayment(order, item, paymentUrl, amountDue) {
+async function sendRentalAdjustmentEmailWithPayment(
+    order,
+    item,
+    paymentUrl,
+    amountDue,
+    deliveryOptions = {}
+) {
     await sendGraphMail({
         to: order.customer_email,
         subject: `Mietzeitraum zu Auftrag ${order.order_no} wurde angepasst`,
@@ -335,10 +434,29 @@ async function sendRentalAdjustmentEmailWithPayment(order, item, paymentUrl, amo
                 <p>Es ergibt sich aktuell kein zusätzlicher Zahlungsbetrag.</p>
             `}
         `
+    }, {
+        ...deliveryOptions,
+        operationKey: deliveryOptions.operationKey || createOperationKey(
+            'mail-rental-adjustment',
+            {
+                orderId: order.id || null,
+                orderNo: order.order_no,
+                itemId: item.id,
+                adjustedEnd: item.adjusted_rental_end || item.adjustedRentalEnd || null,
+                amountDue
+            }
+        )
     });
 }
 
-async function sendReturnAdditionalChargeEmail(order, item, paymentUrl, amountDue, reason) {
+async function sendReturnAdditionalChargeEmail(
+    order,
+    item,
+    paymentUrl,
+    amountDue,
+    reason,
+    deliveryOptions = {}
+) {
     await sendGraphMail({
         to: order.customer_email,
         subject: `Nachzahlung zu Mietauftrag ${order.order_no}`,
@@ -355,10 +473,16 @@ async function sendReturnAdditionalChargeEmail(order, item, paymentUrl, amountDu
 
             <p>Alternativ können Sie den Betrag auch direkt bei uns vor Ort bezahlen.</p>
         `
+    }, {
+        ...deliveryOptions,
+        operationKey: deliveryOptions.operationKey || createOperationKey(
+            'mail-return-charge',
+            { orderId: order.id || null, orderNo: order.order_no, itemId: item.id, amountDue }
+        )
     });
 }
 
-async function sendPaymentReceiptEmail(order, payment) {
+async function sendPaymentReceiptEmail(order, payment, deliveryOptions = {}) {
     const paymentTypeLabels = {
         initial_payment: 'Miete und Kaution / ursprünglicher Mietauftrag',
         rental: 'Miete / ursprünglicher Mietauftrag',
@@ -400,10 +524,22 @@ async function sendPaymentReceiptEmail(order, payment) {
 
             <p>Vielen Dank.</p>
         `
+    }, {
+        ...deliveryOptions,
+        operationKey: deliveryOptions.operationKey || createOperationKey(
+            'mail-payment-receipt',
+            {
+                orderId: order.id || null,
+                orderNo: order.order_no,
+                paymentId: payment.id || payment.mollie_payment_id || payment.mollie_refund_id || null,
+                paymentType: payment.payment_type,
+                amount: payment.amount
+            }
+        )
     });
 }
 
-async function sendReturnSummaryEmail(order, item, payments = []) {
+async function sendReturnSummaryEmail(order, item, payments = [], deliveryOptions = {}) {
     const depositRefund = payments.find(payment =>
         payment.paymentType === 'deposit_refund' ||
         payment.payment_type === 'deposit_refund'
@@ -505,10 +641,22 @@ async function sendReturnSummaryEmail(order, item, payments = []) {
                 Bitte bewahren Sie diese E-Mail als Nachweis Ihrer Rückgabe auf.
             </p>
         `
+    }, {
+        ...deliveryOptions,
+        operationKey: deliveryOptions.operationKey || createOperationKey(
+            'mail-return-summary',
+            {
+                orderId: order.id || null,
+                orderNo: order.order_no,
+                itemId: item.id,
+                actualReturnDate: item.actualReturnDate || item.actual_return_date || null
+            }
+        )
     });
 }
 
 module.exports = {
+    deliverGraphMail,
     escapeHtml,
     sendOrderEmail,
     sendVerificationEmail,

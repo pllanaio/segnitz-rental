@@ -9,6 +9,9 @@ initialisiert:
 - Existiert die in `DB_NAME` konfigurierte Datenbank nicht, versucht der
   Datenbankbenutzer sie anzulegen.
 - Fehlende Tabellen werden aus `database/schema.sql` erstellt.
+- Nach Migrationen vergleicht der Start Tabellen, Spalten, Defaults, Indizes sowie
+  CHECK- und Foreign-Key-Definitionen mit dem kanonischen Schema und bricht bei
+  Drift ab.
 - Ausstehende versionierte Migrationen werden einmalig ausgeführt und in
   `app_schema_migrations` protokolliert. Eine nachträglich veränderte bereits
   ausgeführte Migration verhindert den Start.
@@ -16,9 +19,16 @@ initialisiert:
   starten. Für Deployments mit mehreren Replikas wird ein MySQL-Advisory-Lock
   verwendet.
 
+Die Anwendung verwendet für Geschäftszeiten standardmäßig `Europe/Berlin` und
+setzt jede neue MySQL-Session auf den jeweils gültigen UTC-Offset (inklusive
+Sommer-/Winterzeit). `BUSINESS_TIME_ZONE` kann nur auf eine von Node/Intl
+unterstützte IANA-Zeitzone gesetzt werden. `/live` prüft nur den Prozess;
+`/ready` und der kompatible Pfad `/health` prüfen Datenbank und Schema und liefern
+bei Nichtverfügbarkeit HTTP 503.
+
 Der konfigurierte Datenbankbenutzer benötigt damit `CREATE`, `ALTER`, `INDEX`,
-`SELECT`, `INSERT`, `UPDATE` und `DELETE`. Soll das Programm auch die Datenbank
-selbst anlegen, wird zusätzlich `CREATE` auf Serverebene benötigt. Kann der
+`REFERENCES`, `SELECT`, `INSERT`, `UPDATE` und `DELETE`. Soll das Programm auch
+die Datenbank selbst anlegen, wird zusätzlich `CREATE` auf Serverebene benötigt. Kann der
 Benutzer das nicht, muss nur eine leere Datenbank mit dem Namen aus `DB_NAME`
 bereitgestellt werden; Tabellen und Migrationen übernimmt die Anwendung.
 
@@ -44,25 +54,49 @@ aktualisiert und eine neue unveränderliche Migration in
 `database/migrations/automatic.js` ergänzt. Das Deployment führt sie selbst aus;
 ein manueller SQL-Schritt gehört nicht mehr zum Releaseprozess.
 
+## Produktionsdeployment mit Docker Compose
+
+Die mitgelieferte `compose.yml` bindet den HTTP-Port standardmäßig nur an
+`127.0.0.1`, begrenzt Linux-Capabilities auf den initialen Eigentümer- und
+Benutzerwechsel und persistiert Produkt- und Rückgabebilder in benannten
+Volumes. Rückgabebilder
+liegen außerhalb des öffentlichen Web-Verzeichnisses und werden ausschließlich
+über eine eigentümer- beziehungsweise admin-geprüfte Route ohne Browser-Cache
+ausgeliefert. Das bestehende Volume `return-images` bleibt auch nach dieser
+Pfadänderung erhalten; nur sein Einhängepunkt im Container ist privat.
+
+1. `.env.example` nach `.env` kopieren und alle leeren Secrets setzen.
+2. `SESSION_SECRET` und `ADMIN_SETUP_TOKEN` mit mindestens 32 zufälligen Zeichen
+   erzeugen. `.env` niemals committen.
+3. Mit `docker compose pull` und
+   `docker compose up -d --force-recreate` deployen.
+4. Für reproduzierbare Rollouts bevorzugt
+   `SEGNITZ_IMAGE=pllanaio/segnitz-rental:sha-<vollstaendiger-commit-sha>` setzen.
+
+`docker compose down` behält die benannten Volumes. `docker compose down -v`
+löscht sie dagegen zusammen mit allen hochgeladenen Bildern und darf nur nach
+einem geprüften Backup verwendet werden. Datenbank und beide Upload-Volumes
+müssen regelmäßig gesichert und eine Wiederherstellung muss getestet werden.
+
+Beim Upgrade werden auch ältere, eventuell noch `root:root` gehörende
+Upload-Volumes automatisch nutzbar gemacht: Der Container-Entrypoint legt nur
+die beiden festen Einhängepunkte `/app/public/img/products` und
+`/app/uploads/returns` an und überträgt deren Eigentümerschaft auf den
+`node`-Benutzer. Dafür startet er kurz mit den Linux-Capabilities `CHOWN`,
+`SETGID` und `SETUID`, gibt sie beim Wechsel zu `node` ab und startet
+anschließend die Anwendung per `exec`. Ein manueller `chown`-Hotfix auf dem
+Server ist nicht erforderlich; bestehende Bilddateien werden dabei weder
+verändert noch gelöscht.
+
+Falls der Reverse Proxy nicht auf demselben Host läuft, muss
+`APP_BIND_ADDRESS` bewusst auf eine geeignete interne Adresse geändert und der
+Origin per Firewall vor direktem Internetzugriff geschützt werden.
+
 ## Authors and acknowledgment
 Leon Pllana @ Segnitz Rental
 
-## Resources
-Node-Modules: <br>
-"pdf-lib": "^1.17.1" - https://pdf-lib.js.org <br>
-"node-fetch": "^2.7.0" - https://github.com/node-fetch/node-fetch <br>
-"file-saver": "^2.0.5" - https://github.com/eligrey/FileSaver.js#readme <br>
-"express": "^4.18.2" - https://expressjs.com <br>
-"dotenv": "^16.4.4" - https://github.com/motdotla/dotenv#readme <br>
-"cors": "^2.8.5" - https://github.com/expressjs/cors#readme <br>
-"bootstrap-icons": "^1.11.3" - https://icons.getbootstrap.com <br>
-"bcrypt": "^5.1.1" - https://github.com/kelektiv/node.bcrypt.js#readme <br>
-"mysql2": "^3.9.7" - https://sidorares.github.io/node-mysql2/docs <br>
-"express-session": "^1.18.0" - https://github.com/expressjs/session#readme <br>
-"nodemailer": "^6.9.13" - https://nodemailer.com<br>
-<br>
-Javascript Modules: <br>
-Bootstrap v5.3.3 - https://getbootstrap.com <br>
-@popperjs/core v2.11.8 - https://github.com/floating-ui/floating-ui#readme <br>
-Signature Pad v2.3.2 - https://github.com/szimek/signature_pad <br>
-Tempus Dominus v6.9.4 - https://getdatepicker.com/<br>
+## Abhängigkeiten
+
+Die verbindlichen und aktuell aufgelösten Versionen stehen in `package.json`
+und `package-lock.json`. Production-Abhängigkeiten werden in CI mit
+`npm audit --omit=dev --audit-level=high` geprüft.
