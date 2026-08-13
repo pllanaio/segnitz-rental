@@ -16,13 +16,32 @@ let serverOutput = '';
 class SessionClient {
     constructor() {
         this.cookie = '';
+        this.csrfToken = '';
     }
 
     async request(pathname, options = {}) {
         const headers = new Headers(options.headers || {});
+        const method = String(options.method || 'GET').toUpperCase();
+
+        if (this.csrfToken === '' && !['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+            const csrfHeaders = this.cookie ? { cookie: this.cookie } : {};
+            const csrfResponse = await fetch(`${BASE_URL}/csrf-token`, {
+                headers: csrfHeaders
+            });
+            const csrfCookie = csrfResponse.headers.get('set-cookie');
+            if (csrfCookie) this.cookie = csrfCookie.split(';', 1)[0];
+
+            const csrfResult = await csrfResponse.json();
+            assert.equal(csrfResponse.status, 200, JSON.stringify(csrfResult));
+            this.csrfToken = String(csrfResult.csrfToken || '');
+        }
 
         if (this.cookie) {
             headers.set('cookie', this.cookie);
+        }
+
+        if (this.csrfToken && !['GET', 'HEAD'].includes(method)) {
+            headers.set('x-csrf-token', this.csrfToken);
         }
 
         const response = await fetch(`${BASE_URL}${pathname}`, {
@@ -34,6 +53,9 @@ class SessionClient {
         if (setCookie) {
             this.cookie = setCookie.split(';', 1)[0];
         }
+
+        const responseCsrfToken = response.headers.get('x-csrf-token');
+        if (responseCsrfToken) this.csrfToken = responseCsrfToken;
 
         return response;
     }
@@ -69,7 +91,7 @@ async function waitForServer() {
 before(async () => {
     await resetTestDatabase();
 
-    serverProcess = spawn(process.execPath, ['segnitz_rental.js'], {
+    serverProcess = spawn(process.execPath, ['server.js'], {
         cwd: path.resolve(__dirname, '../..'),
         env: {
             ...process.env,
@@ -196,17 +218,17 @@ test('übernimmt den Gast-Warenkorb nach erfolgreichem Kundenlogin', async () =>
     });
 
     assert.equal(loginResponse.status, 200);
-    assert.deepEqual(await loginResponse.json(), {
-        message: 'Login erfolgreich!',
-        redirectTo: '/index.html'
-    });
+    const loginResult = await loginResponse.json();
+    assert.equal(loginResult.message, 'Login erfolgreich!');
+    assert.equal(loginResult.redirectTo, '/index.html');
+    assert.match(loginResult.csrfToken, /^[a-f0-9]{64}$/);
 
     const authResponse = await client.request('/auth-status');
-    assert.deepEqual(await authResponse.json(), {
-        loggedIn: true,
-        user: TEST_USER.email,
-        role: TEST_USER.role
-    });
+    const authResult = await authResponse.json();
+    assert.equal(authResult.loggedIn, true);
+    assert.equal(authResult.user, TEST_USER.email);
+    assert.equal(authResult.role, TEST_USER.role);
+    assert.equal(authResult.csrfToken, loginResult.csrfToken);
 
     const cartResponse = await client.request('/cart');
     const cart = await cartResponse.json();

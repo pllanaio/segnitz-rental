@@ -25,7 +25,7 @@ const MySQLStore = require('express-mysql-session')(session);
 const fsp = require("fs").promises;
 const fs = require('fs');
 const mysql = require('mysql2/promise');
-const dbConfig = require('./config/db');
+const dbConfig = require('./database/bootstrappedDbConfig');
 const crypto = require('crypto');
 const multer = require('multer');
 const { getSafeImageExtension, imageFileFilter } = require('./utils/uploads');
@@ -168,15 +168,15 @@ app.use(session({
     cookie: createSessionCookieOptions()
 }));
 
-function getOrCreateAdminCsrfToken(req) {
-    if (!req.session.adminCsrfToken) {
-        req.session.adminCsrfToken = crypto.randomBytes(32).toString('hex');
+function getOrCreateCsrfToken(req) {
+    if (!req.session.csrfToken) {
+        req.session.csrfToken = crypto.randomBytes(32).toString('hex');
     }
 
-    return req.session.adminCsrfToken;
+    return req.session.csrfToken;
 }
 
-function adminCsrfTokensEqual(providedToken, expectedToken) {
+function csrfTokensEqual(providedToken, expectedToken) {
     const expectedTokenBuffer = Buffer.from(expectedToken, 'utf8');
     const providedTokenBuffer = Buffer.from(providedToken, 'utf8');
 
@@ -185,11 +185,21 @@ function adminCsrfTokensEqual(providedToken, expectedToken) {
         crypto.timingSafeEqual(providedTokenBuffer, expectedTokenBuffer);
 }
 
-function requireAdminCsrfToken(req, res, next) {
-    const expectedToken = req.session && req.session.adminCsrfToken;
+function requireCsrfToken(req, res, next) {
+    const method = String(req.method || 'GET').toUpperCase();
+    const exemptPath = req.path === '/setup-admin' || req.path === '/webhooks/mollie';
+
+    if (
+        ['GET', 'HEAD', 'OPTIONS'].includes(method) ||
+        exemptPath
+    ) {
+        return next();
+    }
+
+    const expectedToken = req.session.csrfToken;
     const providedToken = String(req.get('X-CSRF-Token') || '');
     const tokensMatch = typeof expectedToken === 'string' &&
-        adminCsrfTokensEqual(providedToken, req.session.adminCsrfToken);
+        csrfTokensEqual(providedToken, req.session.csrfToken);
 
     if (!tokensMatch) {
         return res.status(403).json({
@@ -200,6 +210,146 @@ function requireAdminCsrfToken(req, res, next) {
     return next();
 }
 
+const {
+    getInstallationState,
+    isSetupRequired
+} = require('./database/installationState');
+const {
+    createInitialAdmin,
+    getSetupStatus
+} = require('./services/setupService');
+
+const setupLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: {
+        error: 'Zu viele Einrichtungsversuche. Bitte in 15 Minuten erneut versuchen.'
+    }
+});
+
+function isSetupAssetPath(pathname) {
+    return pathname === '/setup.html' ||
+        pathname === '/setup-status' ||
+        pathname === '/setup-admin' ||
+        pathname === '/health' ||
+        pathname === '/favicon.ico' ||
+        pathname === '/js/setup_config.js' ||
+        pathname === '/js/bootstrap.bundle.min.js' ||
+        pathname.startsWith('/css/') ||
+        pathname.startsWith('/img/');
+}
+
+async function refreshSetupStateWhenRequired() {
+    return getSetupStatus();
+}
+
+app.get('/health', (req, res) => {
+    const installation = getInstallationState();
+
+    res.json({
+        status: installation === 'ready' ? 'ok' : 'setup_required',
+        database: 'ready',
+        installation
+    });
+});
+
+app.get('/setup-status', async (req, res) => {
+    try {
+        const installation = await refreshSetupStateWhenRequired();
+
+        return res.json({
+            setupRequired: installation === 'setup_required'
+        });
+    } catch (error) {
+        console.error('Installationsstatus konnte nicht geladen werden:', error);
+        return res.status(503).json({
+            error: 'Der Installationsstatus konnte nicht geladen werden.'
+        });
+    }
+});
+
+app.post('/setup-admin', setupLimiter, async (req, res) => {
+    try {
+        const admin = await createInitialAdmin(req.body || {});
+
+        await new Promise((resolve, reject) => {
+            req.session.regenerate(error => error ? reject(error) : resolve());
+        });
+
+        req.session.user = admin.email;
+        req.session.role = admin.role;
+        req.session.createdAt = Date.now();
+        const csrfToken = getOrCreateCsrfToken(req);
+
+        await new Promise((resolve, reject) => {
+            req.session.save(error => error ? reject(error) : resolve());
+        });
+
+        console.log(
+            `${new Date().toISOString()} - Ersteinrichtung abgeschlossen: ` +
+            `globales Adminkonto ${admin.email} wurde erstellt`
+        );
+
+        res.set('X-CSRF-Token', csrfToken);
+
+        return res.status(201).json({
+            message: 'Adminkonto wurde erstellt. Die Installation ist betriebsbereit.',
+            redirectTo: '/backend.html'
+        });
+    } catch (error) {
+        const statusCode = Number(error.statusCode) || 500;
+
+        if (statusCode >= 500) {
+            console.error('Fehler bei der Admin-Ersteinrichtung:', error);
+        }
+
+        return res.status(statusCode).json({
+            error: statusCode >= 500
+                ? 'Die Ersteinrichtung konnte nicht abgeschlossen werden.'
+                : error.message
+        });
+    }
+});
+
+app.get('/csrf-token', (req, res) => {
+    res.set('Cache-Control', 'no-store');
+
+    const csrfToken = getOrCreateCsrfToken(req);
+    res.set('X-CSRF-Token', csrfToken);
+    return res.json({ csrfToken });
+});
+
+app.use(async (req, res, next) => {
+    if (!isSetupRequired() || isSetupAssetPath(req.path)) return next();
+
+    try {
+        const installation = await refreshSetupStateWhenRequired();
+        if (installation === 'ready') return next();
+    } catch (error) {
+        console.error('Installationsstatus konnte nicht aktualisiert werden:', error);
+        return res.status(503).json({
+            error: 'Die Datenbankinitialisierung ist derzeit nicht verfügbar.'
+        });
+    }
+
+    const acceptsHtml = ['GET', 'HEAD'].includes(req.method) &&
+        String(req.get('accept') || '').includes('text/html');
+
+    if (acceptsHtml) {
+        return res.redirect(303, '/setup.html');
+    }
+
+    return res.status(503).json({
+        error: 'Die Anwendung muss zuerst eingerichtet werden.',
+        setupRequired: true,
+        setupUrl: '/setup.html'
+    });
+});
+
+app.use(requireCsrfToken);
+
 app.use('/', productRoutes);
 app.use('/', cartRoutes);
 
@@ -209,9 +359,11 @@ app.get('/', (req, res) => {
 });
 
 app.get('/auth-status', (req, res) => {
-    const csrfToken = req.session.user && req.session.role === 'global_admin'
-        ? getOrCreateAdminCsrfToken(req)
+    const csrfToken = req.session.user
+        ? getOrCreateCsrfToken(req)
         : null;
+
+    if (csrfToken) res.set('X-CSRF-Token', csrfToken);
 
     res.json({
         loggedIn: !!req.session.user,
@@ -333,6 +485,14 @@ app.post('/login', loginLimiter, async (req, res) => {
                     rows[0].role
                 );
 
+                const csrfToken = getOrCreateCsrfToken(req);
+
+                await new Promise((resolve, reject) => {
+                    req.session.save(error => error ? reject(error) : resolve());
+                });
+
+                res.set('X-CSRF-Token', csrfToken);
+
                 return res.status(200).json({
                     message: 'Login erfolgreich!',
                     redirectTo: redirectAfterLogin || (
@@ -340,9 +500,7 @@ app.post('/login', loginLimiter, async (req, res) => {
                             ? '/backend.html'
                             : '/index.html'
                     ),
-                    ...(rows[0].role === 'global_admin'
-                        ? { csrfToken: getOrCreateAdminCsrfToken(req) }
-                        : {})
+                    csrfToken
                 });
             } catch (sessionError) {
 
@@ -2625,7 +2783,7 @@ app.put('/admin/orders/:id/cancel', checkAdmin, async (req, res) => {
     }
 });
 
-app.put('/admin/order-items/:itemId/cancel', checkAdmin, requireAdminCsrfToken, adminReturnMutationLimiter, async (req, res) => {
+app.put('/admin/order-items/:itemId/cancel', checkAdmin, adminReturnMutationLimiter, async (req, res) => {
     let connection;
 
     try {
@@ -2921,7 +3079,7 @@ async function removeUploadedFiles(files = []) {
     );
 }
 
-app.post('/admin/order-items/:itemId/return-images', checkAdmin, requireAdminCsrfToken, adminReturnMutationLimiter, uploadReturnImages.array('images', 10), async (req, res) => {
+app.post('/admin/order-items/:itemId/return-images', checkAdmin, adminReturnMutationLimiter, uploadReturnImages.array('images', 10), async (req, res) => {
     let connection;
     let committed = false;
     const uploadedFiles = Array.isArray(req.files) ? req.files : [];
@@ -3430,7 +3588,7 @@ function calculateLateDays(actualReturnDate, plannedReturnDate) {
     return Math.ceil((actual - planned) / (1000 * 60 * 60 * 24));
 }
 
-app.put('/admin/order-items/:itemId/return', checkAdmin, requireAdminCsrfToken, adminReturnMutationLimiter, async (req, res) => {
+app.put('/admin/order-items/:itemId/return', checkAdmin, adminReturnMutationLimiter, async (req, res) => {
     let connection;
 
     try {
@@ -5292,7 +5450,7 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
     }
 });
 
-app.post('/admin/order-payments/:id/retry-refund', checkAdmin, requireAdminCsrfToken, adminReturnMutationLimiter, async (req, res) => {
+app.post('/admin/order-payments/:id/retry-refund', checkAdmin, adminReturnMutationLimiter, async (req, res) => {
     let connection;
 
     try {
@@ -5456,7 +5614,7 @@ app.post('/admin/order-payments/:id/retry-refund', checkAdmin, requireAdminCsrfT
     }
 });
 
-app.post('/admin/order-payments/manual-refund', checkAdmin, requireAdminCsrfToken, adminReturnMutationLimiter, async (req, res) => {
+app.post('/admin/order-payments/manual-refund', checkAdmin, adminReturnMutationLimiter, async (req, res) => {
     const {
         orderId,
         orderItemId,

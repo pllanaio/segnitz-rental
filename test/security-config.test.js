@@ -78,29 +78,25 @@ test('enables a restrictive baseline CSP', () => {
   );
 });
 
-test('protects changed return mutations with CSRF validation and rate limiting', () => {
+test('protects browser mutations with global CSRF validation', () => {
   assert.match(
     serverSource,
-    /adminCsrfTokensEqual\(\s*providedToken,\s*req\.session\.adminCsrfToken\s*\)/
+    /csrfTokensEqual\(\s*providedToken,\s*req\.session\.csrfToken\s*\)/
   );
   assert.match(
     serverSource,
-    /app\.put\(\s*'\/admin\/order-items\/:itemId\/cancel',\s*checkAdmin,\s*requireAdminCsrfToken,\s*adminReturnMutationLimiter,/
+    /app\.use\(requireCsrfToken\)/
   );
   assert.match(
     serverSource,
-    /app\.post\(\s*'\/admin\/order-items\/:itemId\/return-images',\s*checkAdmin,\s*requireAdminCsrfToken,\s*adminReturnMutationLimiter,/
+    /\['GET', 'HEAD', 'OPTIONS'\]\.includes\(method\)/
   );
   assert.match(
     serverSource,
-    /app\.put\(\s*'\/admin\/order-items\/:itemId\/return',\s*checkAdmin,\s*requireAdminCsrfToken,\s*adminReturnMutationLimiter,/
+    /req\.path === '\/webhooks\/mollie'/
   );
   assert.match(
     serverSource,
-    /app\.post\(\s*'\/admin\/order-payments\/:id\/retry-refund',\s*checkAdmin,\s*requireAdminCsrfToken,\s*adminReturnMutationLimiter,/
-  );
-  assert.match(
-    serverSource,
-    /app\.post\(\s*'\/admin\/order-payments\/manual-refund',\s*checkAdmin,\s*requireAdminCsrfToken,\s*adminReturnMutationLimiter,/
+    /app\.get\(\s*'\/csrf-token'/
   );
 });

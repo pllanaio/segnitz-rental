@@ -36,7 +36,6 @@ class SessionClient {
 
         if (
             this.csrfToken &&
-            pathname.startsWith('/admin/') &&
             !['GET', 'HEAD'].includes(method)
         ) {
             headers.set('x-csrf-token', this.csrfToken);
@@ -106,6 +105,11 @@ async function waitForServer() {
 }
 
 async function login(client, account) {
+    const csrfResponse = await client.request('/csrf-token');
+    const csrfResult = await csrfResponse.json();
+    assert.equal(csrfResponse.status, 200, JSON.stringify(csrfResult));
+    client.csrfToken = String(csrfResult.csrfToken || '');
+
     const response = await client.request('/login', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -157,7 +161,7 @@ async function createOrder(client, paymentMethod, rentalStart, rentalEnd) {
 before(async () => {
     await resetOrderLifecycleDatabase();
 
-    serverProcess = spawn(process.execPath, ['segnitz_rental.js'], {
+    serverProcess = spawn(process.execPath, ['server.js'], {
         cwd: path.resolve(__dirname, '../..'),
         env: {
             ...process.env,
@@ -301,7 +305,7 @@ test('filtert Kunden- und Adminbestellungen nach konkretem Jahr und Monat', asyn
     assert.ok(adminResult.filterOptions.years.includes('2025'));
 });
 
-test('blockiert geänderte Rückgabe-Mutationen ohne gültiges Admin-CSRF-Token', async () => {
+test('blockiert sämtliche angemeldeten Mutationen ohne gültiges CSRF-Token', async () => {
     const admin = new SessionClient();
     await login(admin, TEST_ADMIN);
 
@@ -311,11 +315,15 @@ test('blockiert geänderte Rückgabe-Mutationen ohne gültiges Admin-CSRF-Token'
     admin.csrfToken = '';
 
     const protectedRequests = [
+        ['/admin/orders/0/cancel', 'PUT'],
+        ['/admin/opening-hours', 'PUT'],
+        ['/admin/order-payments/manual', 'POST'],
         ['/admin/order-items/0/cancel', 'PUT'],
         ['/admin/order-items/0/return-images', 'POST'],
         ['/admin/order-items/0/return', 'PUT'],
         ['/admin/order-payments/0/retry-refund', 'POST'],
-        ['/admin/order-payments/manual-refund', 'POST']
+        ['/admin/order-payments/manual-refund', 'POST'],
+        ['/logout', 'POST']
     ];
 
     for (const [pathname, method] of protectedRequests) {
