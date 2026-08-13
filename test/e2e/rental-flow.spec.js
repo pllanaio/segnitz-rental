@@ -75,6 +75,59 @@ test('zeigt Loginfehler und meldet einen Testkunden erfolgreich an', async ({ pa
     await expect(page.locator('#profile-button')).toBeVisible();
 });
 
+test('führt die abgesicherte Ersteinrichtung des ersten Admins aus', async ({ page }) => {
+    const consoleErrors = [];
+    let submittedSetup = null;
+
+    page.on('pageerror', error => consoleErrors.push(error.message));
+    page.on('console', message => {
+        if (message.type() === 'error') consoleErrors.push(message.text());
+    });
+
+    await page.route('**/setup-status', route => route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ setupRequired: true })
+    }));
+    await page.route('**/setup-admin', async route => {
+        submittedSetup = route.request().postDataJSON();
+        await route.fulfill({
+            status: 201,
+            contentType: 'application/json',
+            body: JSON.stringify({
+                message: 'Adminkonto wurde erstellt. Die Installation ist betriebsbereit.',
+                redirectTo: '/login.html?setup=complete'
+            })
+        });
+    });
+
+    await page.goto('/setup.html');
+
+    await expect(page).toHaveTitle('Segnitz Rental – Ersteinrichtung');
+    await expect(page.getByRole('heading', { name: 'Ersteinrichtung' })).toBeVisible();
+    await expect(page.getByText('Die Datenbank ist bereit.')).toBeVisible();
+
+    await page.locator('#setupToken').fill('deployment-setup-token');
+    await page.locator('#firstName').fill('First');
+    await page.locator('#lastName').fill('Admin');
+    await page.locator('#email').fill('first.admin@example.com');
+    await page.locator('#password').fill('FirstAdminPassword123!');
+    await page.locator('#passwordRepeat').fill('FirstAdminPassword123!');
+
+    await page.getByRole('button', { name: 'Adminkonto erstellen' }).click();
+    await expect(page.locator('#setupMessage')).toContainText('Installation ist betriebsbereit');
+    await expect(page).toHaveURL(/\/login\.html\?setup=complete$/);
+
+    expect(submittedSetup).toEqual({
+        setupToken: 'deployment-setup-token',
+        firstName: 'First',
+        lastName: 'Admin',
+        email: 'first.admin@example.com',
+        password: 'FirstAdminPassword123!'
+    });
+    expect(consoleErrors).toEqual([]);
+});
+
 test('führt Admin-Navigation und dynamische Produktaktionen ohne Inline-Handler aus', async ({ page }) => {
     const response = await page.goto('/login.html');
     const csp = response.headers()['content-security-policy'];

@@ -21,7 +21,9 @@ const tableNames = Object.freeze([
     'rental_products',
     'opening_hours',
     'guest_verifications',
-    'users'
+    'users',
+    'app_installation',
+    'app_schema_migrations'
 ]);
 
 function readSchemaStatements() {
@@ -42,7 +44,7 @@ function assertTestDatabaseName(databaseName = process.env.DB_NAME) {
     }
 }
 
-async function rebuildDatabaseSchema(connection) {
+async function dropDatabaseSchema(connection) {
     assertTestDatabaseName();
     await connection.query('SET FOREIGN_KEY_CHECKS = 0');
 
@@ -53,6 +55,10 @@ async function rebuildDatabaseSchema(connection) {
     } finally {
         await connection.query('SET FOREIGN_KEY_CHECKS = 1');
     }
+}
+
+async function rebuildDatabaseSchema(connection) {
+    await dropDatabaseSchema(connection);
 
     for (const statement of readSchemaStatements()) {
         await connection.query(statement);
@@ -61,6 +67,7 @@ async function rebuildDatabaseSchema(connection) {
 
 module.exports = {
     assertTestDatabaseName,
+    dropDatabaseSchema,
     readSchemaStatements,
     rebuildDatabaseSchema,
     schemaPath,

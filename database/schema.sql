@@ -1,3 +1,23 @@
+CREATE TABLE app_schema_migrations (
+    version VARCHAR(128) NOT NULL,
+    checksum CHAR(64) NOT NULL,
+    applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (version)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE app_installation (
+    id TINYINT UNSIGNED NOT NULL,
+    status VARCHAR(32) NOT NULL,
+    setup_token_hash CHAR(64) NULL,
+    setup_token_created_at DATETIME NULL,
+    initialized_at DATETIME NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    CONSTRAINT chk_app_installation_singleton CHECK (id = 1),
+    CONSTRAINT chk_app_installation_status CHECK (status IN ('setup_required', 'ready'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
 CREATE TABLE users (
     id INT NOT NULL AUTO_INCREMENT,
     username VARCHAR(255) NOT NULL,
