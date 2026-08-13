@@ -10,14 +10,6 @@ const {
     createHelmetOptions,
     createSessionCookieOptions
 } = require('./config/security');
-const {
-    getInstallationState,
-    isSetupRequired
-} = require('./database/installationState');
-const {
-    createInitialAdmin,
-    getSetupStatus
-} = require('./services/setupService');
 
 assertSecurityEnvironment();
 app.use(helmet(createHelmetOptions()));
@@ -33,7 +25,7 @@ const MySQLStore = require('express-mysql-session')(session);
 const fsp = require("fs").promises;
 const fs = require('fs');
 const mysql = require('mysql2/promise');
-const dbConfig = require('./config/db');
+const dbConfig = require('./database/bootstrappedDbConfig');
 const crypto = require('crypto');
 const multer = require('multer');
 const { getSafeImageExtension, imageFileFilter } = require('./utils/uploads');
@@ -143,10 +135,6 @@ const uploadReturnImages = multer({
     fileFilter: imageFileFilter
 });
 
-if (getInstallationState() === 'starting') {
-    throw new Error('Die Anwendung muss über server.js mit Datenbank-Bootstrap gestartet werden.');
-}
-
 const sessionStore = new MySQLStore({
     host: process.env.DB_HOST,
     port: Number(process.env.DB_PORT),
@@ -211,6 +199,15 @@ function requireAdminCsrfToken(req, res, next) {
 
     return next();
 }
+
+const {
+    getInstallationState,
+    isSetupRequired
+} = require('./database/installationState');
+const {
+    createInitialAdmin,
+    getSetupStatus
+} = require('./services/setupService');
 
 const setupLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
