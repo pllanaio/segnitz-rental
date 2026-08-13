@@ -486,6 +486,11 @@ app.post('/login', loginLimiter, async (req, res) => {
                 );
 
                 const csrfToken = getOrCreateCsrfToken(req);
+
+                await new Promise((resolve, reject) => {
+                    req.session.save(error => error ? reject(error) : resolve());
+                });
+
                 res.set('X-CSRF-Token', csrfToken);
 
                 return res.status(200).json({
