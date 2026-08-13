@@ -79,10 +79,8 @@ const {
 } = require('./services/mollieService');
 
 const {
-    calculateReturnSettlement,
-    deriveAggregateReturnStatus,
-    deriveOrderStatusFromInitialPayment,
-    deriveReturnCaseStatus,
+    calculateReturnSettlement, deriveAggregateReturnStatus,
+    deriveOrderStatusFromInitialPayment, deriveReturnCaseStatus,
     isDuplicateKeyError,
     isOpenPaymentStatus,
     isStrictIsoDate,
