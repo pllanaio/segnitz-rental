@@ -157,7 +157,7 @@ async function createOrder(client, paymentMethod, rentalStart, rentalEnd) {
 before(async () => {
     await resetOrderLifecycleDatabase();
 
-    serverProcess = spawn(process.execPath, ['segnitz_rental.js'], {
+    serverProcess = spawn(process.execPath, ['server.js'], {
         cwd: path.resolve(__dirname, '../..'),
         env: {
             ...process.env,
