@@ -12,6 +12,8 @@ FROM node:24.19.0-alpine3.23@sha256:244cc2b53f46f9e876304391d17682b0ddae9ac33491
 
 WORKDIR /app
 COPY --chown=node:node package*.json ./
+RUN mkdir -p /app/node_modules \
+    && chown node:node /app/node_modules
 
 USER node
 RUN npm ci --omit=dev \
