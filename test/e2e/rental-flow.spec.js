@@ -9,53 +9,131 @@ function futureDate(offsetDays) {
     return date.toISOString().slice(0, 10);
 }
 
-test.beforeEach(async ({ page }) => {
-    await page.addInitScript(() => {
-        const formatDate = date => date.toISOString().slice(0, 10);
-        const flatpickrStub = () => ({
-            destroy() {},
-            formatDate
-        });
-        flatpickrStub.formatDate = formatDate;
-        window.flatpickr = flatpickrStub;
-    });
-});
+function germanDate(isoDate) {
+    return new Intl.DateTimeFormat('de-DE', { timeZone: 'UTC' })
+        .format(new Date(`${isoDate}T00:00:00Z`));
+}
 
-test('zeigt den Katalog und legt ein Produkt über die Oberfläche in den Warenkorb', async ({ page }) => {
+test('führt Katalog, React-Warenkorb und abgesicherten Checkout über die Oberfläche aus', async ({ page }) => {
     const rentalStart = futureDate(30);
     const rentalEnd = futureDate(32);
+    let checkoutPayload = null;
+
+    await page.route('**/data', async route => {
+        checkoutPayload = route.request().postDataJSON();
+        await route.fulfill({
+            status: 201,
+            contentType: 'application/json',
+            body: JSON.stringify({
+                message: 'Testbestellung wurde angelegt.',
+                orderId: 4201,
+                orderNo: 'R-E2E-4201',
+                amountDue: 299.70
+            })
+        });
+    });
 
     await page.goto('/');
 
-    const productCard = page.locator('#productGrid .product-card', {
+    const productCard = page.locator('#productGrid article', {
         hasText: TEST_PRODUCT.title
     });
 
     await expect(productCard).toBeVisible();
     await expect(page.locator('#categoryFilterList')).toContainText('Baumaschinen');
 
-    await productCard.getByRole('button', { name: 'Details' }).click();
-    await expect(page.locator('#productDetailsModal')).toBeVisible();
-    await expect(page.locator('#modalProductTitle')).toHaveText(TEST_PRODUCT.title);
+    await productCard.getByRole('button', { name: 'Auswählen' }).click();
+    const productDialog = page.getByRole('dialog', { name: TEST_PRODUCT.title });
+    await expect(productDialog).toBeVisible();
+    await productDialog.getByLabel('Mietbeginn').fill(rentalStart);
+    await productDialog.getByLabel('Mietende').fill(rentalEnd);
 
-    await page.evaluate(({ rentalStart, rentalEnd }) => {
-        document.getElementById('modalRentalStart').value = rentalStart;
-        document.getElementById('modalRentalEnd').value = rentalEnd;
-    }, { rentalStart, rentalEnd });
-
-    await page.locator('#selectProductFromModal').click();
+    const addRequestPromise = page.waitForRequest(request =>
+        request.method() === 'POST' && request.url().endsWith('/cart/items')
+    );
+    await productDialog.getByRole('button', { name: 'In den Warenkorb' }).click();
+    const addRequest = await addRequestPromise;
 
     await expect(page.locator('#cartItemCount')).toHaveText('1');
-    await expect(page.locator('#globalAlertContainer')).toContainText('Produkt wurde zum Warenkorb hinzugefügt.');
+    await expect(page.locator('#globalAlertContainer')).toContainText(
+        `${TEST_PRODUCT.title} wurde zum Warenkorb hinzugefügt.`
+    );
+    expect(addRequest.headers()['x-csrf-token']).toMatch(/^[a-f0-9]{64}$/);
+    expect(addRequest.postDataJSON()).toEqual({
+        productId: TEST_PRODUCT.id,
+        rentalStart,
+        rentalEnd
+    });
 
-    await page.locator('[data-bs-target="#cartModal"]').click();
-    await expect(page.locator('#cartModal')).toBeVisible();
-    await expect(page.locator('#cartItems')).toContainText(TEST_PRODUCT.title);
-    await expect(page.locator('#cartItems')).toContainText(`${rentalStart} bis ${rentalEnd}`);
+    await page.locator('#cartItemCount').locator('xpath=ancestor::button').click();
+    const cartDialog = page.getByRole('dialog', { name: 'Warenkorb' });
+    await expect(cartDialog).toBeVisible();
+    await expect(cartDialog).toContainText(TEST_PRODUCT.title);
+    await expect(cartDialog).toContainText(germanDate(rentalStart));
+    await expect(cartDialog).toContainText(germanDate(rentalEnd));
 
-    await page.getByRole('button', { name: 'Zeitraum ändern' }).click();
-    await expect(page.locator('#cartItemEditModal')).toBeVisible();
-    await expect(page.locator('#editCartItemTitle')).toHaveText(TEST_PRODUCT.title);
+    await cartDialog.getByRole('button', { name: 'Zeitraum ändern' }).click();
+    await expect(cartDialog.getByLabel('Von')).toHaveValue(rentalStart);
+    await expect(cartDialog.getByLabel('Bis')).toHaveValue(rentalEnd);
+    await cartDialog.getByRole('button', { name: 'Abbrechen' }).click();
+    await cartDialog.getByRole('button', { name: 'Zur Kasse' }).click();
+
+    await expect(page.getByRole('heading', { name: 'Warenkorb prüfen' })).toBeVisible();
+    await page.getByRole('button', { name: /^Weiter/ }).click();
+
+    await expect(page.getByRole('heading', { name: 'Persönliche Daten' })).toBeVisible();
+    await page.getByLabel('Vorname', { exact: true }).fill('Browser');
+    await page.getByLabel('Nachname', { exact: true }).fill('Test');
+    await page.getByLabel('E-Mail', { exact: true }).fill('browser.test@example.com');
+    await page.getByLabel('Telefon', { exact: true }).fill('0123456789');
+    await page.getByLabel('Straße und Hausnummer', { exact: true }).fill('Teststrasse 1');
+    await page.getByLabel('PLZ', { exact: true }).fill('97070');
+    await page.getByLabel('Ort', { exact: true }).fill('Wuerzburg');
+    await page.getByRole('button', { name: /^Weiter/ }).click();
+
+    await expect(page.getByRole('heading', { name: 'Bestellung abschließen' })).toBeVisible();
+    const signature = page.getByLabel('Unterschriftsfeld. Mit Maus, Finger oder Stift unterschreiben.');
+    const signatureBox = await signature.boundingBox();
+    expect(signatureBox).not.toBeNull();
+    await page.mouse.move(signatureBox.x + 25, signatureBox.y + 35);
+    await page.mouse.down();
+    await page.mouse.move(signatureBox.x + 140, signatureBox.y + 75, { steps: 8 });
+    await page.mouse.up();
+    await page.getByRole('checkbox', { name: /Allgemeinen Geschäftsbedingungen/ }).check();
+    await page.getByRole('checkbox', { name: /Verarbeitung meiner Daten/ }).check();
+    await page.getByRole('radio', { name: /Bar bei Abholung/ }).check();
+
+    const checkoutRequestPromise = page.waitForRequest(request =>
+        request.method() === 'POST' && request.url().endsWith('/data')
+    );
+    await page.getByRole('button', { name: /Zahlungspflichtig bestellen/ }).click();
+    const checkoutRequest = await checkoutRequestPromise;
+
+    await expect(page.getByRole('heading', { name: 'Vielen Dank für Ihre Bestellung' })).toBeVisible();
+    await expect(page.getByText('R-E2E-4201')).toBeVisible();
+    expect(checkoutRequest.headers()['x-csrf-token']).toMatch(/^[a-f0-9]{64}$/);
+    expect(checkoutPayload.paymentMethod).toBe('cash');
+
+    const customerFields = Object.fromEntries(
+        checkoutPayload.form.find(step => step.step === 3).elements.map(({ name, value }) => [name, value])
+    );
+    expect(customerFields).toMatchObject({
+        FirstName: 'Browser',
+        LastName: 'Test',
+        CustomerEmail: 'browser.test@example.com',
+        CustomerPhone: '0123456789',
+        CustomerAddress: 'Teststrasse 1',
+        CustomerZip: '97070',
+        CustomerCity: 'Wuerzburg'
+    });
+
+    const completionFields = Object.fromEntries(
+        checkoutPayload.form.find(step => step.step === 4).elements.map(element => [element.name, element])
+    );
+    expect(completionFields.Signature.value).toMatch(/^data:image\/png;base64,/);
+    expect(completionFields.agbs.checked).toBe(true);
+    expect(completionFields.dsgvo.checked).toBe(true);
+    expect(completionFields.paymentMethod.value).toBe('cash');
 });
 
 test('zeigt Loginfehler und meldet einen Testkunden erfolgreich an', async ({ page }) => {
@@ -68,11 +146,16 @@ test('zeigt Loginfehler und meldet einen Testkunden erfolgreich an', async ({ pa
     await expect(page.locator('#globalAlertContainer')).toContainText('Falsche Zugangsdaten.');
 
     await page.locator('#password').fill(TEST_USER.password);
-    await page.getByRole('button', { name: 'Einloggen' }).click();
+    await Promise.all([
+        page.waitForURL(/\/index\.html$/),
+        page.getByRole('button', { name: 'Einloggen' }).click()
+    ]);
 
     await expect(page).toHaveURL(/\/index\.html$/);
-    await expect(page.locator('#login-status')).toHaveText(`Angemeldet als: ${TEST_USER.email}`);
-    await expect(page.locator('#profile-button')).toBeVisible();
+    await expect(page.getByRole('navigation', { name: 'Konto' })).toContainText(
+        `Angemeldet als ${TEST_USER.email}`
+    );
+    await expect(page.getByRole('link', { name: 'Mein Profil' })).toBeVisible();
 });
 
 test('führt die abgesicherte Ersteinrichtung des ersten Admins aus', async ({ page }) => {
@@ -133,7 +216,7 @@ test('führt Admin-Navigation und dynamische Produktaktionen ohne Inline-Handler
     const csp = response.headers()['content-security-policy'];
 
     expect(csp).toContain("script-src-attr 'none'");
-    expect(csp).toContain("script-src 'self' https://cdn.jsdelivr.net");
+    expect(csp).toMatch(/script-src 'self'(?: 'sha256-[A-Za-z0-9+/]{43}=')+/);
     expect(csp).not.toContain("script-src 'self' 'unsafe-inline'");
 
     await page.locator('#username').fill(TEST_ADMIN.email);
@@ -142,14 +225,16 @@ test('führt Admin-Navigation und dynamische Produktaktionen ohne Inline-Handler
         page.waitForURL(/\/backend\.html$/),
         page.getByRole('button', { name: 'Einloggen' }).click()
     ]);
+    await expect(page.locator('[onclick], [onchange], [onsubmit]')).toHaveCount(0);
     await expect(page.locator('#productList')).toContainText(TEST_PRODUCT.title);
 
     await page.getByRole('button', { name: 'Bearbeiten' }).click();
     await expect(page.locator('#title')).toHaveValue(TEST_PRODUCT.title);
 
     await page.getByRole('button', { name: 'Öffnungszeiten' }).click();
-    await expect(page.locator('#openingHoursView')).toBeVisible();
-    await expect(page.locator('#openingHoursAdmin')).toContainText('Montag');
+    const openingHoursView = page.getByRole('heading', { name: 'Öffnungszeiten' }).locator('xpath=ancestor::section');
+    await expect(openingHoursView).toBeVisible();
+    await expect(openingHoursView).toContainText('Montag');
 });
 
 test('rendert gespeicherte Kundendaten im Adminbereich ohne HTML- oder Aktionsinjektion', async ({ page }) => {
@@ -240,11 +325,12 @@ test('rendert öffentliche und eigene Bewertungen als Text statt als HTML', asyn
     }));
 
     await page.goto('/');
-    const productCard = page.locator('#productGrid .product-card', { hasText: TEST_PRODUCT.title });
-    await productCard.getByRole('button', { name: 'Details' }).click();
+    const productCard = page.locator('#productGrid article', { hasText: TEST_PRODUCT.title });
+    await productCard.getByRole('button', { name: 'Auswählen' }).click();
 
-    await expect(page.locator('#modalProductReviews')).toContainText(payload);
-    await expect(page.locator('#modalProductReviews .xss-probe')).toHaveCount(0);
+    const productDialog = page.getByRole('dialog', { name: TEST_PRODUCT.title });
+    await expect(productDialog).toContainText(payload);
+    await expect(productDialog.locator('.xss-probe')).toHaveCount(0);
 
     await page.route('**/my-profile', route => route.fulfill({
         status: 200,
@@ -438,18 +524,19 @@ test('führt die Rückgabemaske mit Schadensdokumentation und wählbarem Zahlung
         page.waitForURL(/\/backend\.html$/),
         page.getByRole('button', { name: 'Einloggen' }).click()
     ]);
-    await expect(page).toHaveTitle('Segnitz Rental - Backend');
+    await expect(page).toHaveTitle('Administration – Segnitz Rental');
     await expect(page).toHaveURL(/\/backend\.html$/);
     await page.getByRole('button', { name: 'Bestellungen' }).click();
 
     const completedCard = page.locator('#ordersList .card', { hasText: 'R202600078' });
     await expect(completedCard).toContainText('Zurückgegeben');
     await expect(completedCard).not.toContainText('Teilweise zurückgegeben');
-    await expect(completedCard).toContainText('Erstattung offen');
+    await expect(completedCard).toContainText('Erstattung ausstehend');
 
     const openCard = page.locator('#ordersList .card', { hasText: 'R202600077' });
     await openCard.getByRole('button', { name: 'Details' }).click();
-    await expect(page.getByRole('link', { name: 'Zahlungslink öffnen' })).toHaveAttribute(
+    const orderDialog = page.getByRole('dialog', { name: /Bestelldetails.*R202600077/ });
+    await expect(orderDialog.getByRole('link', { name: 'Zahlungslink' })).toHaveAttribute(
         'href',
         'https://checkout.test.mollie.local/tr_test_open_7701'
     );
@@ -457,30 +544,33 @@ test('führt die Rückgabemaske mit Schadensdokumentation und wählbarem Zahlung
     const deleteRequestPromise = page.waitForRequest(request =>
         request.method() === 'DELETE' && request.url().endsWith('/admin/return-images/7799')
     );
-    await page.getByRole('button', { name: 'Foto löschen' }).click();
-    await page.locator('#confirmModalConfirmBtn').click();
+    await orderDialog.getByRole('button', { name: 'Löschen', exact: true }).click();
+    await page.getByRole('dialog', { name: 'Rückgabefoto löschen' })
+        .getByRole('button', { name: 'Foto löschen' })
+        .click();
     await deleteRequestPromise;
 
-    await page.getByRole('button', { name: 'Rückgabe', exact: true }).click();
+    await orderDialog.getByRole('button', { name: 'Rückgabe', exact: true }).click();
 
-    await expect(page.locator('#returnIsLate')).toBeDisabled();
-    await expect(page.locator('#returnDamageDescriptionGroup')).toBeHidden();
-    await page.locator('#returnIsDamaged').check();
-    await expect(page.locator('#returnDamageDescriptionGroup')).toBeVisible();
-    await page.locator('#returnDamageDescription').fill('Hydraulikleitung gerissen');
-    await page.locator('#returnAdditionalChargeReason').fill('Reparatur der Hydraulikleitung');
-    await page.locator('#returnAdditionalChargeAmount').fill('400');
-    await expect(page.locator('#returnAdditionalChargePaymentMethodGroup')).toBeVisible();
-    await expect(page.locator('#returnAdditionalChargePaymentMethod')).toHaveValue('online');
-    await page.locator('#returnAdditionalChargePaymentMethod').selectOption('cash');
+    const returnDialog = page.getByRole('dialog', { name: 'Rückgabe abwickeln' });
+    await expect(returnDialog.getByText('Pünktlich', { exact: true })).toBeVisible();
+    await expect(returnDialog.getByLabel('Schadensbeschreibung *')).toHaveCount(0);
+    await returnDialog.getByRole('checkbox', { name: /Artikel beschädigt/ }).check();
+    await returnDialog.getByLabel('Schadensbeschreibung *').fill('Hydraulikleitung gerissen');
+    await returnDialog.getByLabel('Zusätzliche Reparaturkosten / Forderung').fill('Reparatur der Hydraulikleitung');
+    await returnDialog.getByLabel('Zusätzlicher Betrag').fill('400');
+    const paymentMethod = returnDialog.getByLabel('Nachzahlung begleichen über');
+    await expect(paymentMethod).toHaveValue('online');
+    await paymentMethod.selectOption('cash');
     const screenshot = await page.screenshot();
     expect(screenshot.byteLength).toBeGreaterThan(10_000);
 
     const returnRequestPromise = page.waitForRequest(request =>
         request.method() === 'PUT' && request.url().endsWith('/admin/order-items/771/return')
     );
-    await page.getByRole('button', { name: 'Rückgabe speichern' }).click();
-    await page.locator('#confirmModalConfirmBtn').click();
+    await returnDialog.getByRole('button', { name: 'Rückgabe prüfen' }).click();
+    await expect(returnDialog).toContainText('kann danach nicht rückgängig gemacht werden');
+    await returnDialog.getByRole('button', { name: 'Rückgabe endgültig festschreiben' }).click();
     const returnRequest = await returnRequestPromise;
     const payload = returnRequest.postDataJSON();
 
@@ -568,11 +658,11 @@ test('verarbeitet den paginierten Kundenauftrags-Vertrag und zeigt vor Rückgabe
     await expect(page.locator('#ordersView')).toBeVisible();
 
     await expect(page.locator('#myOrdersList')).toContainText('R202600001');
-    await expect(page.locator('#myOrdersList')).toContainText('1 Bestellung gefunden');
+    await expect(page.getByRole('navigation', { name: 'Bestellseiten' })).toContainText('1 Bestellung gefunden');
     await page.getByRole('button', { name: 'Details anzeigen' }).click();
     await expect(page.locator('#myOrderDetailsModal')).toBeVisible();
     await expect(page.locator('#myOrderDetailsBody')).toContainText('Kaution zurück');
-    await expect(page.locator('#myOrderDetailsBody')).toContainText('0.00 €');
+    await expect(page.locator('#myOrderDetailsBody')).toContainText(/0,00\s€/);
     expect(apiErrors).toEqual([]);
 });
 
@@ -599,8 +689,9 @@ test('erklärt nach Bar-Fallback die automatisch erstattete Online-Doppelzahlung
     await page.goto('/index.html?payment=extension&orderId=1&paymentType=rental_adjustment&itemId=11');
     const syncRequest = await syncRequestPromise;
 
-    await expect(page.locator('#paymentResultTitle')).toHaveText('Nachzahlung bereits bar beglichen');
-    await expect(page.locator('#paymentResultText')).toContainText('automatisch zurückerstattet');
-    await expect(page.locator('#final')).toContainText('doppelte Onlinezahlung wurde erstattet');
+    const paymentResult = page.getByRole('region', { name: 'Zahlungsergebnis' });
+    await expect(paymentResult.getByRole('heading')).toHaveText('Mietzeitraum erfolgreich verlängert');
+    await expect(paymentResult).toContainText('bereits bar beglichen');
+    await expect(paymentResult).toContainText('Eine doppelte Zahlung wird automatisch erstattet');
     expect(syncRequest.headers()['x-csrf-token']).toMatch(/^[a-f0-9]{64}$/);
 });

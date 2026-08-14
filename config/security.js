@@ -25,27 +25,34 @@ function createSessionCookieOptions(environment = process.env) {
     };
 }
 
-function createHelmetOptions(environment = process.env) {
+function createHelmetOptions(environment = process.env, { frontendScriptHashes = [] } = {}) {
+    const production = isProduction(environment);
+    const legacyDevelopmentScripts = !production && frontendScriptHashes.length === 0
+        ? ['https://cdn.jsdelivr.net']
+        : [];
+    const developmentStyleSources = production
+        ? []
+        : ['https://cdn.jsdelivr.net', 'https://fonts.googleapis.com'];
+    const developmentFontSources = production ? [] : ['https://fonts.gstatic.com'];
     const directives = {
         defaultSrc: ["'self'"],
         baseUri: ["'self'"],
         objectSrc: ["'none'"],
         frameAncestors: ["'none'"],
         formAction: ["'self'"],
-        scriptSrc: ["'self'", 'https://cdn.jsdelivr.net'],
+        scriptSrc: ["'self'", ...frontendScriptHashes, ...legacyDevelopmentScripts],
         scriptSrcAttr: ["'none'"],
         styleSrc: [
             "'self'",
             "'unsafe-inline'",
-            'https://cdn.jsdelivr.net',
-            'https://fonts.googleapis.com'
+            ...developmentStyleSources
         ],
         imgSrc: ["'self'", 'data:', 'blob:'],
-        fontSrc: ["'self'", 'data:', 'https://fonts.gstatic.com'],
+        fontSrc: ["'self'", 'data:', ...developmentFontSources],
         connectSrc: ["'self'"]
     };
 
-    directives.upgradeInsecureRequests = isProduction(environment) ? [] : null;
+    directives.upgradeInsecureRequests = production ? [] : null;
 
     return {
         contentSecurityPolicy: { directives },

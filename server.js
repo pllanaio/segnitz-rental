@@ -5,6 +5,10 @@ require('dotenv').config();
 const dbConfig = require('./config/db');
 const mysql = require('mysql2/promise');
 const { assertSecurityEnvironment } = require('./config/security');
+const {
+    assertFrontendBuild,
+    getFrontendDirectory
+} = require('./services/frontendAssets');
 const { initializeDatabase } = require('./database/bootstrap');
 const { runCoordinatedDatabaseCleanup } = require('./utils/cleanup');
 const { primeSchemaReadiness } = require('./database/readiness');
@@ -89,6 +93,9 @@ function logBootstrapResult(bootstrapResult) {
 
 async function startServer() {
     assertSecurityEnvironment();
+    assertFrontendBuild(getFrontendDirectory(), {
+        required: process.env.NODE_ENV === 'production'
+    });
     const bootstrapResult = await initializeDatabase();
     primeSchemaReadiness(bootstrapResult.schema, bootstrapResult.migrationManifest);
     logBootstrapResult(bootstrapResult);

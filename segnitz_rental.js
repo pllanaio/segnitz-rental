@@ -10,9 +10,28 @@ const {
     createHelmetOptions,
     createSessionCookieOptions
 } = require('./config/security');
+const {
+    getExportedPagePath,
+    getFrontendDirectory,
+    readFrontendCspHashes
+} = require('./services/frontendAssets');
 
 assertSecurityEnvironment();
-app.use(helmet(createHelmetOptions()));
+const frontendDirectory = getFrontendDirectory();
+const frontendScriptHashes = readFrontendCspHashes(frontendDirectory, {
+    required: process.env.NODE_ENV === 'production'
+});
+app.use(helmet(createHelmetOptions(process.env, { frontendScriptHashes })));
+app.use('/_next/static', express.static(path.join(frontendDirectory, '_next', 'static'), {
+    fallthrough: false,
+    immutable: true,
+    index: false,
+    maxAge: '1y',
+    redirect: false,
+    setHeaders: response => {
+        response.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    }
+}));
 app.use(express.json({
     limit: '1mb'
 }));
@@ -415,6 +434,7 @@ function isSetupAssetPath(pathname) {
         pathname === '/js/setup_config.js' ||
         pathname === '/js/verify_email_config.js' ||
         pathname === '/js/bootstrap.bundle.min.js' ||
+        pathname.startsWith('/_next/') ||
         pathname.startsWith('/css/') ||
         pathname.startsWith('/img/');
 }
@@ -448,6 +468,7 @@ function isPublicStaticAssetPath(pathname) {
         pathname === '/verify-email.html' ||
         pathname === '/favicon.ico' ||
         PUBLIC_BRAND_ASSET_PATHS.has(pathname) ||
+        pathname.startsWith('/_next/') ||
         pathname.startsWith('/css/') ||
         pathname.startsWith('/js/') ||
         pathname.startsWith('/img/products/');
@@ -647,6 +668,11 @@ function isSensitiveResponsePath(pathname) {
     return pathname === '/auth-status' ||
         pathname === '/backend.html' ||
         pathname === '/profile.html' ||
+        pathname === '/login.html' ||
+        pathname === '/register.html' ||
+        pathname === '/setup.html' ||
+        pathname === '/verify-email.html' ||
+        pathname === '/email-verified.html' ||
         pathname === '/login' ||
         pathname === '/logout' ||
         pathname === '/cart' ||
@@ -676,9 +702,37 @@ app.use(requireCsrfToken);
 app.use('/', productRoutes);
 app.use('/', cartRoutes);
 
-// Spezifische Route für die Startseite
+function sendFrontendPage(res, legacyPage, {
+    cacheControl = 'no-cache',
+    noIndex = false,
+    noReferrer = false
+} = {}) {
+    const exportedPage = getExportedPagePath(frontendDirectory, legacyPage);
+    const responseHeaders = { 'Cache-Control': cacheControl };
+
+    if (noIndex) responseHeaders['X-Robots-Tag'] = 'noindex, nofollow';
+    if (noReferrer) responseHeaders['Referrer-Policy'] = 'no-referrer';
+    res.set(responseHeaders);
+
+    if (fs.existsSync(exportedPage)) return res.sendFile(exportedPage);
+
+    // Lokale Backend-Entwicklung bleibt vor dem ersten Frontend-Build möglich.
+    // Produktion validiert den Export vor dem Datenbank-Bootstrap und erreicht
+    // diesen Fallback daher nie.
+    if (process.env.NODE_ENV !== 'production') {
+        return res.sendFile(path.join(__dirname, 'public', legacyPage));
+    }
+
+    return res.status(503).json({ error: 'Frontend-Build ist nicht verfügbar.' });
+}
+
+// Der historische Pfad ist zugleich die logische Next-Route. Eine Weiterleitung
+// von / vermeidet einen Hydration-Mismatch zwischen / und /index.html. Vorhandene
+// Queryparameter (z. B. Zahlungsrückkehr) bleiben dabei erhalten.
 app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+    const queryStart = req.originalUrl.indexOf('?');
+    const query = queryStart >= 0 ? req.originalUrl.slice(queryStart) : '';
+    return res.redirect(308, `/index.html${query}`);
 });
 
 app.get('/auth-status', (req, res) => {
@@ -697,20 +751,52 @@ app.get('/auth-status', (req, res) => {
 });
 
 app.get('/index.html', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+    sendFrontendPage(res, 'index.html');
 });
 
 app.get('/backend.html', checkAdmin, (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'backend.html'));
+    sendFrontendPage(res, 'backend.html', {
+        cacheControl: 'private, no-store',
+        noIndex: true
+    });
 });
 
 app.get('/verify-email.html', (req, res) => {
-    res.set({
-        'Cache-Control': 'no-store',
-        'Referrer-Policy': 'no-referrer'
+    sendFrontendPage(res, 'verify-email.html', {
+        cacheControl: 'no-store',
+        noIndex: true,
+        noReferrer: true
     });
-    res.sendFile(path.join(__dirname, 'public', 'verify-email.html'));
 });
+
+app.get('/login.html', (req, res) => sendFrontendPage(res, 'login.html', {
+    cacheControl: 'private, no-store',
+    noIndex: true,
+    noReferrer: true
+}));
+
+app.get('/register.html', (req, res) => sendFrontendPage(res, 'register.html', {
+    cacheControl: 'private, no-store',
+    noIndex: true,
+    noReferrer: true
+}));
+
+app.get('/setup.html', (req, res) => sendFrontendPage(res, 'setup.html', {
+    cacheControl: 'private, no-store',
+    noIndex: true,
+    noReferrer: true
+}));
+
+app.get('/email-verified.html', (req, res) => sendFrontendPage(res, 'email-verified.html', {
+    cacheControl: 'private, no-store',
+    noIndex: true,
+    noReferrer: true
+}));
+
+app.get('/profile.html', (req, res) => sendFrontendPage(res, 'profile.html', {
+    cacheControl: 'private, no-store',
+    noIndex: true
+}));
 
 app.get('/img/returns/:filename', async (req, res) => {
     const filename = getStoredReturnImageFilename(`img/returns/${req.params.filename}`);

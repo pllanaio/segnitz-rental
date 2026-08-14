@@ -1,5 +1,66 @@
 ## Segnitz Rental Manager
-Modular rental tool for several types of products including tools, cars and construction machinery with database integration, pdf signing option and payment gateway integration
+
+Anwendung für die Vermietung von Werkzeugen und Baumaschinen mit
+Bestellverwaltung, digitaler Unterschrift und Mollie-Zahlungen. Die Oberfläche
+läuft mit React 19 und dem Next.js App Router; das bestehende Express-Backend
+bleibt die alleinige API-, Session- und Geschäftslogik-Schicht.
+
+## Frontend-Architektur
+
+Das Next.js-Projekt liegt in `frontend/` und wird als statischer Export gebaut.
+Express liefert diesen Export zusammen mit den bestehenden Root-API-Pfaden unter
+derselben Origin aus. Dadurch bleiben die vorhandenen Sicherheitsverträge ohne
+CORS oder Cookie-Rewriting erhalten:
+
+- Session-Cookie `segnitz.sid` und CSRF-Header `X-CSRF-Token`,
+- bestellspezifischer Gastzugriff unter `/orders/:id`,
+- private Rückgabebilder und rollenabhängige Admin-Endpunkte,
+- historische Browserpfade wie `/index.html`, `/login.html` und
+  `/backend.html`.
+
+Die `.html`-Segmente sind bewusst echte Next-Routen. Next exportiert eine Route
+wie `/login.html` physisch als `login.html.html`; Express bildet die historische
+URL explizit darauf ab. Eine bloße Alias-Auslieferung einer Clean-URL würde den
+vorgerenderten Routerpfad und den Browserpfad auseinanderlaufen lassen.
+
+Der Export wird im Container unveränderlich unter `/app/frontend-dist`
+gespeichert. Laufzeit-Uploads bleiben getrennt in `/app/public/img/products` und
+`/app/uploads/returns`. Next-SSR, Server Actions, ISR und der eingebaute
+Image-Optimizer werden in dieser Architektur bewusst nicht verwendet.
+
+### Lokale Entwicklung
+
+Benötigt werden Node.js 22 oder 24 und eine MySQL-8.4-Datenbank.
+
+```bash
+npm ci
+npm --prefix frontend ci
+npm run frontend:build
+npm start
+```
+
+Für schnelle UI-Änderungen kann `npm run frontend:dev` parallel zum Backend
+verwendet werden. Nicht von Next bediente Pfade werden dabei nach
+`http://127.0.0.1:3000` weitergereicht, sodass API, Session, CSRF und Bilder auch
+auf dem Next-Entwicklungsport same-origin funktionieren. Ein abweichender
+Backend-Ursprung kann über `FRONTEND_DEV_BACKEND_ORIGIN` gesetzt werden. Der
+produktionsnahe End-to-End-Test läuft weiterhin über den Express-Port und den
+gebauten Export.
+
+Qualitätsprüfungen:
+
+```bash
+npm run frontend:check
+npm run frontend:build
+npm run test:unit
+npm run test:integration
+npm run test:e2e
+```
+
+Beim Frontend-Build werden alle von Next erzeugten Inline-Bootstrap-Skripte
+SHA-256-gehasht. Express lädt `csp-script-hashes.json` in die Helmet-CSP. Ein
+Produktionsstart ohne vollständige Seiten oder gültiges Manifest bricht vor dem
+Datenbank-Bootstrap ab; `unsafe-inline` wird für Skripte nicht freigeschaltet.
 
 ## Datenbank
 

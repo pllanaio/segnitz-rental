@@ -51,8 +51,13 @@ test('does not require production secrets for local tests', () => {
 });
 
 test('enables a restrictive baseline CSP', () => {
-  const developmentOptions = createHelmetOptions({ NODE_ENV: 'development' });
+  const frontendHash = "'sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='";
+  const developmentOptions = createHelmetOptions(
+    { NODE_ENV: 'development' },
+    { frontendScriptHashes: [frontendHash] }
+  );
   const productionOptions = createHelmetOptions({ NODE_ENV: 'production' });
+  const legacyDevelopmentOptions = createHelmetOptions({ NODE_ENV: 'development' });
 
   assert.deepEqual(developmentOptions.contentSecurityPolicy.directives.objectSrc, ["'none'"]);
   assert.deepEqual(developmentOptions.contentSecurityPolicy.directives.frameAncestors, ["'none'"]);
@@ -62,7 +67,23 @@ test('enables a restrictive baseline CSP', () => {
   );
   assert.deepEqual(
     developmentOptions.contentSecurityPolicy.directives.scriptSrc,
+    ["'self'", frontendHash]
+  );
+  assert.deepEqual(
+    legacyDevelopmentOptions.contentSecurityPolicy.directives.scriptSrc,
     ["'self'", 'https://cdn.jsdelivr.net']
+  );
+  assert.deepEqual(
+    productionOptions.contentSecurityPolicy.directives.scriptSrc,
+    ["'self'"]
+  );
+  assert.deepEqual(
+    productionOptions.contentSecurityPolicy.directives.styleSrc,
+    ["'self'", "'unsafe-inline'"]
+  );
+  assert.deepEqual(
+    productionOptions.contentSecurityPolicy.directives.fontSrc,
+    ["'self'", 'data:']
   );
   assert.equal(
     developmentOptions.contentSecurityPolicy.directives.scriptSrc.includes("'unsafe-inline'"),

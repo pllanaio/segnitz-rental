@@ -1,4 +1,8 @@
 node_modules/
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/coverage/
 npm-debug.log*
 *.log
 .DS_Store

@@ -10,6 +10,7 @@ const { removeUploadedFiles, uploadProductImages } = require('../utils/uploads')
 const { checkProductAvailability } = require('../utils/availability');
 const { runInTransactionWithRetry } = require('../utils/dbRetry');
 const { formatDateInTimeZone } = require('../utils/businessDate');
+const { validateProductInput } = require('../utils/productInput');
 const {
     syncProductCategories,
     deleteUnusedCategories
@@ -178,14 +179,14 @@ router.get('/products/:id/availability', async (req, res) => {
 });
 
 router.post('/products', checkAdmin, async (req, res) => {
-    const { productKey, title, description, pricePerDay, deposit, imagePath, category, categories } = req.body;
+    const validation = validateProductInput(req.body, { requireProductKey: true });
+    if (validation.error) return res.status(400).json({ error: validation.error });
+
+    const { productKey, title, description, imagePath, categories: normalizedCategories } = validation.value;
+    const { pricePerDay, deposit } = req.body;
 
     const normalizedPricePerDay = Number(String(pricePerDay).replace(',', '.'));
     const normalizedDeposit = Number(String(deposit).replace(',', '.'));
-
-    if (!productKey || !title) {
-        return res.status(400).json({ error: 'Produkt-Key und Titel sind Pflichtfelder.' });
-    }
 
     if (
         Number.isNaN(normalizedPricePerDay) ||
@@ -205,10 +206,6 @@ router.post('/products', checkAdmin, async (req, res) => {
     try {
         connection = await mysql.createConnection(dbConfig);
         await connection.beginTransaction();
-
-        const normalizedCategories = Array.isArray(categories)
-            ? categories
-            : (category ? [category] : []);
 
         const [result] = await connection.execute(
             `INSERT INTO rental_products 
@@ -244,14 +241,14 @@ router.post('/products', checkAdmin, async (req, res) => {
 });
 
 router.put('/products/:id', checkAdmin, async (req, res) => {
-    const { title, description, pricePerDay, deposit, imagePath, isActive, category, categories } = req.body;
+    const validation = validateProductInput(req.body);
+    if (validation.error) return res.status(400).json({ error: validation.error });
+
+    const { title, description, imagePath, categories: normalizedCategories } = validation.value;
+    const { pricePerDay, deposit, isActive } = req.body;
 
     const normalizedPricePerDay = Number(String(pricePerDay).replace(',', '.'));
     const normalizedDeposit = Number(String(deposit).replace(',', '.'));
-
-    if (!title) {
-        return res.status(400).json({ error: 'Titel ist ein Pflichtfeld.' });
-    }
 
     if (
         Number.isNaN(normalizedPricePerDay) ||
@@ -272,17 +269,13 @@ router.put('/products/:id', checkAdmin, async (req, res) => {
         connection = await mysql.createConnection(dbConfig);
         await connection.beginTransaction();
 
-        const normalizedCategories = Array.isArray(categories)
-            ? categories
-            : (category ? [category] : []);
-
         await connection.execute(
             `UPDATE rental_products
              SET title = ?,
                  description = ?,
                  price_per_day = ?,
                  deposit = ?,
-                 image_path = ?,
+                 image_path = COALESCE(?, image_path),
                  is_active = ?,
                  category = ?
              WHERE id = ?`,
@@ -291,7 +284,7 @@ router.put('/products/:id', checkAdmin, async (req, res) => {
                 description,
                 normalizedPricePerDay,
                 normalizedDeposit,
-                imagePath || '',
+                imagePath ?? null,
                 isActive ? 1 : 0,
                 normalizedCategories[0] || null,
                 req.params.id
