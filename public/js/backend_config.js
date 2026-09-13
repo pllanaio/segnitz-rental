@@ -7,6 +7,7 @@ let availableCategories = [];
 let currentOrderPage = 1;
 let adminCsrfToken = '';
 let backendUserRequest = null;
+const committedReturnItems = new Set();
 const ordersPerPage = 10;
 let orderPagination = {
     page: 1,
@@ -29,13 +30,10 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     document.getElementById('backendLogoutButton')?.addEventListener('click', logout);
-    document.getElementById('saveOpeningHoursButton')?.addEventListener('click', saveOpeningHours);
-    document.getElementById('submitOrderItemRentalPeriodButton')
-        ?.addEventListener('click', submitOrderItemRentalPeriod);
-    document.getElementById('submitCancelOrderItemButton')
-        ?.addEventListener('click', submitCancelOrderItem);
-    document.getElementById('submitOrderItemReturnButton')
-        ?.addEventListener('click', submitOrderItemReturn);
+    window.PendingActions.bindClick(document.getElementById('saveOpeningHoursButton'), saveOpeningHours);
+    window.PendingActions.bindClick(document.getElementById('submitOrderItemRentalPeriodButton'), submitOrderItemRentalPeriod);
+    window.PendingActions.bindClick(document.getElementById('submitCancelOrderItemButton'), submitCancelOrderItem);
+    window.PendingActions.bindClick(document.getElementById('submitOrderItemReturnButton'), submitOrderItemReturn);
     document.getElementById('uploadReturnImagesButton')?.addEventListener('click', () => {
         const itemId = document.getElementById('returnItemId').value;
         uploadReturnImagesForCurrentReturn(itemId);
@@ -44,13 +42,12 @@ document.addEventListener('DOMContentLoaded', () => {
         ?.addEventListener('change', renderSelectedReturnImagePreview);
 
     const manualPaymentSubmitButton = document.getElementById('manualPaymentSubmitButton');
-    manualPaymentSubmitButton?.addEventListener('click', () => {
+    window.PendingActions.bindClick(manualPaymentSubmitButton, () => {
         if (manualPaymentSubmitButton.dataset.operation === 'refund') {
-            submitManualRefund();
-            return;
+            return submitManualRefund();
         }
 
-        submitManualPayment();
+        return submitManualPayment();
     });
 
     document.getElementById('rentalPeriodEnd')?.addEventListener('input', updateRentalPeriodPreview);
@@ -139,7 +136,7 @@ function getOptionalNumber(value) {
     return Number.isFinite(number) ? number : null;
 }
 
-function handleBackendActionClick(event) {
+async function handleBackendActionClick(event) {
     const button = event.target.closest('[data-backend-action]');
 
     if (!button || button.disabled) return;
@@ -178,7 +175,7 @@ function handleBackendActionClick(event) {
         'open-return-item': () => openOrderItemReturnModal(orderId, itemId)
     };
 
-    actions[action]?.();
+    await window.PendingActions.run(button, async () => actions[action]?.());
 }
 
 async function loadProducts() {
@@ -1152,10 +1149,10 @@ function renderOrderItemCard(order, item) {
     const lateDays = actualReturnDate && plannedReturnDate
         ? Math.max(calculateRentalDays(plannedReturnDate, actualReturnDate) - 1, 0)
         : 0;
-    const lateFee = lateDays * Number(item.adjustedPricePerDay || item.pricePerDay || 0);
+    const lateFee = lateDays * Number(item.adjustedPricePerDay ?? item.pricePerDay ?? 0);
     const adjustedStart = item.adjustedRentalStart || item.rentalStart;
     const adjustedEnd = item.adjustedRentalEnd || item.actualReturnDate || item.rentalEnd;
-    const adjustedPrice = item.adjustedPricePerDay || item.pricePerDay;
+    const adjustedPrice = item.adjustedPricePerDay ?? item.pricePerDay;
     const isCancelled = itemStatus === 'cancelled';
     const isReturned = String(itemStatus).startsWith('returned_');
     const orderStatus = String(order.status || '').trim().toLowerCase();
@@ -1205,7 +1202,7 @@ function renderOrderItemCard(order, item) {
 
                         ${isReturned ? `
                             <div class="small text-muted mt-2">
-                                Rückgabe: ${escapeHtml(item.returnedAt || '-')}<br>
+                                Rückgabe: ${escapeHtml(window.SegnitzDate.formatInstant(item.returnedAt))}<br>
                                 Kaution: ${formatDepositDecision(item.depositDecision)}
                             </div>
                         ` : ''}
@@ -2402,7 +2399,7 @@ function openRentalPeriodModal(orderId, itemId) {
     rentalPeriodStartInput.disabled = true;
 
     document.getElementById('rentalPeriodEnd').value = item.adjustedRentalEnd || item.rentalEnd || '';
-    document.getElementById('rentalPeriodPricePerDay').value = item.adjustedPricePerDay || item.pricePerDay || '';
+    document.getElementById('rentalPeriodPricePerDay').value = item.adjustedPricePerDay ?? item.pricePerDay ?? '';
 
     updateRentalPeriodPreview();
 
@@ -2417,7 +2414,7 @@ function updateRentalPeriodPreview() {
 
     const start = document.getElementById('rentalPeriodStart').value || item.rentalStart;
     const end = document.getElementById('rentalPeriodEnd').value;
-    const price = Number(item.adjustedPricePerDay || item.pricePerDay || 0);
+    const price = Number(item.adjustedPricePerDay ?? item.pricePerDay ?? 0);
 
     document.getElementById('rentalPeriodPricePerDay').value = price.toFixed(2);
 
@@ -2523,7 +2520,7 @@ function openOrderItemReturnModal(orderId, itemId) {
     returnAdjustedStartInput.disabled = true;
     returnAdjustedEndInput.value = item.adjustedRentalEnd || item.rentalEnd || '';
     returnAdjustedEndInput.disabled = true;
-    document.getElementById('returnPricePerDay').value = item.adjustedPricePerDay || item.pricePerDay || '';
+    document.getElementById('returnPricePerDay').value = item.adjustedPricePerDay ?? item.pricePerDay ?? '';
     document.getElementById('returnStatus').value = item.returnStatus || 'returned_ok';
     document.getElementById('returnDepositDecision').value = item.depositDecision || 'pending';
     document.getElementById('returnIsDamaged').checked = Boolean(item.isDamaged);
@@ -2579,7 +2576,7 @@ function applyOrderItemReturnModalRules(triggerSource = 'auto') {
     const additionalChargeReasonInput = document.getElementById('returnAdditionalChargeReason');
 
     const lateDays = calculateLateDays(actualReturnDate, adjustedEnd);
-    const pricePerDay = Number(item.adjustedPricePerDay || item.pricePerDay || 0);
+    const pricePerDay = Number(item.adjustedPricePerDay ?? item.pricePerDay ?? 0);
     const lateFee = lateDays * pricePerDay;
 
     isLateInput.checked = lateDays > 0;
@@ -2635,7 +2632,7 @@ function applyOrderItemReturnModalRules(triggerSource = 'auto') {
     ].filter(Boolean).join(' | ');
 
     document.getElementById('returnPricePerDay').value =
-        Number(item.adjustedPricePerDay || item.pricePerDay || 0).toFixed(2);
+        Number(item.adjustedPricePerDay ?? item.pricePerDay ?? 0).toFixed(2);
 
     document.getElementById('returnPricePreview').innerHTML = `
     <div class="admin-price-panel mt-3">
@@ -2796,6 +2793,8 @@ async function saveOrderItemReturn(itemId, orderId) {
     };
 
     try {
+        let result = { message: 'Rückgabe gespeichert.' };
+        if (!committedReturnItems.has(String(itemId))) {
         const response = await fetch(`/admin/order-items/${itemId}/return`, {
             method: 'PUT',
             headers: await getAdminCsrfHeaders({
@@ -2804,25 +2803,31 @@ async function saveOrderItemReturn(itemId, orderId) {
             body: JSON.stringify(payload)
         });
 
-        const result = await response.json();
+        result = await response.json();
 
         if (!response.ok) {
             showAlert(result.error || 'Rückgabe konnte nicht gespeichert werden.', 'danger');
             return;
         }
 
+        committedReturnItems.add(String(itemId));
+        }
         try {
             await uploadReturnImagesForCurrentReturn(itemId);
         } catch (uploadError) {
             console.error('Rückgabe gespeichert, aber Fotos konnten nicht hochgeladen werden:', uploadError);
-            showAlert('Rückgabe gespeichert, aber Rückgabefotos konnten nicht hochgeladen werden.', 'warning');
+            showAlert('Rückgabe ist gespeichert; Fotos fehlen. Die Auswahl bleibt erhalten. Bitte Fotos erneut hochladen.', 'warning', 0);
+            document.getElementById('submitOrderItemReturnButton').textContent = 'Fotos und Abschluss erneut versuchen';
+            return false;
         }
 
         try {
             await sendReturnSummaryEmailForItem(itemId);
         } catch (mailError) {
             console.error('Rückgabe gespeichert, aber Abschlussmail konnte nicht versendet werden:', mailError);
-            showAlert('Rückgabe gespeichert, aber Abschlussmail konnte nicht versendet werden.', 'warning');
+            showAlert('Rückgabe gespeichert; Abschlussmail konnte nicht vorgemerkt werden. Bitte erneut versuchen.', 'warning', 0);
+            document.getElementById('submitOrderItemReturnButton').textContent = 'Abschluss erneut versuchen';
+            return false;
         }
 
         const detailsResponse = await fetch(`/admin/orders/${orderId}`);
@@ -2833,6 +2838,8 @@ async function saveOrderItemReturn(itemId, orderId) {
             renderOrderDetails(updatedOrder);
         }
 
+        committedReturnItems.delete(String(itemId));
+        document.getElementById('submitOrderItemReturnButton').textContent = 'Rückgabe speichern';
         bootstrap.Modal.getInstance(document.getElementById('orderItemReturnModal'))?.hide();
         setTimeout(restoreOrderDetailsModalLayer, 300);
 
@@ -2861,6 +2868,10 @@ async function saveOrderItemReturn(itemId, orderId) {
 }
 
 async function submitOrderItemReturn() {
+    const retryItemId = document.getElementById('returnItemId').value;
+    if (committedReturnItems.has(String(retryItemId))) {
+        return saveOrderItemReturn(retryItemId, document.getElementById('returnOrderId').value);
+    }
     showAlert(
         'Achtung: Die Rückgabe wird beim Speichern festgeschrieben und kann danach nicht mehr rückgängig gemacht werden.',
         'warning'
@@ -2936,306 +2947,18 @@ async function uploadReturnImagesForCurrentReturn(itemId) {
 }
 
 function calculateOrderItemFinancials(item) {
-    const originalDays = calculateRentalDays(item.rentalStart, item.rentalEnd);
-
-    const effectiveStart = item.adjustedRentalStart || item.rentalStart;
-    const effectiveEnd = item.adjustedRentalEnd || item.rentalEnd;
-    const plannedEnd = item.adjustedRentalEnd || item.rentalEnd;
-    const actualReturnDate = item.actualReturnDate || null;
-    const lateDays = calculateLateDays(actualReturnDate, plannedEnd);
-
-    const effectiveDays = calculateRentalDays(effectiveStart, effectiveEnd);
-    const extendedDays = Math.max(
-        calculateRentalDays(item.rentalStart, item.adjustedRentalEnd || item.rentalEnd) - originalDays,
-        0
-    );
-
-    const pricePerDay = Number(item.adjustedPricePerDay || item.pricePerDay || 0);
-    const lateFee = lateDays * pricePerDay;
-    const rentalTotal = effectiveDays * pricePerDay;
-    const originalRentalTotal = originalDays * Number(item.pricePerDay || 0);
-    const rentalAdjustment = rentalTotal - originalRentalTotal;
-
-    const deposit = Number(item.deposit || 0);
-    const isReturned = String(item.itemStatus || '').startsWith('returned_') || Boolean(item.returnedAt);
-    const depositRefund = isReturned ? Number(item.depositRefundAmount || 0) : 0;
-    const depositRetained = isReturned ? Math.max(deposit - depositRefund, 0) : 0;
-    const repairCharge = Number(item.additionalChargeAmount || 0);
-    const additionalCharge = repairCharge + lateFee;
-    const grossTotalWithDeposit = rentalTotal + deposit;
-    const customerAdditionalDue = Math.max(repairCharge + lateFee - deposit, 0);
-    const customerCredit = depositRefund;
-
-    return {
-        originalDays,
-        effectiveDays,
-        extendedDays,
-        pricePerDay,
-        rentalTotal,
-        deposit,
-        depositRefund,
-        depositRetained,
-        additionalCharge,
-        grossTotalWithDeposit,
-        customerAdditionalDue,
-        customerCredit,
-        originalRentalTotal,
-        rentalAdjustment,
-        lateDays,
-        lateFee,
-        repairCharge,
-        additionalChargeReason: item.additionalChargeReason || ''
-    };
+    if (!item.financials) throw new Error('Finanzdaten fehlen. Bitte die Bestellung erneut laden.');
+    return item.financials;
 }
 
 function renderOrderFinancialSummary(order) {
-    const items = order.items || [];
-    const financialItems = items.filter(item => String(item.itemStatus || 'active') !== 'cancelled');
-
-    const payments = order.payments || [];
-
-    const paidRentalAdjustments = payments
-        .filter(payment =>
-            payment.paymentType === 'rental_adjustment' &&
-            payment.paymentStatus === 'paid'
-        )
-        .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
-
-    const paidReturnAdditionalCharges = payments
-        .filter(payment =>
-            payment.paymentType === 'return_additional_charge' &&
-            payment.paymentStatus === 'paid'
-        )
-        .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
-
-    const totals = financialItems.reduce((sum, item) => {
-        const f = calculateOrderItemFinancials(item);
-
-        sum.rentalTotal += f.rentalTotal;
-        sum.deposit += f.deposit;
-        sum.depositRefund += f.depositRefund;
-        sum.depositRetained += f.depositRetained;
-        sum.additionalCharges += f.additionalCharge;
-        sum.customerAdditionalDue += f.customerAdditionalDue;
-        sum.customerCredit += f.customerCredit;
-        sum.originalRentalTotal += f.originalRentalTotal;
-        sum.rentalAdjustment += f.rentalAdjustment;
-
-        return sum;
-    }, {
-        rentalTotal: 0,
-        deposit: 0,
-        depositRefund: 0,
-        depositRetained: 0,
-        originalRentalTotal: 0,
-        rentalAdjustment: 0,
-        additionalCharges: 0,
-        customerAdditionalDue: 0,
-        customerCredit: 0
-    });
-    const openRentalAdjustments = payments
-        .filter(payment =>
-            payment.paymentType === 'rental_adjustment' &&
-            ['pending', 'open', 'authorized', 'failed', 'cancelled', 'expired'].includes(payment.paymentStatus)
-        )
-        .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
-
-    const chargeableRentalAdjustment = Math.max(openRentalAdjustments, 0);
-    const unsettledReturnAdditionalCharges = payments
-        .filter(payment =>
-            payment.paymentType === 'return_additional_charge' &&
-            ['pending', 'open', 'authorized', 'failed', 'cancelled', 'expired'].includes(payment.paymentStatus)
-        )
-        .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
-
-    const paidDepositRefunds = payments
-        .filter(payment =>
-            payment.paymentType === 'deposit_refund' &&
-            payment.paymentStatus === 'paid'
-        )
-        .reduce((sum, payment) => sum + Math.abs(Number(payment.amount || 0)), 0);
-    const latestCancellationRefundsByTarget = new Map();
-    payments
-        .filter(payment =>
-            ['order_cancellation_refund', 'duplicate_payment_refund'].includes(payment.paymentType)
-        )
-        .sort((a, b) => Number(a.id || 0) - Number(b.id || 0))
-        .forEach(payment => {
-            const key = [
-                payment.paymentType,
-                payment.orderItemId || 'order',
-                payment.molliePaymentId || payment.paymentMethod || 'cash'
-            ].join(':');
-            latestCancellationRefundsByTarget.set(key, payment);
-        });
-    const latestCancellationRefunds = [...latestCancellationRefundsByTarget.values()];
-    const paidCancellationRefunds = latestCancellationRefunds
-        .filter(payment => payment.paymentStatus === 'paid')
-        .reduce((sum, payment) => sum + Math.abs(Number(payment.amount || 0)), 0);
-    const outstandingCancellationRefunds = latestCancellationRefunds
-        .filter(payment =>
-            ['pending', 'open', 'authorized', 'failed', 'cancelled'].includes(payment.paymentStatus)
-        )
-        .reduce((sum, payment) => sum + Math.abs(Number(payment.amount || 0)), 0);
-
-    const refundableDeposit = Math.max(
-        totals.customerCredit - paidDepositRefunds,
-        0
-    );
-
-    const legacyReturnAdditionalDue = unsettledReturnAdditionalCharges > 0
-        ? 0
-        : Math.max(totals.customerAdditionalDue - paidReturnAdditionalCharges, 0);
-    const totalAdditionalDue =
-        chargeableRentalAdjustment +
-        unsettledReturnAdditionalCharges +
-        legacyReturnAdditionalDue;
-
-    const remainingAdditionalDue = Math.max(totalAdditionalDue, 0);
-
-    const finalBalance =
-        remainingAdditionalDue -
-        refundableDeposit -
-        outstandingCancellationRefunds;
-
-    const finalBalanceClass =
-        finalBalance > 0
-            ? 'text-danger'
-            : finalBalance < 0
-                ? 'text-success'
-                : 'text-muted';
-
-    const finalBalanceLabel =
-        finalBalance > 0
-            ? 'Kunde muss insgesamt nachzahlen'
-            : finalBalance < 0
-                ? 'Kunde erhält insgesamt zurück'
-                : 'Bestellung vollständig ausgeglichen';
-
-    return `
-    <div class="card mt-4 checkout-summary">
-        <div class="card-body">
-
-            <h5 class="mb-3">Gesamtpreisberechnung</h5>
-
-            <div class="summary-section-label">Mietkosten</div>
-
-            <div class="checkout-summary-row">
-                <span>Ursprüngliche Miete inkl. MwSt.</span>
-                <strong>${totals.originalRentalTotal.toFixed(2)} €</strong>
-            </div>
-
-            <div class="checkout-summary-row">
-                <span>Mietpreis-Korrektur</span>
-                <strong class="${totals.rentalAdjustment > 0 ? 'text-danger' : totals.rentalAdjustment < 0 ? 'text-muted' : ''}">
-                    ${totals.rentalAdjustment.toFixed(2)} €
-                </strong>
-            </div>
-
-            <div class="checkout-summary-row">
-                <span>Miete gesamt inkl. MwSt.</span>
-                <strong>${totals.rentalTotal.toFixed(2)} €</strong>
-            </div>
-
-            <hr>
-
-            <div class="summary-section-label">Kaution</div>
-
-            <div class="checkout-summary-row">
-                <span>Kaution gesamt</span>
-                <strong>${totals.deposit.toFixed(2)} €</strong>
-            </div>
-
-            <div class="checkout-summary-row">
-                <span>Kaution zurück</span>
-                <strong class="text-success">
-                    ${totals.depositRefund.toFixed(2)} €
-                </strong>
-            </div>
-
-            <div class="checkout-summary-row">
-                <span>Kaution einbehalten</span>
-                <strong class="text-danger">
-                    ${totals.depositRetained.toFixed(2)} €
-                </strong>
-            </div>
-
-            <hr>
-
-            <div class="summary-section-label">Nachzahlungen</div>
-
-            <div class="checkout-summary-row">
-                <span>Zusatzforderungen</span>
-                <strong class="text-danger">
-                    ${totals.additionalCharges.toFixed(2)} €
-                </strong>
-            </div>
-
-            <div class="checkout-summary-row">
-                <span>Bezahlte Mietzeitraum-Nachzahlungen</span>
-                <strong class="text-success">
-                    ${paidRentalAdjustments.toFixed(2)} €
-                </strong>
-            </div>
-
-            <div class="checkout-summary-row">
-                <span>Bezahlte Rückgabe-Nachzahlungen</span>
-                <strong class="text-success">
-                    ${paidReturnAdditionalCharges.toFixed(2)} €
-                </strong>
-            </div>
-
-            ${chargeableRentalAdjustment > 0 ? `
-                <div class="checkout-summary-row">
-                    <span>Noch auszugleichende Mietverlängerungen</span>
-                    <strong class="text-danger">${chargeableRentalAdjustment.toFixed(2)} €</strong>
-                </div>
-            ` : ''}
-
-            ${unsettledReturnAdditionalCharges > 0 ? `
-                <div class="checkout-summary-row">
-                    <span>Noch auszugleichende Rückgabe-Nachzahlungen</span>
-                    <strong class="text-danger">${unsettledReturnAdditionalCharges.toFixed(2)} €</strong>
-                </div>
-            ` : ''}
-
-            ${paidCancellationRefunds > 0 ? `
-                <div class="checkout-summary-row">
-                    <span>Ausgezahlte Storno-/Doppelzahlungs-Erstattungen</span>
-                    <strong class="text-success">${paidCancellationRefunds.toFixed(2)} €</strong>
-                </div>
-            ` : ''}
-
-            ${outstandingCancellationRefunds > 0 ? `
-                <div class="checkout-summary-row">
-                    <span>Noch auszuzahlende Erstattungen</span>
-                    <strong class="text-warning">${outstandingCancellationRefunds.toFixed(2)} €</strong>
-                </div>
-            ` : ''}
-
-            <div class="checkout-summary-total-row mt-3">
-                <span>${finalBalanceLabel}</span>
-
-                <strong class="${finalBalanceClass}">
-                    ${Math.abs(finalBalance).toFixed(2)} €
-                </strong>
-            </div>
-
-        </div>
-    </div>
-`;
+    return window.OrderFinanceView.render(order.financialSummary, order.payments);
 }
 
 async function sendReturnSummaryEmailForItem(itemId) {
-    const response = await fetch(`/admin/order-items/${itemId}/send-return-summary`, {
-        method: 'POST'
-    });
-
+    const response = await fetch(`/admin/order-items/${itemId}/send-return-summary`, { method: 'POST' });
     const result = await response.json();
-
-    if (!response.ok) {
-        throw new Error(result.error || 'Abschlussmail konnte nicht versendet werden.');
-    }
+    if (!response.ok) throw new Error(result.error || 'Abschlussmail konnte nicht vorgemerkt werden.');
 }
 
 function restoreOrderDetailsModalLayer() {

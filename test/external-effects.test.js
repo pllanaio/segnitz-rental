@@ -159,6 +159,50 @@ test('reapt eine letzte Lease samt fachlicher DEAD-Projektion atomar', async () 
     assert.equal(committed, true);
 });
 
+test('letzte abgelaufene Auth-Mail-Lease entfernt Klartext atomar und erhält Finanz-Keys', async () => {
+    const originalPayload = { message: { text: 'synthetic-auth-link' } };
+    const rows = [
+        { operation_key: 'mail-password-reset:synthetic', effect_type: EFFECT_TYPES.MAIL_SEND },
+        { operation_key: 'mail-verify-resend-synthetic', effect_type: EFFECT_TYPES.MAIL_SEND },
+        { operation_key: 'mail-order-confirmation:synthetic', effect_type: EFFECT_TYPES.MAIL_SEND },
+        { operation_key: 'refund:synthetic', effect_type: EFFECT_TYPES.MOLLIE_REFUND_CREATE }
+    ].map((row, index) => ({
+        ...row, id: index + 1, status: 'processing', attempt_count: 8, max_attempts: 8,
+        locked_by: 'crashed-worker', payload_json: structuredClone(originalPayload),
+        payload_hash: hashPayload(originalPayload)
+    }));
+    const before = structuredClone(rows);
+    let committed = false;
+    const connection = {
+        async beginTransaction() {},
+        async execute(sql, params) {
+            if (/attempt_count >= max_attempts/u.test(sql)) return [structuredClone(rows)];
+            if (/^\s*SELECT/u.test(sql)) return [[]];
+            const row = rows.find(candidate => candidate.id === params.at(-1));
+            if (/SET payload_json = JSON_OBJECT/u.test(sql)) row.payload_json = { redacted: true };
+            if (/SET status = 'dead'/u.test(sql)) row.status = 'dead';
+            return [{ affectedRows: 1 }];
+        },
+        async commit() { committed = true; },
+        async rollback() { throw new Error('unexpected rollback'); },
+        async end() {}
+    };
+    await claimExternalEffect({
+        workerId: 'restarted-worker', connectionFactory: async () => connection, mailPaused: false,
+        applyDead: async (_connection, effect) => {
+            assert.equal(committed, false);
+            assert.deepEqual(effect.payload, originalPayload);
+        }
+    });
+    assert.equal(committed, true);
+    for (let index = 0; index < rows.length; index++) {
+        assert.equal(rows[index].status, 'dead');
+        assert.deepEqual(rows[index].payload_json, index < 2 ? { redacted: true } : originalPayload);
+        assert.equal(rows[index].operation_key, before[index].operation_key);
+        assert.equal(rows[index].payload_hash, before[index].payload_hash);
+    }
+});
+
 test('injiziert den stabilen Outbox-Key zwingend in Mollie-Effekte', async () => {
     let observed;
     const effect = {
@@ -491,7 +535,7 @@ test('Payment-Sync trennt Ursprungszahlung und Refund-Ledger trotz gemeinsamer M
         source.indexOf("app.post('/admin/order-payments/manual'")
     );
     const webhookRoute = source.slice(
-        source.indexOf("app.post('/webhooks/mollie'"),
+        source.indexOf("async function reconcileMolliePayment"),
         source.indexOf('let cleanupTimer = null')
     );
     const cancellationHelper = source.slice(
@@ -523,7 +567,7 @@ test('Payment-Sync trennt Ursprungszahlung und Refund-Ledger trotz gemeinsamer M
         webhookRoute,
         /rop\.payment_type IN \([\s\S]*?'initial_payment'[\s\S]*?'return_additional_charge'[\s\S]*?\)/u
     );
-    assert.match(syncRoute, /updateMollieSourcePaymentStatus/u);
+    assert.match(syncRoute, /reconcileMolliePayment/u);
     assert.match(webhookRoute, /updateMollieSourcePaymentStatus/u);
     assert.doesNotMatch(
         syncRoute,
@@ -657,7 +701,7 @@ test('Bar-Mietverlängerung persistiert Status und Mail atomar', () => {
         source.indexOf("app.put('/admin/order-items/:itemId/return'")
     );
     const mailPosition = adjustmentRoute.indexOf('await sendRentalAdjustmentEmailWithPayment(');
-    const commitPosition = adjustmentRoute.indexOf('await connection.commit();');
+    const commitPosition = adjustmentRoute.indexOf('await commitAdminMutation(connection, req);');
 
     assert.notEqual(mailPosition, -1, 'Mietverlängerungs-Mail fehlt');
     assert.notEqual(commitPosition, -1, 'Transaktions-Commit fehlt');

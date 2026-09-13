@@ -1,20 +1,15 @@
-<html lang="en" class=" mtcytyc idc0_350">
+<html lang="de" class=" mtcytyc idc0_350">
 
 <head>
     <meta charset="utf-8">
     <meta content="width=device-width, initial-scale=1" name="viewport">
     <title>Segnitz Rental</title>
     <!-- CSS -->
-    <link rel="stylesheet" href="css/bootstrap.min.css">
+    <link rel="stylesheet" href="/vendor/bootstrap-5.3.8/bootstrap.min.css">
     <link rel="stylesheet" href="css/style.css">
     <link rel="stylesheet" href="css/bootstrap-icons-1.11.3/font/bootstrap-icons.min.css">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+    <link rel="stylesheet" href="/vendor/flatpickr-4.6.13/flatpickr.min.css">
     <!-- FONT -->
-    <link rel="stylesheet" href="css/fonts.css">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
-        rel="stylesheet">
     <!--FAVICON-->
     <link rel="apple-touch-icon" sizes="180x180" href="img/apple-touch-icon.png">
     <link rel="icon" type="image/png" sizes="32x32" href="img/favicon-32x32.png">
@@ -26,6 +21,7 @@
 </head>
 
 <body>
+    <a class="visually-hidden-focusable" href="#qbox-container_form">Zum Inhalt</a>
     <div id="globalAlertContainer" class="position-fixed top-0 start-50 translate-middle-x mt-3"
         style="z-index: 3000; width: 90%; max-width: 520px;">
     </div>
@@ -101,7 +97,7 @@
                                 <div class="d-flex justify-content-end align-items-center mb-3 flex-wrap gap-3">
                                     <div class="d-flex align-items-center gap-2 ms-auto">
                                         <input type="search" id="productSearchInput" class="form-control"
-                                            placeholder="Produkt suchen..." form="productSearchForm">
+                                            aria-label="Produkt suchen" placeholder="Produkt suchen..." form="productSearchForm">
 
                                         <button type="button" class="btn btn-outline-primary position-relative"
                                             data-bs-toggle="modal" data-bs-target="#cartModal"
@@ -293,11 +289,18 @@
                                         </p>
                                         <div id="signature-pad" class="m-signature-pad">
                                             <div class="m-signature-pad--body">
-                                                <canvas></canvas>
+                                                <canvas aria-label="Unterschrift zeichnen" aria-describedby="signatureAlternativeHint"></canvas>
                                                 <input type="hidden" name="Signature" id="Signature" value="">
+
                                             </div>
                                         </div>
                                     </div>
+                                                <div id="signatureAlternative" class="mt-3 d-none">
+                                                    <label for="signatureFile" class="form-label">Vorhandene Unterschrift als Bild hochladen</label>
+                                                    <input id="signatureFile" type="file" class="form-control" accept="image/png,image/jpeg" aria-describedby="signatureAlternativeHint">
+                                                    <p id="signatureAlternativeHint" class="small">Alternativ zum Zeichnen können Sie ein PNG- oder JPEG-Bild Ihrer eigenen Unterschrift auswählen (max. 500 KB). Der Upload wird als Unterschriftsbild geprüft.</p>
+                                                    <p id="signatureFileStatus" role="status"></p>
+                                                </div>
                                     <div class="container text-center">
                                         <div class="row justify-content-center">
                                             <div class="col-md-auto">
@@ -307,15 +310,18 @@
                                             </div>
                                         </div>
                                     </div>
+                                    <p id="legalDocumentStatus" role="status">Vertragsdokumente werden geladen…</p>
+                                    <input type="hidden" name="termsVersion" id="termsVersion">
+                                    <input type="hidden" name="privacyVersion" id="privacyVersion">
                                     <div class="form-check form-switch">
                                         <input class="form-check-input" type="checkbox" role="switch" name="agbs"
                                             id="agbs">
-                                        <label class="form-check-label">Hiermit stimme ich den AGBs zu</label>
+                                        <label class="form-check-label" for="agbs">Hiermit stimme ich den <a id="termsLink" href="/legal-status.html" target="_blank" rel="noopener">Mietbedingungen</a> zu</label>
                                     </div>
                                     <div class="form-check form-switch">
                                         <input class="form-check-input" type="checkbox" role="switch" name="dsgvo"
                                             id="dsgvo">
-                                        <label class="form-check-label">Hiermit stimme ich der Datenschutzerklärung
+                                        <label class="form-check-label" for="dsgvo">Hiermit stimme ich der <a id="privacyLink" href="/legal-status.html" target="_blank" rel="noopener">Datenschutzerklärung</a>
                                             zu</label>
                                     </div>
                                     <div class="mt-4 mb-4">
@@ -402,7 +408,7 @@
                 <div id="q-box__buttons">
                     <button id="prev-btn" type="button" class="d-none">Zurück</button>
                     <button id="next-btn" type="button" class="d-none">Weiter</button>
-                    <button id="submit-btn" type="button" class="d-none">Absenden</button>
+                    <button id="submit-btn" type="submit" class="d-none">Absenden</button>
                 </div>
                 </form>
         </div>
@@ -416,22 +422,26 @@
         <div class="preloader-section section-right"></div>
     </div>
     <!-- Flatpickr -->
-    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
-    <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/de.js"></script>
+    <script src="/vendor/flatpickr-4.6.13/flatpickr.min.js"></script>
+    <script src="/vendor/flatpickr-4.6.13/de.js"></script>
     <!--Bootstrap-->
-    <script type="text/javascript" src="js/bootstrap.bundle.min.js"></script>
+    <script type="text/javascript" src="/vendor/bootstrap-5.3.8/bootstrap.bundle.min.js"></script>
     <script type="text/javascript" src="js/csrf.js"></script>
     <script type="text/javascript" src="js/safe_html.js"></script>
+    <script src="/js/contact-contract.js"></script>
     <script type="text/javascript" src="js/date_utils.js"></script>
     <!-- Javascript to handle Alerts -->
     <script type="text/javascript" src="js/alerts.js"></script>
     <!-- General Functionalities -->
+    <script src="/js/catalog-state.js"></script>
+    <script src="/js/legal-documents.js"></script>
+    <script src="js/pending-actions.js"></script>
     <script type="text/javascript" src="js/frontend_config.js"></script>
     <!--Signature-->
     <script type="text/javascript" src="js/signature_pad.js"></script>
     <script type="text/javascript" src="js/signature_handler.js"></script>
     <!--HTML2json-->
-    <script type="text/javascript" src="js/html2json.js"></script>
+    
 
     <!-- 👉 HIER DAS MODAL EINFÜGEN -->
     <div class="modal fade" id="productDetailsModal" tabindex="-1" aria-hidden="true">
@@ -439,7 +449,7 @@
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">Produktdetails</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    <button type="button" class="btn-close" aria-label="Schließen" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
                     <div id="modalProductCarouselWrapper" class="mb-3 d-none">
@@ -510,7 +520,7 @@
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">Warenkorb leeren</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    <button type="button" class="btn-close" aria-label="Schließen" data-bs-dismiss="modal"></button>
                 </div>
 
                 <div class="modal-body">
@@ -537,7 +547,7 @@
                         <i class="bi bi-cart3"></i>
                         Warenkorb
                     </h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    <button type="button" class="btn-close" aria-label="Schließen" data-bs-dismiss="modal"></button>
                 </div>
 
                 <div class="modal-body">
@@ -616,7 +626,7 @@
                         Zeitraum ändern
                     </h5>
 
-                    <button type="button" class="btn-close" data-bs-dismiss="modal">
+                    <button type="button" class="btn-close" aria-label="Schließen" data-bs-dismiss="modal">
                     </button>
                 </div>
 
@@ -658,6 +668,7 @@
 
     </div>
 
+<footer class="container py-3"><a id="operatorLink" href="/legal-status.html">Betreiberangaben</a></footer>
 </body>
 
 </html>

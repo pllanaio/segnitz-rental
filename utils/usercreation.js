@@ -6,7 +6,7 @@ require('dotenv').config({
 const bcrypt = require('bcrypt');
 const mysql = require('mysql2/promise');
 
-const saltRounds = 10;
+const { isValidPassword, PASSWORD_HASH_ROUNDS } = require('./passwordPolicy');
 
 const allowedRoles = ['global_admin', 'user', 'bearbeiter'];
 
@@ -14,6 +14,8 @@ async function createUser(username, password, role = 'user') {
     if (!allowedRoles.includes(role)) {
         throw new Error(`Ungültige Rolle: ${role}`);
     }
+
+    if (!isValidPassword(password, role)) throw new Error('Passwort entspricht nicht der Rollenrichtlinie.');
 
     const connection = await mysql.createConnection({
         host: process.env.DB_HOST,
@@ -24,7 +26,7 @@ async function createUser(username, password, role = 'user') {
     });
 
     try {
-        const hashedPassword = await bcrypt.hash(password, saltRounds);
+        const hashedPassword = await bcrypt.hash(password, PASSWORD_HASH_ROUNDS);
 
         const [rows] = await connection.execute(
             'INSERT INTO users (username, password, role) VALUES (?, ?, ?)',
@@ -43,6 +45,4 @@ async function createUser(username, password, role = 'user') {
     }
 }
 
-//createUser('admin', 'test1234', 'global_admin');
-//createUser('leon', 'test', 'user');
-// createUser('mitarbeiter1', 'test1234', 'bearbeiter');
+module.exports = { createUser };

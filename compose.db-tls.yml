@@ -1,0 +1,14 @@
+# Optional production overlay for an operator-approved public database CA.
+# Use together with compose.yml. Never mount the CA's private signing key.
+services:
+  app:
+    environment:
+      DB_TLS: "1"
+      DB_TLS_CA_FILE: /run/secrets/database-ca.pem
+    volumes:
+      - type: bind
+        source: ${DB_TLS_CA_HOST_FILE:?Set the absolute path of the approved public database CA certificate}
+        target: /run/secrets/database-ca.pem
+        read_only: true
+        bind:
+          create_host_path: false

@@ -67,7 +67,7 @@ async function getCachedSchemaReadiness({
     return schemaCheckPromise;
 }
 
-async function checkDatabaseReadiness({
+async function runDatabaseReadiness({
     connectionFactory,
     deepCheckIntervalMs,
     failureRetryIntervalMs,
@@ -86,6 +86,7 @@ async function checkDatabaseReadiness({
             throw new Error('Datenbank-Ping ist nicht bereit.');
         }
         sessionTimeZone = pingRows[0].sessionTimeZone;
+        if (sessionTimeZone !== '+00:00') throw new Error('Datenbankverbindung verwendet keine UTC-Zeitzone.');
 
         if (expectedMigrationManifest.length > 0) {
             const [migrationRows] = await connection.execute(
@@ -109,6 +110,35 @@ async function checkDatabaseReadiness({
     });
 
     return { schema, sessionTimeZone };
+}
+
+
+async function checkDatabaseReadiness(options = {}) {
+    const timeoutMs = options.timeoutMs || Number(process.env.DB_READINESS_TIMEOUT_MS || 1500);
+    const controller = new AbortController();
+    const connections = new Set();
+    const factory = options.connectionFactory || (() => mysql.createConnection(dbConfig.connectionConfig({ signal: controller.signal })));
+    let timer;
+    try {
+        return await Promise.race([
+            runDatabaseReadiness({ ...options, connectionFactory: async () => {
+                const connection = await factory({ signal: controller.signal });
+                if (controller.signal.aborted) {
+                    connection.destroy?.();
+                    throw Object.assign(new Error('Readiness-Frist überschritten.'), { code: 'DB_READINESS_TIMEOUT' });
+                }
+                connections.add(connection);
+                return connection;
+            } }),
+            new Promise((resolve, reject) => {
+                timer = setTimeout(() => {
+                    controller.abort();
+                    for (const connection of connections) connection.destroy?.();
+                    reject(Object.assign(new Error('Readiness-Frist überschritten.'), { code: 'DB_READINESS_TIMEOUT' }));
+                }, timeoutMs);
+            })
+        ]);
+    } finally { clearTimeout(timer); }
 }
 
 function resetReadinessCache() {

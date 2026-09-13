@@ -34,3 +34,12 @@ public/templates/
 public/img/products/
 public/img/returns/
 uploads/
+
+docs/
+scripts/ops/
+release-image/
+release-scan/
+release-evidence/
+*.age
+*.sql.gz
+*.dump

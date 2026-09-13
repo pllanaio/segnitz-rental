@@ -52,13 +52,13 @@ function quoteIdentifier(identifier) {
 async function connectOrCreateDatabase() {
     try {
         return {
-            connection: await mysql.createConnection(dbConfig),
+            connection: await mysql.createConnection(dbConfig.connectionConfig({ migration: true })),
             databaseCreated: false
         };
     } catch (error) {
         if (error.code !== 'ER_BAD_DB_ERROR') throw error;
 
-        const { database, ...serverConfig } = dbConfig;
+        const { database, ...serverConfig } = dbConfig.connectionConfig({ migration: true });
         const serverConnection = await mysql.createConnection(serverConfig);
 
         try {
@@ -71,7 +71,7 @@ async function connectOrCreateDatabase() {
         }
 
         return {
-            connection: await mysql.createConnection(dbConfig),
+            connection: await mysql.createConnection(dbConfig.connectionConfig({ migration: true })),
             databaseCreated: true
         };
     }
@@ -161,6 +161,19 @@ async function readAppliedMigrationRows(connection) {
 async function assertDatabaseHasNoUnknownMigrations(connection, migrationList = migrations) {
     const appliedRows = await readAppliedMigrationRows(connection);
     assertNoUnknownAppliedMigrations(appliedRows, buildMigrationManifest(migrationList));
+    // Fail before *any* DDL/DML, including a new migration scheduled ahead of
+    // historical backfills. Checking inside the up-loop would be too late.
+    const knownByVersion = new Map(migrationList.map(migration => [migration.version, migration]));
+    for (const applied of appliedRows) {
+        const migration = knownByVersion.get(applied.version);
+        if (applied.checksum === migrationChecksum(migration)) continue;
+        if ((migration.legacyChecksums || []).includes(applied.checksum) &&
+            legacyMigrationChecksum(migration) === applied.checksum) continue;
+        throw new Error(
+            `Migration ${migration.version} wurde nachträglich verändert. ` +
+            'Der Serverstart wurde zum Schutz der Datenbank abgebrochen.'
+        );
+    }
     return appliedRows;
 }
 
@@ -169,7 +182,9 @@ async function runAutomaticMigrations(connection, migrationList = migrations) {
     const appliedRows = await assertDatabaseHasNoUnknownMigrations(connection, migrationList);
     const appliedByVersion = new Map(appliedRows.map(row => [row.version, row]));
 
-    for (const migration of migrationList) {
+    // Normalize existing local DATETIME before historical SQL backfills create UTC values.
+    const executionOrder = [...migrationList].sort((a, b) => Number(Boolean(b.runBeforeLegacy)) - Number(Boolean(a.runBeforeLegacy)));
+    for (const migration of executionOrder) {
         const checksum = migrationChecksum(migration);
         const appliedMigration = appliedByVersion.get(migration.version);
 
@@ -247,6 +262,9 @@ async function seedCanonicalDefaults(connection) {
 async function initializeFreshSchema(connection) {
     await ensureCanonicalTables(connection);
     await seedCanonicalDefaults(connection);
+    // Fresh installs record migration checksums without executing every legacy up.
+    // The new audit table additionally needs its immutable append-only triggers.
+    await require('./migrations/20260913_admin_audit').up(connection);
     return recordFreshSchemaMigrations(connection);
 }
 
@@ -424,6 +442,7 @@ async function initializeDatabase() {
 module.exports = {
     assertDatabaseHasNoUnknownMigrations,
     buildMigrationManifest,
+    connectOrCreateDatabase,
     ensureCanonicalTables,
     hasExistingApplicationTables,
     initializeFreshSchema,

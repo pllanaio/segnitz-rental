@@ -42,7 +42,7 @@ test('führt Payment-Synchronisierung nur über den schreibenden Owner-Endpunkt 
     );
 
     assert.match(syncRoute, /mayAccessOrder\(req, orders\[0\]\)/);
-    assert.match(syncRoute, /getMolliePayment/);
+    assert.match(syncRoute, /reconcileMolliePayment/);
     assert.match(syncRoute, /beginTransaction/);
     assert.match(syncRoute, /\.commit\(/);
 });

@@ -1,50 +1,73 @@
 # Security Policy
 
-## Supported version
+Security fixes target current `main`. Report vulnerabilities privately to the
+repository owner; include affected behavior, reproduction and impact without
+customer data, credentials or a public working exploit.
 
-Security fixes are applied to the current `main` branch.
+## Secrets and runtime
 
-## Reporting a vulnerability
+Provide secrets through the deployment secret store or private environment files.
+Never commit credentials, `.env`, auth links, database dumps or private image data.
+Use the shared redaction boundary for logs; financial idempotency keys must remain
+stable even when sensitive authentication metadata is redacted.
 
-Do not open a public issue containing credentials, customer data, payment data or a working exploit. Contact the repository owner privately and include:
+A previously exposed credential requires a separately authorized operator rotation
+and incident assessment. History rewriting, token rotation or destructive cleanup
+are not automatic development actions. Existing customer/business data must be
+preserved.
 
-- the affected route or component
-- steps to reproduce
-- expected and actual behavior
-- the potential impact
-- a proposed fix, when available
+Production requires validated HTTPS `BASE_URL`, a strong `SESSION_SECRET`,
+verified `TRUST_PROXY` topology, secure cookies and real enabled integrations.
+Simulator combinations are rejected before migrations/HTTP start. Mail maintenance
+pauses jobs; it must not mark unsent mail as sent. Keep CSRF, session regeneration,
+`auth_version`, ownership checks and private return images enabled.
 
-## Credential handling
+The CSP forbids inline scripts and event handlers. Versioned browser libraries and
+license notices are maintained with the application; npm audit alone does not
+cover browser assets. Do not weaken CSP to accommodate unused code.
 
-- Secrets must only be supplied through environment variables or the deployment platform's secret store.
-- Never commit `.env` files, passwords, API keys, SMTP credentials or database dumps.
-- Any credential that has appeared in Git history must be treated as compromised and rotated immediately.
-- After rotation, remove the secret from Git history with an approved history-rewrite procedure and invalidate old deployments or caches.
-- Generated dependencies such as `node_modules/` must not be tracked in Git; only lockfiles belong in the repository.
+## Required release checks
 
-## Production runtime requirements
+All checks run on the final release commit: syntax/unit on supported Node 22/24,
+MySQL integration, real application Playwright, production dependency audit,
+container vulnerability scan, CodeQL and final `Release gate`. Authentication,
+payments, upload and availability changes need additional human review.
 
-- Set `NODE_ENV=production` and terminate TLS at the application proxy so session cookies are sent with the `Secure` flag.
-- Use a randomly generated `SESSION_SECRET` with at least 32 characters.
-- The current CSP keeps inline scripts and styles as a compatibility bridge. Remove `unsafe-inline` after the frontend has been migrated to external assets or CSP nonces.
+CI builds a single OCI artifact with SBOM/provenance. The manually triggered
+publication workflow validates every exact-commit check and artifact digest,
+copies the same OCI bytes with `--all --preserve-digests`, checks the registry
+digest, then signs/attests that digest. It never rebuilds or updates `latest`.
+Compose requires an explicitly reviewed `repository@sha256` image reference.
+Publication and production deployment remain separately authorized actions.
 
-## Minimum release checks
+## Required GitHub settings: not activated by this file
 
-A production release requires successful CI tests, Docker build, dependency audit and CodeQL analysis. High-risk changes to authentication, payments, uploads or order status transitions require an additional review.
+Observed 2026-09-13: `main` was unprotected with no required checks; repository
+rulesets were empty. No settings were changed during implementation. Secret-
+scanning settings and protected environments could not be verified through the
+available read-only endpoint. Absence from repository metadata is not evidence
+that a security feature is disabled.
 
-## Required GitHub repository settings
+Configure and independently verify:
 
-The following controls cannot be enabled by files in this repository and must
-be configured in the GitHub repository or organization settings:
+- An active `main` ruleset blocking deletion and force pushes, requiring PRs,
+  at least one independent review, dismissal of stale approvals, approval of the
+  latest push, resolved conversations, strict up-to-date checks and no routine
+  administrator bypass.
+- Required checks exactly matching `Unit tests (Node 22)`, `Unit tests (Node 24)`,
+  `MySQL integration tests`, `Playwright end-to-end tests`,
+  `Production dependency audit`, `Build and scan release image`,
+  `CodeQL security gate` and `Release gate` from this repository's Actions app.
+- The `production-release` environment restricted to `main`, required independent
+  reviewers, prevention of self-review and scoped registry credentials. Its name
+  in a workflow does not create an approval policy.
+- Dependabot alerts/security updates, secret scanning, supported non-provider
+  patterns and push protection; assess feature availability and organization rules.
+- The minimum workflow permissions and protected changes to workflows/release
+  scripts, with ownership/review assignments approved by the operator.
 
-- protect `main` with a ruleset and block force-pushes and branch deletion
-- require the unit, integration, end-to-end, production-audit, Docker-build and
-  CodeQL checks before a release commit can become the current `main`
-- enable Dependabot alerts and security updates
-- enable secret scanning, non-provider pattern scanning and push protection
-
-The Docker publish workflow waits for the complete `CI` workflow to succeed,
-verifies that the tested commit is still the current `main`, publishes an
-immutable commit-SHA tag and signs the resulting image digest through GitHub's
-OIDC identity. Repository rules remain necessary to stop unreviewed or untested
-changes from landing in the branch in the first place.
+The proposed values, exact observed evidence, failure tests and remaining checks
+are in [docs/evidence-operations.md](docs/evidence-operations.md). Deployment,
+monitoring, backup, restore, provider reconciliation and retention procedures are
+in [docs/operations.md](docs/operations.md). A green CI result alone is not a
+production approval or evidence of a successful restore.

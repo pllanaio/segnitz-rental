@@ -476,3 +476,52 @@ CREATE TABLE user_sessions (
     data MEDIUMTEXT COLLATE utf8mb4_bin NULL,
     PRIMARY KEY (session_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+
+CREATE TABLE app_datetime_migration_progress (
+    table_name VARCHAR(128) NOT NULL,
+    interpretation VARCHAR(16) NOT NULL,
+    override_hash CHAR(64) NOT NULL,
+    last_id BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    completed TINYINT(1) NOT NULL DEFAULT 0,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (table_name),
+    CONSTRAINT chk_datetime_progress_completed CHECK (completed IN (0, 1)),
+    CONSTRAINT chk_datetime_progress_mode CHECK (interpretation IN ('utc', 'berlin'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE admin_mutation_events (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    actor_user_id INT NOT NULL,
+    actor_ref CHAR(64) NOT NULL,
+    actor_role VARCHAR(50) NOT NULL,
+    request_id CHAR(36) NOT NULL,
+    action VARCHAR(128) NOT NULL,
+    order_id INT NOT NULL,
+    order_item_id INT NULL,
+    payment_id INT NULL,
+    snapshot_json JSON NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY idx_admin_mutation_order (order_id, id),
+    KEY idx_admin_mutation_actor (actor_user_id, id),
+    KEY idx_admin_mutation_request (request_id),
+    CONSTRAINT chk_admin_mutation_identity CHECK (
+        actor_user_id > 0 AND order_id > 0
+        AND (order_item_id IS NULL OR order_item_id > 0)
+        AND (payment_id IS NULL OR payment_id > 0)
+        AND actor_role IN ('global_admin', 'bearbeiter')
+    ),
+    CONSTRAINT chk_admin_mutation_snapshot CHECK (
+        JSON_TYPE(snapshot_json) = 'OBJECT'
+        AND JSON_CONTAINS_PATH(snapshot_json, 'one', '$.schemaVersion') = 1
+        AND JSON_EXTRACT(snapshot_json, '$.schemaVersion') = 1
+    )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TRIGGER admin_mutation_events_no_update BEFORE UPDATE
+    ON admin_mutation_events FOR EACH ROW
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'admin_mutation_events is append only';
+
+CREATE TRIGGER admin_mutation_events_no_delete BEFORE DELETE
+    ON admin_mutation_events FOR EACH ROW
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'admin_mutation_events is append only';

@@ -1,0 +1,56 @@
+{
+  "flatpickr": {
+    "version": "4.6.13",
+    "files": {
+      "flatpickr.min.js": "1eeab1cb779471a0b0aaa93dd91c2eb1aa537d696f01ab05ea9dabc55e8525a1",
+      "flatpickr.min.css": "1b34a42552c96f10e4dfaaa4a367276b03868aacff63c1ac42ffe331352bc754",
+      "de.js": "8bcf8bfb7d68b2c8b99d2082257c5ef523c8c1afc62c94f6aa9aeb6fb77b9338",
+      "LICENSE.md": "5fd57afc3905651175947ae44818e91ffcf5b605e4c88fac42d9700243bd9095"
+    },
+    "archiveSha512": "f7b3cc1bf6b2c2862907822f6ef5098b44508bcbde6abbd4d28a2fd565b79345993c132b4d056a7a4497e428d21bf3384378ba03fd052970bb4720280145123f",
+    "source": "https://registry.npmjs.org/flatpickr/-/flatpickr-4.6.13.tgz",
+    "basePath": "vendor/flatpickr-4.6.13"
+  },
+  "bootstrap": {
+    "version": "5.3.8",
+    "files": {
+      "bootstrap.bundle.min.js": "e4fd49181388c48ec5040bd3fe66f57c29c8e67fcd8502b3354b96ec7ab47cc7",
+      "bootstrap.min.css": "d85327d99c7a3ee1f9b5d0500d1370acea3ad2db39c163c2f51f232baedbdede",
+      "LICENSE": "4620c84ad5ce8602ff65640ed6b7c8b78ebb9e036584f0ebc1ccc88206a4bb51"
+    },
+    "archiveSha512": "1cfd52643a9a2c33f0b0d8aa46a8b935c3f44925dc897dacf44f91caa24822a1a8faf25e37900954cf7c097996fd6bb1d274392fb8de59476994211fd047beb6",
+    "source": "https://registry.npmjs.org/bootstrap/-/bootstrap-5.3.8.tgz",
+    "basePath": "vendor/bootstrap-5.3.8"
+  },
+  "signature_pad": {
+    "version": "2.3.2",
+    "basePath": "js",
+    "license": "MIT",
+    "files": {
+      "signature_pad.js": "c479b113bbd35d81b0361b355a44fa96042e720ef85379f0ae28c68c00ef2d97",
+      "signature_pad.LICENSE.txt": "7d461320b6c69581bd19cc9402aa9a5e33ad826ed2f977d03bcb884e0cc6ce54"
+    },
+    "archiveSha512": "a5e6172f13ac218e8c112d93ad12c388d8364fefbc8066e93f6c9a0bee8e86dc6bf9ad9dce86aa5a8b160d8f6c5aa4c0024e84fd3c903be2c9c3dcd0c32bb990",
+    "source": "https://registry.npmjs.org/signature_pad/-/signature_pad-2.3.2.tgz",
+    "upstreamGitCommit": "78a90b70d5b503b1aa8052dc63667dcdbc4ca0c9",
+    "upstreamFileSha256": {
+      "dist/signature_pad.js": "debc021c96df02faa6120fd39e930c3ad73f6aaf674f1f8d17163a5c3f1fd92a"
+    },
+    "localModifications": "docs/browser-assets.md#signature-pad",
+    "licenseSource": "https://raw.githubusercontent.com/szimek/signature_pad/9a99148b9d9f469214c62f42b801349f3955d8e1/LICENSE"
+  },
+  "bootstrap-icons": {
+    "version": "1.11.3",
+    "basePath": "css/bootstrap-icons-1.11.3",
+    "license": "MIT",
+    "files": {
+      "font/bootstrap-icons.min.css": "f643d6fe7e679f9de3e16311600c5ef5cd6b098f7a3a8828fcc29255d2b33e62",
+      "font/bootstrap-icons.css": "4ffa6bea4304d2eda418683f56261685ed47bf00995039f27e5ad62d53938d2d",
+      "font/fonts/bootstrap-icons.woff2": "476adf42b40325098fcfa8b36ab3e769186bb4f6ce6a249753e2e1a9c22bf99e",
+      "font/fonts/bootstrap-icons.woff": "bb1de989b83970f6f4e54de1cd974c5cba55b73582da5e1b225a6d0edf029483",
+      "LICENSE": "0fb3e11bd57e896c5a512afd64864d28a37de45d19835016c87ca1ad19ead969"
+    },
+    "archiveSha512": "fb79691eb0b0fe2b76ffb9412f5e554741c4ba6681b2cd3e7ff2dbe99bc72129f59a52bcde38c5a68a132ec3166c88c93038c38ce13132c4f19d74884f8938c3",
+    "source": "https://registry.npmjs.org/bootstrap-icons/-/bootstrap-icons-1.11.3.tgz"
+  }
+}

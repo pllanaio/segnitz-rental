@@ -1,6 +1,7 @@
 'use strict';
 
 const bcrypt = require('bcrypt');
+const { isValidPassword, PASSWORD_HASH_ROUNDS } = require('../utils/passwordPolicy');
 const crypto = require('node:crypto');
 const mysql = require('mysql2/promise');
 const dbConfig = require('../config/db');
@@ -48,12 +49,7 @@ function validateAdminInput(input) {
         throw createSetupError('Bitte eine gültige E-Mail-Adresse eingeben.', 400, 'INVALID_EMAIL');
     }
 
-    const passwordIsValid = password.length >= 12 &&
-        Buffer.byteLength(password, 'utf8') <= 72 &&
-        /[a-z]/u.test(password) &&
-        /[A-Z]/u.test(password) &&
-        /[0-9]/u.test(password) &&
-        /[^A-Za-z0-9]/u.test(password);
+    const passwordIsValid = isValidPassword(password, 'global_admin');
 
     if (!passwordIsValid) {
         throw createSetupError(
@@ -167,7 +163,7 @@ async function createInitialAdmin(input) {
             );
         }
 
-        const passwordHash = await bcrypt.hash(admin.password, 12);
+        const passwordHash = await bcrypt.hash(admin.password, PASSWORD_HASH_ROUNDS);
 
         await connection.execute(
             `INSERT INTO users

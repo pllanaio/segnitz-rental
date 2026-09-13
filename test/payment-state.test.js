@@ -33,7 +33,7 @@ test('ein später Initialzahlungs-Webhook reaktiviert keinen terminalen Mietauft
     assert.equal(deriveOrderStatusFromInitialPayment('expired', 'paid'), 'expired');
     assert.equal(deriveOrderStatusFromInitialPayment('picked_up', 'paid'), 'picked_up');
     assert.equal(deriveOrderStatusFromInitialPayment('returned', 'paid'), 'returned');
-    assert.equal(deriveOrderStatusFromInitialPayment('returned', 'charged_back'), 'payment_dispute');
+    assert.equal(deriveOrderStatusFromInitialPayment('returned', 'charged_back'), 'returned');
 });
 
 test('verrechnet Schäden, Verlängerung und Verspätung gemeinsam mit der Kaution', () => {

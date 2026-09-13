@@ -1,3 +1,4 @@
+const { rentalDays, toCents } = require('./orderFinanceService');
 function getFormValue(formData, fieldName) {
     if (!Array.isArray(formData)) return null;
 
@@ -42,23 +43,24 @@ async function generateOrderNo(connection) {
 }
 
 function calculateRentalDays(startDate, endDate) {
-    const start = new Date(startDate);
-    const end = new Date(endDate);
-
-    return Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1;
+    return rentalDays(startDate, endDate);
 }
 
 function buildOrderSummary(orderNo, cartItems, status = 'reserved') {
-    let rentalTotal = 0;
-    let depositTotal = 0;
+    let rentalTotalCents = 0;
+    let depositTotalCents = 0;
 
     const items = cartItems.map(item => {
         const days = calculateRentalDays(item.rentalStart, item.rentalEnd);
-        const lineRentalTotal = days * Number(item.pricePerDay || 0) * Number(item.quantity || 1);
-        const lineDepositTotal = Number(item.deposit || 0) * Number(item.quantity || 1);
-
-        rentalTotal += lineRentalTotal;
-        depositTotal += lineDepositTotal;
+        const quantity = Number(item.quantity ?? 1);
+        if (!Number.isSafeInteger(quantity) || quantity < 1) throw new Error('Ungültige Mietmenge.');
+        const lineRentalCents = days * toCents(item.pricePerDay || 0) * quantity;
+        const lineDepositCents = toCents(item.deposit || 0) * quantity;
+        rentalTotalCents += lineRentalCents;
+        depositTotalCents += lineDepositCents;
+        if (!Number.isSafeInteger(rentalTotalCents + depositTotalCents)) throw new Error('Mietsumme außerhalb des sicheren Bereichs.');
+        const lineRentalTotal = lineRentalCents / 100;
+        const lineDepositTotal = lineDepositCents / 100;
 
         return {
             productId: item.productId,
@@ -80,9 +82,9 @@ function buildOrderSummary(orderNo, cartItems, status = 'reserved') {
         status,
         items,
         totals: {
-            rentalTotal,
-            depositTotal,
-            grandTotalBeforeDepositReturn: rentalTotal + depositTotal
+            rentalTotal: rentalTotalCents / 100,
+            depositTotal: depositTotalCents / 100,
+            grandTotalBeforeDepositReturn: (rentalTotalCents + depositTotalCents) / 100
         }
     };
 }

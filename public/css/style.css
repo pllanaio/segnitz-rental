@@ -621,6 +621,7 @@ input[type="radio"]:hover {
 }
 
 #modalCalendarContainer .flatpickr-days,
+#modalCalendarContainer .flatpickr-rContainer,
 #modalCalendarContainer .dayContainer {
   width: 100%;
   min-width: 100%;
@@ -1235,3 +1236,13 @@ input[name="paymentMethod"] {
     justify-content: space-between;
   }
 }
+/* Keep keyboard focus visible across the wizard, cards and modal actions. */
+:focus-visible { outline: 3px solid #dc6502; outline-offset: 3px; }
+#signatureAlternative { position: relative; z-index: 1; }
+@media (max-width: 575px) { .flatpickr-calendar { max-width: 100%; } #q-box__buttons button { min-height: 44px; } }
+
+.form-control:focus-visible, .form-select:focus-visible { outline: 3px solid #dc6502 !important; outline-offset: 3px; }
+#termsLink, #privacyLink, #operatorLink { color: #123d7c; text-decoration: underline; }
+/* Flatpickr's default 39px maximum must grow with the existing full-width
+   calendar container, otherwise wide views place more than seven days in a row. */
+#modalCalendarContainer .flatpickr-day { width: 14.285714%; max-width: none; flex-basis: 14.285714%; }
