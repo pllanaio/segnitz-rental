@@ -78,7 +78,7 @@ test('verwirft unbekannte Migrationen bereits im günstigen Readiness-Check', as
     let connectionEnded = false;
     const connectionFactory = async () => ({
         async query() {
-            return [[{ alive: 1, sessionTimeZone: '+02:00' }]];
+            return [[{ alive: 1, sessionTimeZone: '+00:00' }]];
         },
         async execute(sql) {
             assert.match(sql, /app_schema_migrations/u);
@@ -111,7 +111,7 @@ test('schließt die Ping-Verbindung vor dem gemeinsamen tiefen Schema-Check', as
         if (connectionCount === 1) {
             return {
                 async query() {
-                    return [[{ alive: 1, sessionTimeZone: '+02:00' }]];
+                    return [[{ alive: 1, sessionTimeZone: '+00:00' }]];
                 },
                 async execute() {
                     return [[expectedMigration]];
@@ -140,4 +140,21 @@ test('schließt die Ping-Verbindung vor dem gemeinsamen tiefen Schema-Check', as
         /tiefer Schemafehler/u
     );
     assert.equal(connectionCount, 2);
+});
+
+
+test('Readiness-Frist zerstört die laufende Verbindung und antwortet begrenzt', async () => {
+    resetReadinessCache();
+    let destroyed = false;
+    const started = Date.now();
+    await assert.rejects(checkDatabaseReadiness({
+        timeoutMs: 20,
+        connectionFactory: async () => ({
+            async query() { return new Promise(() => {}); },
+            destroy() { destroyed = true; },
+            async end() {}
+        })
+    }), { code: 'DB_READINESS_TIMEOUT' });
+    assert.equal(destroyed, true);
+    assert.ok(Date.now() - started < 500);
 });

@@ -609,6 +609,9 @@ const migrations = [
     }
 ];
 
+migrations.push(require('./20260913_utc_instants').migration);
+migrations.push(require('./20260913_auth_secrets').migration);
+
 module.exports = {
     columnExists,
     constraintExists,

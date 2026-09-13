@@ -15,7 +15,7 @@ let myOrderFilterOptions = {
     paymentStatuses: []
 };
 
-function handleProfileActionClick(event) {
+async function handleProfileActionClick(event) {
     const button = event.target.closest('[data-profile-action]');
 
     if (!button || button.disabled) return;
@@ -30,7 +30,7 @@ function handleProfileActionClick(event) {
         'submit-review': () => submitProductReview(productId, orderId)
     };
 
-    actions[action]?.();
+    await window.PendingActions.run(button, async () => actions[action]?.());
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -409,7 +409,7 @@ function renderReviewCard(item, orderId) {
                         </div>
                     </div>
                     <div class="text-muted small">
-                        Bewertet am: ${escapeHtml(item.review.createdAt || '-')}
+                        Bewertet am: ${escapeHtml(window.SegnitzDate.formatInstant(item.review.createdAt))}
                     </div>
                 </div>
             </div>
@@ -620,331 +620,12 @@ function calculateLateDays(actualReturnDate, plannedReturnDate) {
 }
 
 function calculateOrderItemFinancials(item) {
-    const originalDays = calculateRentalDays(item.rentalStart, item.rentalEnd);
-
-    const effectiveStart = item.adjustedRentalStart || item.rentalStart;
-    const effectiveEnd = item.adjustedRentalEnd || item.rentalEnd;
-    const plannedEnd = item.adjustedRentalEnd || item.rentalEnd;
-    const lateDays = calculateLateDays(item.actualReturnDate || null, plannedEnd);
-
-    const effectiveDays = calculateRentalDays(effectiveStart, effectiveEnd);
-    const extendedDays = Math.max(
-        calculateRentalDays(item.rentalStart, item.adjustedRentalEnd || item.rentalEnd) - originalDays,
-        0
-    );
-
-    const pricePerDay = Number(item.adjustedPricePerDay || item.pricePerDay || 0);
-    const lateFee = lateDays * pricePerDay;
-    const rentalTotal = effectiveDays * pricePerDay;
-    const originalRentalTotal = originalDays * Number(item.pricePerDay || 0);
-    const rentalAdjustment = rentalTotal - originalRentalTotal;
-
-    const deposit = Number(item.deposit || 0);
-    const isReturned = String(item.itemStatus || '').startsWith('returned_') || Boolean(item.returnedAt);
-    const depositRefund = isReturned ? Number(item.depositRefundAmount || 0) : 0;
-    const depositRetained = isReturned ? Math.max(deposit - depositRefund, 0) : 0;
-    const repairCharge = Number(item.additionalChargeAmount || 0);
-    const additionalCharge = repairCharge + lateFee;
-
-    const grossTotalWithDeposit = rentalTotal + deposit;
-    const customerAdditionalDue = Math.max(additionalCharge - deposit, 0);
-    const customerCredit = depositRefund;
-
-    return {
-        originalDays,
-        effectiveDays,
-        extendedDays,
-        pricePerDay,
-        rentalTotal,
-        deposit,
-        depositRefund,
-        depositRetained,
-        additionalCharge,
-        grossTotalWithDeposit,
-        customerAdditionalDue,
-        customerCredit,
-        originalRentalTotal,
-        rentalAdjustment,
-        lateDays,
-        lateFee,
-        repairCharge,
-        additionalChargeReason: item.additionalChargeReason || ''
-    };
+    if (!item.financials) throw new Error('Finanzdaten fehlen. Bitte die Bestellung erneut laden.');
+    return item.financials;
 }
 
 function renderMyOrderFinancialSummary(order) {
-    const items = order.items || [];
-    const financialItems = items.filter(item => String(item.itemStatus || 'active') !== 'cancelled');
-
-    const payments = order.payments || [];
-
-    const paidRentalAdjustments = payments
-        .filter(payment =>
-            payment.paymentType === 'rental_adjustment' &&
-            payment.paymentStatus === 'paid'
-        )
-        .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
-
-    const paidReturnAdditionalCharges = payments
-        .filter(payment =>
-            payment.paymentType === 'return_additional_charge' &&
-            payment.paymentStatus === 'paid'
-        )
-        .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
-
-    const itemRows = items.map(item => {
-        const f = calculateOrderItemFinancials(item);
-
-        return `
-            <div class="border-bottom py-2">
-                <strong>${escapeHtml(item.title)}</strong><br>
-                Miettage: ${f.effectiveDays}<br>
-                Tagespreis: ${f.pricePerDay.toFixed(2)} € inkl. MwSt.<br>
-                Miete gesamt: ${f.rentalTotal.toFixed(2)} € inkl. MwSt.<br>
-                Kaution: ${f.deposit.toFixed(2)} €<br>
-                ${f.additionalCharge > 0 ? `Zusatzforderung: ${f.additionalCharge.toFixed(2)} €<br>` : ''}
-                ${f.depositRefund > 0 ? `Kaution zurück: ${f.depositRefund.toFixed(2)} €<br>` : ''}
-            </div>
-        `;
-    }).join('');
-
-    const totals = financialItems.reduce((sum, item) => {
-        const f = calculateOrderItemFinancials(item);
-
-        sum.rentalTotal += f.rentalTotal;
-        sum.deposit += f.deposit;
-        sum.depositRefund += f.depositRefund;
-        sum.depositRetained += f.depositRetained;
-        sum.additionalCharges += f.additionalCharge;
-        sum.customerAdditionalDue += f.customerAdditionalDue;
-        sum.customerCredit += f.customerCredit;
-        sum.originalRentalTotal += f.originalRentalTotal;
-        sum.rentalAdjustment += f.rentalAdjustment;
-
-        return sum;
-    }, {
-        rentalTotal: 0,
-        deposit: 0,
-        depositRefund: 0,
-        depositRetained: 0,
-        originalRentalTotal: 0,
-        rentalAdjustment: 0,
-        customerAdditionalDue: 0,
-        customerCredit: 0,
-        additionalCharges: 0
-    });
-
-    const openRentalAdjustments = payments
-        .filter(payment =>
-            payment.paymentType === 'rental_adjustment' &&
-            ['pending', 'open', 'authorized', 'failed', 'cancelled', 'expired'].includes(payment.paymentStatus)
-        )
-        .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
-
-    const chargeableRentalAdjustment = Math.max(openRentalAdjustments, 0);
-    const unsettledReturnAdditionalCharges = payments
-        .filter(payment =>
-            payment.paymentType === 'return_additional_charge' &&
-            ['pending', 'open', 'authorized', 'failed', 'cancelled', 'expired'].includes(payment.paymentStatus)
-        )
-        .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
-
-    const paidDepositRefunds = payments
-        .filter(payment =>
-            payment.paymentType === 'deposit_refund' &&
-            payment.paymentStatus === 'paid'
-        )
-        .reduce((sum, payment) => sum + Math.abs(Number(payment.amount || 0)), 0);
-    const latestCancellationRefundsByTarget = new Map();
-    payments
-        .filter(payment =>
-            ['order_cancellation_refund', 'duplicate_payment_refund'].includes(payment.paymentType)
-        )
-        .sort((a, b) => Number(a.id || 0) - Number(b.id || 0))
-        .forEach(payment => {
-            const key = [
-                payment.refundGroupKey || payment.paymentType,
-                payment.orderItemId || 'order'
-            ].join(':');
-            latestCancellationRefundsByTarget.set(key, payment);
-        });
-    const latestCancellationRefunds = [...latestCancellationRefundsByTarget.values()];
-    const paidCancellationRefunds = latestCancellationRefunds
-        .filter(payment => payment.paymentStatus === 'paid')
-        .reduce((sum, payment) => sum + Math.abs(Number(payment.amount || 0)), 0);
-    const outstandingCancellationRefunds = latestCancellationRefunds
-        .filter(payment =>
-            ['pending', 'open', 'authorized', 'failed', 'cancelled'].includes(payment.paymentStatus)
-        )
-        .reduce((sum, payment) => sum + Math.abs(Number(payment.amount || 0)), 0);
-
-    const refundableDeposit = Math.max(
-        totals.customerCredit - paidDepositRefunds,
-        0
-    );
-
-    const legacyReturnAdditionalDue = unsettledReturnAdditionalCharges > 0
-        ? 0
-        : Math.max(totals.customerAdditionalDue - paidReturnAdditionalCharges, 0);
-    const totalAdditionalDue =
-        chargeableRentalAdjustment +
-        unsettledReturnAdditionalCharges +
-        legacyReturnAdditionalDue;
-
-    const remainingAdditionalDue = Math.max(totalAdditionalDue, 0);
-
-    const finalBalance =
-        remainingAdditionalDue -
-        refundableDeposit -
-        outstandingCancellationRefunds;
-
-    const finalBalanceClass =
-        finalBalance > 0
-            ? 'text-danger'
-            : finalBalance < 0
-                ? 'text-success'
-                : 'text-muted';
-
-    const finalBalanceLabel =
-        finalBalance > 0
-            ? 'Kunde muss insgesamt nachzahlen'
-            : finalBalance < 0
-                ? 'Kunde erhält insgesamt zurück'
-                : 'Bestellung vollständig ausgeglichen';
-    const openOnlinePaymentLinks = payments
-        .filter(payment =>
-            ['rental_adjustment', 'return_additional_charge'].includes(payment.paymentType) &&
-            payment.paymentMethod === 'online' &&
-            ['pending', 'open', 'authorized'].includes(payment.paymentStatus) &&
-            getSafeCheckoutUrl(payment.checkoutUrl)
-        )
-        .map(payment => ({
-            ...payment,
-            checkoutUrl: getSafeCheckoutUrl(payment.checkoutUrl)
-        }));
-
-    return `
-    <div class="card mt-4 checkout-summary">
-        <div class="card-body">
-            <h5 class="mb-3">Gesamtpreisberechnung</h5>
-
-            ${openOnlinePaymentLinks.length > 0 ? `
-                <div class="alert alert-warning">
-                    <strong>Offene Nachzahlung</strong>
-                    ${openOnlinePaymentLinks.map(payment => `
-                        <div class="d-flex justify-content-between align-items-center gap-2 mt-2 flex-wrap">
-                            <span>${payment.paymentType === 'rental_adjustment'
-                                ? 'Mietverlängerung'
-                                : 'Rückgabe-Nachzahlung'}: ${Number(payment.amount || 0).toFixed(2)} €</span>
-                            <a class="btn btn-primary btn-sm" href="${payment.checkoutUrl}"
-                                target="_blank" rel="noopener noreferrer">
-                                Jetzt online bezahlen
-                            </a>
-                        </div>
-                    `).join('')}
-                </div>
-            ` : ''}
-
-            <div class="summary-section-label">Mietkosten</div>
-
-            <div class="checkout-summary-row">
-                <span>Ursprüngliche Miete inkl. MwSt.</span>
-                <strong>${totals.originalRentalTotal.toFixed(2)} €</strong>
-            </div>
-
-            <div class="checkout-summary-row">
-                <span>Mietpreis-Korrektur</span>
-                <strong class="${totals.rentalAdjustment > 0 ? 'text-danger' : totals.rentalAdjustment < 0 ? 'text-muted' : ''}">
-                    ${totals.rentalAdjustment.toFixed(2)} €
-                </strong>
-            </div>
-
-            ${totals.rentalAdjustment < 0 ? `
-                <div class="small text-muted mb-2">
-                    Verkürzungen werden nicht automatisch als Mietrückerstattung berücksichtigt.
-                </div>
-            ` : ''}
-
-            <div class="checkout-summary-row">
-                <span>Miete gesamt inkl. MwSt.</span>
-                <strong>${totals.rentalTotal.toFixed(2)} €</strong>
-            </div>
-
-            <hr>
-
-            <div class="summary-section-label">Kaution</div>
-
-            <div class="checkout-summary-row">
-                <span>Kaution gesamt</span>
-                <strong>${totals.deposit.toFixed(2)} €</strong>
-            </div>
-
-            <div class="checkout-summary-row">
-                <span>Kaution zurück</span>
-                <strong class="text-success">${totals.depositRefund.toFixed(2)} €</strong>
-            </div>
-
-            <div class="checkout-summary-row">
-                <span>Kaution einbehalten</span>
-                <strong class="text-danger">${totals.depositRetained.toFixed(2)} €</strong>
-            </div>
-
-            <hr>
-
-            <div class="summary-section-label">Nachzahlungen</div>
-
-            <div class="checkout-summary-row">
-                <span>Zusatzforderungen</span>
-                <strong class="text-danger">${totals.additionalCharges.toFixed(2)} €</strong>
-            </div>
-
-            <div class="checkout-summary-row">
-                <span>Bezahlte Mietzeitraum-Nachzahlungen</span>
-                <strong class="text-success">${paidRentalAdjustments.toFixed(2)} €</strong>
-            </div>
-
-            <div class="checkout-summary-row">
-                <span>Bezahlte Rückgabe-Nachzahlungen</span>
-                <strong class="text-success">${paidReturnAdditionalCharges.toFixed(2)} €</strong>
-            </div>
-
-            ${chargeableRentalAdjustment > 0 ? `
-                <div class="checkout-summary-row">
-                    <span>Noch auszugleichende Mietverlängerungen</span>
-                    <strong class="text-danger">${chargeableRentalAdjustment.toFixed(2)} €</strong>
-                </div>
-            ` : ''}
-
-            ${unsettledReturnAdditionalCharges > 0 ? `
-                <div class="checkout-summary-row">
-                    <span>Noch auszugleichende Rückgabe-Nachzahlungen</span>
-                    <strong class="text-danger">${unsettledReturnAdditionalCharges.toFixed(2)} €</strong>
-                </div>
-            ` : ''}
-
-            ${paidCancellationRefunds > 0 ? `
-                <div class="checkout-summary-row">
-                    <span>Bereits ausgezahlte Erstattungen</span>
-                    <strong class="text-success">${paidCancellationRefunds.toFixed(2)} €</strong>
-                </div>
-            ` : ''}
-
-            ${outstandingCancellationRefunds > 0 ? `
-                <div class="checkout-summary-row">
-                    <span>Noch auszuzahlende Erstattung</span>
-                    <strong class="text-warning">${outstandingCancellationRefunds.toFixed(2)} €</strong>
-                </div>
-            ` : ''}
-
-            <div class="checkout-summary-total-row">
-                <span>${finalBalanceLabel}</span>
-                <strong class="${finalBalanceClass}">
-                    ${Math.abs(finalBalance).toFixed(2)} €
-                </strong>
-            </div>
-        </div>
-    </div>
-`;
+    return window.OrderFinanceView.render(order.financialSummary, order.payments);
 }
 
 function getStatusBadge(status) {
@@ -1128,7 +809,7 @@ function switchProfileView(view) {
     }
 }
 
-document.getElementById('profileForm')?.addEventListener('submit', async (event) => {
+window.PendingActions.bindForm(document.getElementById('profileForm'), async (event) => {
     event.preventDefault();
 
     console.log('Profildaten speichern ausgelöst');
@@ -1143,18 +824,18 @@ document.getElementById('profileForm')?.addEventListener('submit', async (event)
         city: document.getElementById('profileCity').value.trim()
     };
 
-    if (!/^[0-9]+$/.test(payload.phone)) {
-        showAlert('Telefon darf nur Ziffern enthalten.', 'warning');
+    if (!window.ContactContract.isValidPhone(payload.phone)) {
+        showAlert('Bitte eine gültige Telefonnummer mit Ländervorwahl eingeben.', 'warning');
         return;
     }
 
-    if (!/^[0-9]+$/.test(payload.zip)) {
-        showAlert('PLZ darf nur Ziffern enthalten.', 'warning');
+    if (!window.ContactContract.isValidPostalCode(payload.zip)) {
+        showAlert('Bitte eine gültige Postleitzahl eingeben.', 'warning');
         return;
     }
 
-    if (!/^[a-zA-Z0-9äöüÄÖÜß\s]+$/.test(payload.address)) {
-        showAlert('Adresse darf nur Buchstaben, Zahlen und Leerzeichen enthalten.', 'warning');
+    if (!window.ContactContract.isSafeAddress(payload.address)) {
+        showAlert('Bitte eine gültige Adresse ohne Steuerzeichen eingeben.', 'warning');
         return;
     }
 
@@ -1175,7 +856,7 @@ document.getElementById('profileForm')?.addEventListener('submit', async (event)
         }
 
         showAlert(result.message || 'Profildaten wurden gespeichert.', 'success');
-        console.log('Profildaten gespeichert:', result);
+
 
     } catch (error) {
         console.error('Fehler beim Speichern der Profildaten:', error);
@@ -1183,7 +864,7 @@ document.getElementById('profileForm')?.addEventListener('submit', async (event)
     }
 });
 
-document.getElementById('passwordForm')?.addEventListener('submit', async (event) => {
+window.PendingActions.bindForm(document.getElementById('passwordForm'), async (event) => {
     event.preventDefault();
 
     console.log('Passwortänderung ausgelöst');
@@ -1220,7 +901,7 @@ document.getElementById('passwordForm')?.addEventListener('submit', async (event
         document.getElementById('passwordForm').reset();
 
         showAlert(result.message || 'Passwort wurde geändert.', 'success');
-        console.log('Passwort geändert:', result);
+
 
     } catch (error) {
         console.error('Fehler beim Ändern des Passworts:', error);
@@ -1254,11 +935,11 @@ function getSafeCheckoutUrl(value) {
 }
 
 function allowOnlyDigits(input) {
-    input.value = input.value.replace(/[^0-9]/g, '');
+    input.setCustomValidity((input.id.toLowerCase().includes('phone') ? window.ContactContract.isValidPhone(input.value) : window.ContactContract.isValidPostalCode(input.value)) ? '' : 'Bitte die Kontaktdaten prüfen.');
 }
 
 function allowAddressChars(input) {
-    input.value = input.value.replace(/[^a-zA-Z0-9äöüÄÖÜß\s]/g, '');
+    input.setCustomValidity(window.ContactContract.isSafeAddress(input.value) ? '' : 'Bitte eine gültige Adresse eingeben.');
 }
 
 function initProfileInputValidation() {

@@ -1,8 +1,12 @@
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
+const testPayments = new Map();
+const testRefunds = new Map();
+const testOperations = new Map();
 const { createMollieClient } = require('@mollie/api-client');
 
 let mollieClient = null;
-let testPaymentCounter = 0;
-let testRefundCounter = 0;
 let testCustomerCounter = 0;
 
 async function withMollieTimeout(promise, operation = 'Mollie-Anfrage') {
@@ -30,7 +34,9 @@ async function withMollieTimeout(promise, operation = 'Mollie-Anfrage') {
 }
 
 function isTestMode() {
-    return process.env.MOLLIE_TEST_MODE === '1';
+    const testMode = process.env.MOLLIE_TEST_MODE === '1';
+    if (testMode && process.env.NODE_ENV === 'production') throw new Error('Mollie-Simulator ist in Produktion nicht erlaubt.');
+    return testMode;
 }
 
 function getMollieClient() {
@@ -90,25 +96,44 @@ function buildPaymentMetadata(order, overrides = {}) {
     };
 }
 
-function getTestPaymentStatus(paymentId) {
-    const normalized = String(paymentId || '').toLowerCase();
+function readTestPaymentFixture(paymentId) {
+    const directory = process.env.MOLLIE_TEST_FIXTURES_DIR;
+    if (!directory || process.env.NODE_ENV !== 'test' || !/^tr_[A-Za-z0-9_-]+$/.test(paymentId)) return null;
+    const filename = path.join(directory, `${paymentId}.json`);
+    try { return JSON.parse(fs.readFileSync(filename, 'utf8')); }
+    catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+}
 
-    if (normalized.includes('_paid')) return 'paid';
-    if (normalized.includes('_failed')) return 'failed';
-    if (normalized.includes('_canceled') || normalized.includes('_cancelled')) return 'canceled';
-    if (normalized.includes('_expired')) return 'expired';
-    if (normalized.includes('_charged_back')) return 'charged_back';
-    if (normalized.includes('_authorized')) return 'authorized';
-
-    return 'open';
+function testOperationFile(operationKey) {
+    if (!operationKey || !process.env.MOLLIE_TEST_FIXTURES_DIR || process.env.NODE_ENV !== 'test') return null;
+    return path.join(process.env.MOLLIE_TEST_FIXTURES_DIR, `operation-${crypto.createHash('sha256').update(operationKey).digest('hex')}.json`);
+}
+function readTestOperation(operationKey) {
+    if (!operationKey) return null;
+    const filename = testOperationFile(operationKey);
+    if (filename && fs.existsSync(filename)) return JSON.parse(fs.readFileSync(filename, 'utf8'));
+    return testOperations.get(operationKey) || null;
+}
+function writeTestResult(operationKey, result) {
+    if (operationKey) testOperations.set(operationKey, result);
+    const filename = testOperationFile(operationKey);
+    if (filename) {
+        fs.writeFileSync(`${filename}.tmp`, JSON.stringify(result));
+        fs.renameSync(`${filename}.tmp`, filename);
+        if (result.resource === 'payment') {
+            const paymentFile = path.join(process.env.MOLLIE_TEST_FIXTURES_DIR, `${result.id}.json`);
+            fs.writeFileSync(`${paymentFile}.tmp`, JSON.stringify(result));
+            fs.renameSync(`${paymentFile}.tmp`, paymentFile);
+        }
+    }
 }
 
 function createTestPayment(order, status = 'open') {
-    testPaymentCounter += 1;
-    const id = `tr_test_${status}_${testPaymentCounter}`;
+    const id = `tr_test_${status}_${crypto.randomBytes(10).toString("hex")}`;
     const checkoutUrl = `https://checkout.test.mollie.local/${id}`;
 
-    return {
+    const payment = {
+        resource: 'payment',
         id,
         status,
         method: status === 'paid' ? 'ideal' : null,
@@ -128,6 +153,8 @@ function createTestPayment(order, status = 'open') {
             }
         }
     };
+    testPayments.set(id, payment);
+    return payment;
 }
 
 async function createMollieCustomer({ name, email, metadata = {} }) {
@@ -198,7 +225,11 @@ async function getValidMollieMandate(customerId) {
 
 async function createMolliePaymentForOrder(order) {
     if (isTestMode()) {
-        return createTestPayment(order, 'open');
+        const existing = readTestOperation(order.idempotencyKey);
+        if (existing) return existing;
+        const payment = createTestPayment(order, 'open');
+        writeTestResult(order.idempotencyKey, payment);
+        return payment;
     }
 
     const mollie = getMollieClient();
@@ -276,11 +307,9 @@ async function getMolliePayment(paymentId) {
     }
 
     if (isTestMode()) {
-        return {
-            id: paymentId,
-            status: getTestPaymentStatus(paymentId),
-            method: getTestPaymentStatus(paymentId) === 'paid' ? 'ideal' : null
-        };
+        const payment = readTestPaymentFixture(paymentId) || testPayments.get(paymentId);
+        if (!payment) throw new Error('Isolierte Mollie-Testfixture fehlt.');
+        return payment;
     }
 
     const mollie = getMollieClient();
@@ -302,18 +331,16 @@ async function createMollieRefundForPayment({
     const formattedAmount = formatMollieAmount(amount);
 
     if (isTestMode()) {
-        testRefundCounter += 1;
-        return {
-            id: `re_test_paid_${testRefundCounter}`,
-            status: 'refunded',
-            paymentId,
-            amount: {
-                currency: 'EUR',
-                value: formattedAmount
-            },
-            description,
-            metadata
+        const existing = readTestOperation(idempotencyKey);
+        if (existing) return existing;
+        const refund = {
+            resource: 'refund', id: `re_test_paid_${crypto.randomBytes(10).toString('hex')}`,
+            status: 'refunded', paymentId, amount: { currency: 'EUR', value: formattedAmount },
+            description, metadata
         };
+        testRefunds.set(refund.id, refund);
+        writeTestResult(idempotencyKey, refund);
+        return refund;
     }
 
     const mollie = getMollieClient();
@@ -333,20 +360,44 @@ async function createMollieRefundForPayment({
     return withMollieTimeout(mollie.paymentRefunds.create(payload), 'Mollie-Rückerstattung');
 }
 
+async function collectMolliePages(loadFirstPage, resource, { maxPages = 10, maxItems = 1000 } = {}) {
+    let page = await withMollieTimeout(loadFirstPage(), `Mollie-${resource}-Abfrage`);
+    const result = [];
+    for (let index = 0; index < maxPages; index += 1) {
+        const rows = Array.isArray(page) ? page : page?._embedded?.[resource] || [];
+        result.push(...rows);
+        if (result.length > maxItems) break;
+        if (typeof page.nextPage !== 'function') {
+            if (page?.links?.next || page?._links?.next) break;
+            return result;
+        }
+        if (index + 1 >= maxPages) break;
+        page = await withMollieTimeout(page.nextPage(), `Mollie-${resource}-Folgeseite`);
+    }
+    const error = new Error('Mollie-Abgleich überschreitet das Seitenbudget; manuelle Prüfung erforderlich.');
+    error.code = 'MOLLIE_PAGINATION_LIMIT';
+    throw error;
+}
+
 async function listMollieRefundsForPayment(paymentId) {
-    if (!paymentId) {
-        throw new Error('paymentId ist erforderlich.');
-    }
-
+    if (!paymentId) throw new Error('paymentId ist erforderlich.');
     if (isTestMode()) {
-        return { _embedded: { refunds: [] } };
+        const fixture = readTestPaymentFixture(paymentId);
+        const refunds = new Map([...testRefunds.values()].filter(refund => refund.paymentId === paymentId).map(refund => [refund.id, refund]));
+        const directory = process.env.NODE_ENV === 'test' && process.env.MOLLIE_TEST_FIXTURES_DIR;
+        if (directory) for (const name of fs.readdirSync(directory).filter(name => /^operation-[a-f0-9]{64}\.json$/.test(name))) {
+            const resource = JSON.parse(fs.readFileSync(path.join(directory, name), 'utf8'));
+            if (resource.resource === 'refund' && resource.paymentId === paymentId) refunds.set(resource.id, resource);
+        }
+        return fixture?._embedded?.refunds || [...refunds.values()];
     }
+    return collectMolliePages(() => getMollieClient().paymentRefunds.page({ paymentId, limit: 100 }), 'refunds');
+}
 
-    const mollie = getMollieClient();
-
-    return withMollieTimeout(mollie.paymentRefunds.page({
-        paymentId
-    }), 'Mollie-Rückerstattungsabfrage');
+async function listMollieChargebacksForPayment(paymentId) {
+    if (!paymentId) throw new Error('paymentId ist erforderlich.');
+    if (isTestMode()) return readTestPaymentFixture(paymentId)?._embedded?.chargebacks || [];
+    return collectMolliePages(() => getMollieClient().paymentChargebacks.page({ paymentId, limit: 100 }), 'chargebacks');
 }
 
 async function cancelMolliePayment(paymentId, options = {}) {
@@ -355,10 +406,12 @@ async function cancelMolliePayment(paymentId, options = {}) {
     }
 
     if (isTestMode()) {
-        return {
-            id: paymentId,
-            status: 'canceled'
-        };
+        const existing = readTestOperation(options.idempotencyKey);
+        if (existing) return existing;
+        const payment = { ...await getMolliePayment(paymentId), status: 'canceled' };
+        testPayments.set(paymentId, payment);
+        writeTestResult(options.idempotencyKey, payment);
+        return payment;
     }
 
     const mollie = getMollieClient();
@@ -404,6 +457,7 @@ async function executeMollieExternalEffect(effectType, payload, operationKey) {
     if (effectType === 'mollie.refund.create') {
         const refund = await createMollieRefundForPayment({
             ...payload.refund,
+            metadata: { ...payload.refund.metadata, externalOperationKey: operationKey },
             idempotencyKey: operationKey
         });
         return serializeMollieRefund(refund);
@@ -442,7 +496,7 @@ module.exports = {
 
     getMolliePayment,
     createMollieRefundForPayment,
-    listMollieRefundsForPayment,
+    listMollieRefundsForPayment, listMollieChargebacksForPayment, collectMolliePages,
     cancelMolliePayment,
 
     executeMollieExternalEffect,

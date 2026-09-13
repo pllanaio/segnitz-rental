@@ -39,7 +39,7 @@ async function checkProductAvailability(
         WHERE roi.product_id = ?
         AND ro.status IN (
             'reserved', 'pending_payment', 'payment_failed',
-            'paid', 'confirmed', 'active', 'picked_up'
+            'paid', 'confirmed', 'active', 'picked_up', 'payment_dispute', 'partially_returned', 'partially_cancelled'
         )
         AND (
             ro.status NOT IN ('reserved', 'pending_payment', 'payment_failed')

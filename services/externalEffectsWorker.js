@@ -7,17 +7,20 @@ const {
     claimExternalEffect,
     completeExternalEffect,
     createOperationKey,
+    deferExternalEffect,
     failExternalEffect,
     getExternalEffect,
     purgeExternalEffects,
     enqueueExternalEffect,
     enqueueMollieRefundCreation
 } = require('./externalEffectsOutbox');
+const { ensureDuplicatePaymentRefund } = require('./duplicateRefundService');
+const { lockBookingForProviderPayment } = require('./bookingPaymentService');
 const { executeMollieExternalEffect } = require('./mollieService');
 const {
     mapMolliePaymentStatus,
     mapMollieRefundStatus,
-    deriveReturnCaseStatus
+    deriveReturnCaseStatus, transitionRefundStatus, validateProviderAmount, providerContractError
 } = require('./paymentStateService');
 
 const DEFAULT_INTERVAL_MS = 1000;
@@ -275,42 +278,13 @@ async function enqueuePaidObsoletePaymentRefund(connection, application, result)
     const amount = Number(recovery?.amount || result.amount?.value || 0);
     if (!recovery?.orderId || !application.paymentId || !(amount > 0)) return;
 
-    const operationKey = createOperationKey('refund-obsolete-payment', {
-        sourceOperationKey: recovery.sourceOperationKey || null,
-        paymentId: application.paymentId
-    });
-    const [insertResult] = await connection.execute(
-        `INSERT INTO rental_order_payments
-         (order_id, order_item_id, payment_type, payment_method, payment_status,
-          amount, mollie_payment_id, external_operation_key, note)
-         VALUES (?, ?, 'duplicate_payment_refund', 'online', 'pending', ?, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id)`,
-        [
-            recovery.orderId,
-            recovery.orderItemId || null,
-            -Math.abs(amount),
-            application.paymentId,
-            operationKey,
-            'Veralteter Checkout wurde vor der Stornierung bezahlt; Rückerstattung vorgemerkt'
-        ]
-    );
-
-    await enqueueMollieRefundCreation(connection, {
-        operationKey,
-        refund: {
-            paymentId: application.paymentId,
-            amount,
-            description: 'Automatische Rückerstattung eines veralteten Checkouts',
-            metadata: {
-                orderId: String(recovery.orderId),
-                itemId: recovery.orderItemId ? String(recovery.orderItemId) : null,
-                type: 'duplicate_payment_refund'
-            }
-        },
-        application: {
-            kind: 'refund_record',
-            paymentRecordId: Number(insertResult.insertId)
-        }
+    validateProviderAmount(result.amount, amount);
+    return ensureDuplicatePaymentRefund(connection, {
+        orderId: recovery.orderId,
+        orderItemId: recovery.orderItemId || null,
+        paymentId: application.paymentId,
+        amount,
+        note: 'Veralteter Checkout wurde vor der Stornierung bezahlt; Rückerstattung vorgemerkt'
     });
 }
 
@@ -424,33 +398,28 @@ async function applyExternalEffectResult(connection, effect, result) {
     }
 
     if (application.kind === 'refund_record') {
-        const refundStatus = mapMollieRefundStatus(result.status);
-        await connection.execute(
-            `UPDATE rental_order_payments
-             SET mollie_refund_id = ?, payment_status = ?,
-                 paid_at = CASE WHEN ? = 'paid' THEN COALESCE(paid_at, NOW()) ELSE paid_at END
-             WHERE id = ? AND external_operation_key = ?`,
-            [
-                result.id,
-                refundStatus,
-                refundStatus,
-                application.paymentRecordId,
-                effect.operation_key
-            ]
-        );
         const [paymentRows] = await connection.execute(
-            `SELECT id, order_id, order_item_id, payment_type, payment_status
-             FROM rental_order_payments
-             WHERE id = ? AND external_operation_key = ?
-             LIMIT 1
-             FOR UPDATE`,
+            `SELECT id, order_id, order_item_id, payment_type, payment_status, amount, mollie_payment_id, mollie_refund_id
+             FROM rental_order_payments WHERE id = ? AND external_operation_key = ? LIMIT 1 FOR UPDATE`,
             [application.paymentRecordId, effect.operation_key]
         );
-        await refreshRefundProjection(connection, paymentRows[0]);
+        const record = paymentRows[0];
+        if (!record || result.paymentId !== record.mollie_payment_id ||
+            (record.mollie_refund_id && record.mollie_refund_id !== result.id)) throw providerContractError();
+        validateProviderAmount(result.amount, record.amount);
+        const refundStatus = transitionRefundStatus(record.payment_status, mapMollieRefundStatus(result.status));
+        await connection.execute(
+            `UPDATE rental_order_payments SET mollie_refund_id = ?, payment_status = ?,
+             paid_at = CASE WHEN ? = 'paid' THEN COALESCE(paid_at, NOW()) ELSE paid_at END
+             WHERE id = ? AND external_operation_key = ?`,
+            [result.id, refundStatus, refundStatus, application.paymentRecordId, effect.operation_key]
+        );
+        await refreshRefundProjection(connection, { ...record, payment_status: refundStatus });
         return;
     }
 
     if (application.kind === 'cancel_payment') {
+        await lockBookingForProviderPayment(connection, application.paymentId);
         const mappedStatus = mapMolliePaymentStatus(result.status);
         const desiredStatus = ['cancelled', 'expired', 'failed', 'paid', 'charged_back'].includes(mappedStatus)
             ? mappedStatus
@@ -588,6 +557,10 @@ async function processClaimedExternalEffect(effect, dependencies = {}) {
         );
         return result;
     } catch (error) {
+        if (effect.effect_type === EFFECT_TYPES.MAIL_SEND && error.code === 'MAIL_DELIVERY_PAUSED') {
+            await (dependencies.deferEffect || deferExternalEffect)(effect);
+            return { paused: true };
+        }
         await failEffect(
             effect,
             error,
@@ -659,12 +632,13 @@ async function drainExternalEffects(options = {}) {
                 await processClaimedExternalEffect(effect, options.dependencies || {});
             } catch (error) {
                 console.error(
-                    `${new Date().toISOString()} - Externer Effekt ${effect.operation_key} fehlgeschlagen:`,
-                    error.message
+                    `${new Date().toISOString()} - Externer Effekt #${effect.id} fehlgeschlagen:`,
+                    error.code || error.name || 'EXTERNAL_EFFECT_FAILED'
                 );
             }
             processed += 1;
         }
+        require('./observability').recordWorkerProgress(processed);
         return processed;
     })();
 

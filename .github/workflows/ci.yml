@@ -66,6 +66,8 @@ jobs:
       NODE_ENV: test
       DISABLE_PERIODIC_CLEANUP: 1
       TEST_PORT: 3101
+      MOLLIE_TEST_MODE: 1
+      DISABLE_EMAILS: 1
 
     steps:
       - name: Checkout
@@ -110,6 +112,8 @@ jobs:
       NODE_ENV: test
       DISABLE_PERIODIC_CLEANUP: 1
       E2E_PORT: 3102
+      MOLLIE_TEST_MODE: 1
+      DISABLE_EMAILS: 1
 
     steps:
       - name: Checkout
@@ -163,23 +167,77 @@ jobs:
       - name: Block high and critical production vulnerabilities
         run: npm run audit:prod
 
-  docker-build:
-    name: Docker build
+  codeql:
+    permissions:
+      contents: read
+      security-events: write
+    name: CodeQL security gate
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-
+    timeout-minutes: 20
     steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Build container image
-        run: docker build --tag segnitz-rental:ci .
-
-      - name: Scan container image for high and critical vulnerabilities
-        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # 0.35.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: github/codeql-action/init@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd
         with:
-          image-ref: segnitz-rental:ci
-          format: table
+          languages: javascript-typescript
+          queries: security-extended
+      - uses: github/codeql-action/autobuild@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd
+      - uses: github/codeql-action/analyze@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd
+        with:
+          output: codeql-results
+      - name: Reject high security findings
+        run: node scripts/check-codeql.js codeql-results
+
+  docker-build:
+    name: Build and scan release image
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c
+      - name: Build the sole release candidate, including SBOM and provenance
+        env:
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          mkdir release-image
+          docker buildx build --platform linux/amd64 --provenance=mode=max --sbom=true \
+            --label "org.opencontainers.image.revision=$RELEASE_SHA" \
+            --label org.opencontainers.image.source=https://github.com/pllanaio/segnitz-rental \
+            --tag "pllanaio/segnitz-rental:sha-$RELEASE_SHA" \
+            --output type=oci,dest=release-image/image.tar \
+            --metadata-file release-image/build-metadata.json .
+          node scripts/release-artifact.js create release-image
+      - name: Scan the candidate OCI archive including unfixed high vulnerabilities
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
+        env:
+          TRIVY_LIST_ALL_PKGS: "true"
+        with:
+          input: release-image/image.tar
+          format: json
+          output: release-image/trivy.json
           exit-code: "1"
-          ignore-unfixed: true
+          ignore-unfixed: false
           severity: CRITICAL,HIGH
+      - name: Validate artifact and scan evidence
+        env:
+          RELEASE_SHA: ${{ github.sha }}
+        run: node scripts/release-artifact.js verify release-image
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: release-image-${{ github.sha }}
+          path: release-image/
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: error
+
+  release-gate:
+    name: Release gate
+    if: always()
+    needs: [test, integration-test, e2e-test, dependency-audit, docker-build, codeql]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: All checks must succeed on this commit
+        env:
+          RELEASE_NEEDS: ${{ toJSON(needs) }}
+        run: node scripts/release-gate.js --needs

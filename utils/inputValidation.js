@@ -1,4 +1,5 @@
 'use strict';
+const { isSafeAddress, isValidPhone, isValidPostalCode } = require('../public/js/contact-contract');
 
 const EMAIL_MAX_LENGTH = 254;
 const PASSWORD_MAX_BYTES = 72;
@@ -60,17 +61,8 @@ function isDigitsOnly(value, maxLength) {
     return /^[0-9]+$/u.test(value.trim());
 }
 
-function isSafeAddress(value) {
-    if (!isBoundedString(value, CUSTOMER_FIELD_LIMITS.address)) return false;
-    return /^[a-zA-Z0-9äöüÄÖÜß\s]+$/u.test(value.trim());
-}
 
-function isValidPassword(value) {
-    if (typeof value !== 'string' || value.length < 8) return false;
-    if (Buffer.byteLength(value, 'utf8') > PASSWORD_MAX_BYTES) return false;
-
-    return /[0-9]/u.test(value) && /[^A-Za-z0-9]/u.test(value);
-}
+const { isValidPassword } = require('./passwordPolicy');
 
 function isValidSignatureDataUrl(value) {
     if (typeof value !== 'string' || value.length > SIGNATURE_MAX_LENGTH) return false;
@@ -94,6 +86,8 @@ module.exports = {
     isBoundedString,
     isDigitsOnly,
     isSafeAddress,
+    isValidPhone,
+    isValidPostalCode,
     isValidEmail,
     isValidPassword,
     isValidSignatureDataUrl,

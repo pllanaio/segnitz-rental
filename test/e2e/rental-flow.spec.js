@@ -9,18 +9,6 @@ function futureDate(offsetDays) {
     return date.toISOString().slice(0, 10);
 }
 
-test.beforeEach(async ({ page }) => {
-    await page.addInitScript(() => {
-        const formatDate = date => date.toISOString().slice(0, 10);
-        const flatpickrStub = () => ({
-            destroy() {},
-            formatDate
-        });
-        flatpickrStub.formatDate = formatDate;
-        window.flatpickr = flatpickrStub;
-    });
-});
-
 test('zeigt den Katalog und legt ein Produkt über die Oberfläche in den Warenkorb', async ({ page }) => {
     const rentalStart = futureDate(30);
     const rentalEnd = futureDate(32);
@@ -38,10 +26,14 @@ test('zeigt den Katalog und legt ein Produkt über die Oberfläche in den Warenk
     await expect(page.locator('#productDetailsModal')).toBeVisible();
     await expect(page.locator('#modalProductTitle')).toHaveText(TEST_PRODUCT.title);
 
-    await page.evaluate(({ rentalStart, rentalEnd }) => {
-        document.getElementById('modalRentalStart').value = rentalStart;
-        document.getElementById('modalRentalEnd').value = rentalEnd;
-    }, { rentalStart, rentalEnd });
+    // Real vendored Flatpickr: move months through its visible navigation and
+    // choose rendered day controls; neither calendar nor own API is stubbed.
+    for (let month = 0; month < 3; month++) {
+        if (await page.locator(`#modalCalendarContainer .flatpickr-day[aria-label="${rentalStart}"]:not(.hidden)`).count()) break;
+        await page.locator('#modalCalendarContainer .flatpickr-next-month').click();
+    }
+    await page.locator(`#modalCalendarContainer .flatpickr-day[aria-label="${rentalStart}"]:not(.hidden)`).click();
+    await page.locator(`#modalCalendarContainer .flatpickr-day[aria-label="${rentalEnd}"]:not(.hidden)`).click();
 
     await page.locator('#selectProductFromModal').click();
 
@@ -133,7 +125,7 @@ test('führt Admin-Navigation und dynamische Produktaktionen ohne Inline-Handler
     const csp = response.headers()['content-security-policy'];
 
     expect(csp).toContain("script-src-attr 'none'");
-    expect(csp).toContain("script-src 'self' https://cdn.jsdelivr.net");
+    expect(csp).toContain("script-src 'self'");
     expect(csp).not.toContain("script-src 'self' 'unsafe-inline'");
 
     await page.locator('#username').fill(TEST_ADMIN.email);

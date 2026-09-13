@@ -476,3 +476,15 @@ CREATE TABLE user_sessions (
     data MEDIUMTEXT COLLATE utf8mb4_bin NULL,
     PRIMARY KEY (session_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+
+CREATE TABLE app_datetime_migration_progress (
+    table_name VARCHAR(128) NOT NULL,
+    interpretation VARCHAR(16) NOT NULL,
+    override_hash CHAR(64) NOT NULL,
+    last_id BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    completed TINYINT(1) NOT NULL DEFAULT 0,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (table_name),
+    CONSTRAINT chk_datetime_progress_completed CHECK (completed IN (0, 1)),
+    CONSTRAINT chk_datetime_progress_mode CHECK (interpretation IN ('utc', 'berlin'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

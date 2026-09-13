@@ -41,9 +41,9 @@ test('setzt für jede neue Verbindung Client- und MySQL-Session-Zeitzone', async
         new Date('2026-01-15T12:00:00Z')
     );
 
-    assert.equal(observed[0].config.timezone, '+01:00');
+    assert.equal(observed[0].config.timezone, '+00:00');
     assert.deepEqual(observed[1], {
         sql: 'SET SESSION time_zone = ?',
-        params: ['+01:00']
+        params: ['+00:00']
     });
 });

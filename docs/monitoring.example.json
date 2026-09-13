@@ -1,0 +1,12 @@
+{
+  "targetRef": null,
+  "backupMaxAgeSeconds": null,
+  "outboxBacklogMax": 100,
+  "outboxMaxAgeSeconds": 900,
+  "workerMaxIdleSeconds": 120,
+  "paymentMaxAgeSeconds": 900,
+  "storageMinFreeBytes": 1073741824,
+  "httpMinRequests": 20,
+  "httpErrorRatioMax": 0.02,
+  "httpSlowRatioMax": 0.05
+}

@@ -28,6 +28,14 @@ let stepCount = 3;
 let bestsellerProducts = [];
 let currentModalProductReviews = [];
 const VAT_RATE = 0.19;
+const cachedAvailability = window.CatalogState.requestCache();
+let availabilityRequest = 0;
+let availabilityKnown = false;
+let cartRequest = null;
+let cartGeneration = 0;
+let cartState = 'loading';
+let checkoutPending = false;
+let transitionPending = false;
 
 function syncMainNextButtonVisibility() {
     if (!nextBtn) return;
@@ -341,6 +349,7 @@ if (current_step == 0) {
 }
 
 function submitSignature() {
+    if (window.uploadedSignatureDataUrl) { document.getElementById('Signature').value = window.uploadedSignatureDataUrl; return; }
     var dataURL = signaturePad.toDataURL();
     //Konsolenausgabe zur Sendungsüberprüfung des Bildes
     if (dataURL.trim() !== "") {
@@ -355,6 +364,11 @@ function submitSignature() {
 }
 
 nextBtn.addEventListener('click', async () => {
+    if (transitionPending || checkoutPending || current_step >= stepCount) return;
+    transitionPending = true;
+    nextBtn.disabled = true;
+    prevBtn.disabled = true;
+    try {
 
     // Check if current step is valid before moving to next
     let isValid = true;
@@ -419,9 +433,17 @@ nextBtn.addEventListener('click', async () => {
     syncMainNextButtonVisibility();
 
     progress((100 / stepCount) * current_step);
+    focusCheckoutStep();
+    } finally { transitionPending = false; nextBtn.disabled = false; prevBtn.disabled = false; }
 });
 
+function focusCheckoutStep() {
+    const target = step[current_step]?.querySelector('h2, h3, h4, h5, input, button');
+    if (target) { target.setAttribute('tabindex', '-1'); target.focus(); }
+}
+
 prevBtn.addEventListener('click', () => {
+    if (transitionPending || checkoutPending) return;
     if (current_step > 0) {
         current_step--;
         let previous_step = current_step + 1;
@@ -505,8 +527,11 @@ function serializeFormToStepJson() {
     });
 }
 
-submitBtn.addEventListener('click', async (event) => {
+document.getElementById('form-wrapper').addEventListener('submit', async (event) => {
     event.preventDefault();
+    if (checkoutPending || transitionPending) return;
+    if (current_step !== stepCount) { nextBtn.click(); return; }
+    if (!validateCustomerRequiredFields() || !validateCartReviewStep()) return;
 
     submitSignature();
 
@@ -543,8 +568,10 @@ submitBtn.addEventListener('click', async (event) => {
     }
 
     try {
+        checkoutPending = true;
         preloader.classList.add('d-block');
         submitBtn.disabled = true;
+        prevBtn.disabled = true;
 
         const response = await fetch('/data', {
             method: 'POST',
@@ -566,7 +593,7 @@ submitBtn.addEventListener('click', async (event) => {
 
             if (response.status === 409) {
                 showAlert(
-                    `${result.error || 'Diese E-Mail-Adresse ist bereits registriert.'} Bitte loggen Sie sich ein.`,
+                    result.error || 'Die Bestellung wurde zwischenzeitlich geändert. Bitte prüfen und erneut versuchen.',
                     'warning',
                     8000
                 );
@@ -631,10 +658,11 @@ submitBtn.addEventListener('click', async (event) => {
         } else {
             if (resultTitle) {
                 resultTitle.textContent = 'Barzahlungs-Miete bestätigt';
+                if (result.noPaymentRequired) resultTitle.textContent = 'Kostenfreie Miete bestätigt';
             }
 
             if (resultText) {
-                resultText.textContent = 'Ihre Mietprodukte sind verbindlich eingeplant. Miete und Kaution zahlen Sie vollständig bei der Abholung.';
+                resultText.textContent = result.message || 'Ihre Mietprodukte sind verbindlich eingeplant. Miete und Kaution zahlen Sie vollständig bei der Abholung.';
             }
 
             if (finalDiv) {
@@ -659,6 +687,11 @@ submitBtn.addEventListener('click', async (event) => {
         submitBtn.disabled = false;
 
         showAlert('Bestellung konnte nicht abgeschlossen werden.', 'danger');
+    } finally {
+        checkoutPending = false;
+        submitBtn.disabled = false;
+        prevBtn.disabled = false;
+        preloader.classList.remove('d-block');
     }
 });
 
@@ -763,7 +796,12 @@ document.addEventListener("DOMContentLoaded", () => {
                 return;
             }
 
-            await addProductToCart(productId, rentalStart, rentalEnd);
+            if (selectProductFromModalBtn.disabled || !availabilityKnown) return;
+            selectProductFromModalBtn.disabled = true;
+            let saved;
+            try { saved = await addProductToCart(productId, rentalStart, rentalEnd); }
+            finally { selectProductFromModalBtn.disabled = !availabilityKnown; }
+            if (!saved) return;
 
             const modal = bootstrap.Modal.getInstance(modalElement);
             if (modal) {
@@ -829,23 +867,53 @@ async function showProductDetails(card) {
         carouselWrapper.classList.add('d-none');
     }
 
-    await loadProductAvailability(card.dataset.productId);
-    initProductCalendar();
-    const modal = new bootstrap.Modal(document.getElementById('productDetailsModal'));
-    modal.show();
+    const loading = loadProductAvailability(card.dataset.productId);
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('productDetailsModal')).show();
+    const available = await loading;
+    if (selectedProductCard !== card) return;
+    if (available) initProductCalendar();
+    else if (productCalendar) { productCalendar.destroy(); productCalendar = null; }
 }
 
 let currentBlockedPeriods = [];
 
 async function loadProductAvailability(productId) {
+    const requestId = ++availabilityRequest;
+    availabilityKnown = false;
+    currentBlockedPeriods = [];
+    const selectButton = document.getElementById('selectProductFromModal');
+    const editButton = document.getElementById('saveCartItemRentalPeriodButton');
+    if (selectButton) selectButton.disabled = true;
+    if (editButton) editButton.disabled = true;
+    const info = document.getElementById('modalRentalInfo');
+    if (info) {
+        info.classList.remove('d-none', 'alert-danger');
+        info.textContent = 'Verfügbarkeit wird geprüft…';
+    }
     try {
-        const response = await fetch(`/products/${productId}/availability`);
-        currentBlockedPeriods = await response.json();
-
+        const periods = await cachedAvailability(`periods-${productId}`, async () => {
+            const response = await fetch(`/products/${productId}/availability`);
+            if (!response.ok) throw new Error('Verfügbarkeit nicht verfügbar.');
+            const result = await response.json();
+            if (!Array.isArray(result)) throw new Error('Ungültige Verfügbarkeitsantwort.');
+            return result;
+        });
+        if (requestId !== availabilityRequest) return false;
+        currentBlockedPeriods = periods;
+        availabilityKnown = true;
+        if (selectButton) selectButton.disabled = false;
+        if (editButton) editButton.disabled = false;
+        if (info) info.textContent = 'Bitte einen freien Mietzeitraum auswählen.';
         renderBlockedPeriodsInfo();
-    } catch (error) {
-        console.error('Fehler beim Laden der Verfügbarkeit:', error);
-        currentBlockedPeriods = [];
+        return true;
+    } catch {
+        if (requestId !== availabilityRequest) return false;
+        if (info) {
+            info.classList.add('alert-danger');
+            info.textContent = 'Verfügbarkeit unbekannt. Bitte Details schließen und erneut öffnen. Eine Buchung ist derzeit gesperrt.';
+        }
+        showAlert('Verfügbarkeit konnte nicht geprüft werden. Bitte erneut versuchen.', 'warning');
+        return false;
     }
 }
 
@@ -868,6 +936,7 @@ function renderBlockedPeriodsInfo() {
 }
 
 function selectedRangeConflicts(startDate, endDate) {
+    if (!availabilityKnown) return true;
     return currentBlockedPeriods.some(period => {
         return startDate <= period.rentalEnd && endDate >= period.rentalStart;
     });
@@ -950,22 +1019,22 @@ function validateCustomerRequiredFields() {
         setCheckoutFieldInvalid(email, 'Bitte geben Sie eine gültige E-Mail-Adresse ein.');
     }
 
-    if (phone.value.trim() && !/^[0-9]+$/.test(phone.value.trim())) {
+    if (phone.value.trim() && !window.ContactContract.isValidPhone(phone.value.trim())) {
         isValid = false;
         firstInvalidField = firstInvalidField || phone;
-        setCheckoutFieldInvalid(phone, 'Telefon darf nur Ziffern enthalten.');
+        setCheckoutFieldInvalid(phone, 'Bitte eine gültige Telefonnummer mit Ländervorwahl eingeben.');
     }
 
-    if (zip.value.trim() && !/^[0-9]+$/.test(zip.value.trim())) {
+    if (zip.value.trim() && !window.ContactContract.isValidPostalCode(zip.value.trim())) {
         isValid = false;
         firstInvalidField = firstInvalidField || zip;
-        setCheckoutFieldInvalid(zip, 'PLZ darf nur Ziffern enthalten.');
+        setCheckoutFieldInvalid(zip, 'Bitte eine gültige Postleitzahl eingeben.');
     }
 
-    if (address.value.trim() && !/^[a-zA-Z0-9äöüÄÖÜß\s]+$/.test(address.value.trim())) {
+    if (address.value.trim() && !window.ContactContract.isSafeAddress(address.value.trim())) {
         isValid = false;
         firstInvalidField = firstInvalidField || address;
-        setCheckoutFieldInvalid(address, 'Adresse darf nur Buchstaben, Zahlen und Leerzeichen enthalten.');
+        setCheckoutFieldInvalid(address, 'Bitte eine gültige Adresse ohne Steuerzeichen eingeben.');
     }
 
     if (!isValid) {
@@ -982,7 +1051,7 @@ function validateCustomerRequiredFields() {
 }
 
 async function validateProductStep() {
-    await loadCart();
+    if (!await loadCart()) return false;
 
     if (!currentCart.items || currentCart.items.length === 0) {
         showAlert('Bitte legen Sie mindestens ein Produkt in den Warenkorb.', 'warning');
@@ -1013,6 +1082,7 @@ async function goToNextStepFromCart() {
 }
 
 function validateCartReviewStep() {
+    if (cartState !== 'ready') { showAlert('Warenkorb bitte erneut laden.', 'warning'); return false; }
     if (!currentCart.items || currentCart.items.length === 0) {
         showAlert('Ihr Warenkorb ist leer.', 'warning');
         return false;
@@ -1035,7 +1105,7 @@ function validateCustomerDataStep() {
 function validateSignatureStep() {
     let isValid = true;
 
-    if (signaturePad.isEmpty()) {
+    if (signaturePad.isEmpty() && !window.uploadedSignatureDataUrl) {
         showAlert('Bitte leisten Sie Ihre Unterschrift.', 'warning');
         isValid = false;
     }
@@ -1062,6 +1132,7 @@ async function loadRentalProducts() {
 
     try {
         const response = await fetch('/products');
+        if (!response.ok) throw new Error('Produkte nicht verfügbar.');
         const products = await response.json();
 
         rentalProducts = products.filter(product => product.is_active === 1);
@@ -1163,12 +1234,11 @@ async function loadProductCurrentAvailability(productId, card) {
     const badge = card.querySelector('.availability-badge');
 
     try {
-        const response = await fetch(`/products/${productId}/current-availability`);
-        const result = await response.json();
-
-        if (!response.ok) {
-            throw new Error(result.error || 'Verfügbarkeit konnte nicht geladen werden.');
-        }
+        const result = await cachedAvailability(`current-${productId}`, async () => {
+            const response = await fetch(`/products/${productId}/current-availability`);
+            if (!response.ok) throw new Error('Verfügbarkeit konnte nicht geladen werden.');
+            return response.json();
+        });
 
         if (badge) {
             badge.classList.remove('bg-secondary', 'bg-success', 'bg-danger');
@@ -1236,6 +1306,7 @@ function renderProductPagination() {
     prevBtn.textContent = 'Zurück';
     prevBtn.disabled = currentProductPage === 1;
     prevBtn.addEventListener('click', () => {
+    if (transitionPending || checkoutPending) return;
         currentProductPage--;
         renderProductPage();
     });
@@ -1292,29 +1363,39 @@ function prefillFinalEmailField(email) {
     finalEmailInput.value = email;
 }
 
-async function loadCart() {
-    try {
-        const response = await fetch('/cart');
-        const cart = await response.json();
-
-        if (!response.ok) {
-            throw new Error(cart.error || 'Warenkorb konnte nicht geladen werden.');
+async function loadCart({ refresh = false } = {}) {
+    if (refresh) { cartGeneration++; cartRequest = null; }
+    if (cartRequest) return cartRequest;
+    const generation = cartGeneration;
+    cartState = 'loading';
+    cartRequest = (async () => {
+        try {
+            const response = await fetch('/cart');
+            const cart = await response.json();
+            if (!response.ok || !Array.isArray(cart.items)) throw new Error('Warenkorb konnte nicht geladen werden.');
+            if (generation !== cartGeneration) return null;
+            currentCart = cart;
+            cartState = 'ready';
+            renderCart();
+            renderCartReview();
+            return cart;
+        } catch {
+            if (generation !== cartGeneration) return null;
+            cartState = 'error';
+            for (const id of ['cartItems', 'cartReviewItems']) {
+                const container = document.getElementById(id);
+                if (container) container.innerHTML = '<div class="alert alert-warning" role="status">Warenkorb konnte nicht aktualisiert werden. Bitte erneut laden.</div>';
+            }
+            showAlert('Warenkorb nicht verfügbar. Bitte erneut versuchen.', 'warning');
+            return null;
+        } finally {
+            if (generation === cartGeneration) {
+                cartRequest = null;
+                syncMainNextButtonVisibility();
+            }
         }
-
-        currentCart = cart;
-        renderCart();
-        renderCartReview();
-
-        return cart;
-    } catch (error) {
-        console.error('Fehler beim Laden des Warenkorbs:', error);
-        currentCart = {
-            cartId: null,
-            items: []
-        };
-        renderCart();
-        renderCartReview();
-    }
+    })();
+    return cartRequest;
 }
 
 async function addProductToCart(productId, rentalStart, rentalEnd) {
@@ -1354,8 +1435,9 @@ async function addProductToCart(productId, rentalStart, rentalEnd) {
             return;
         }
 
-        await loadCart();
+        await loadCart({ refresh: true });
         showAlert('Produkt wurde zum Warenkorb hinzugefügt.', 'success');
+        return true;
     } catch (error) {
         console.error('Fehler beim Hinzufügen zum Warenkorb:', error);
         showAlert('Produkt konnte nicht zum Warenkorb hinzugefügt werden.', 'danger');
@@ -1375,7 +1457,7 @@ async function deleteCartItem(itemId) {
             return;
         }
 
-        await loadCart();
+        await loadCart({ refresh: true });
     } catch (error) {
         console.error('Fehler beim Löschen der Warenkorbposition:', error);
         showAlert('Warenkorbposition konnte nicht gelöscht werden.', 'danger');
@@ -1636,7 +1718,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (!searchInput) return;
 
-    searchInput.addEventListener('input', applyProductFilters);
+    let filterTimer;
+    searchInput.addEventListener('input', () => {
+        clearTimeout(filterTimer);
+        filterTimer = setTimeout(applyProductFilters, 150);
+    });
 
     searchInput.addEventListener('keydown', event => {
         if (event.key === 'Enter') {
@@ -1677,6 +1763,7 @@ function initProductCalendar() {
         appendTo: calendarContainer,
         minDate: 'today',
         dateFormat: 'Y-m-d',
+        ariaDateFormat: 'Y-m-d',
         locale: 'de',
         disable: blockedRanges,
         showMonths: 1,
@@ -1719,7 +1806,7 @@ async function openCartItemEditModal(itemId) {
     document.getElementById('editCartRentalEnd').value = item.rentalEnd;
     document.getElementById('editCartRentalRange').value = `${item.rentalStart} bis ${item.rentalEnd}`;
 
-    await loadProductAvailability(item.productId);
+    if (!await loadProductAvailability(item.productId)) return;
 
     if (cartEditCalendar) {
         cartEditCalendar.destroy();
@@ -1728,6 +1815,7 @@ async function openCartItemEditModal(itemId) {
     cartEditCalendar = flatpickr('#editCartRentalRange', {
         mode: 'range',
         dateFormat: 'Y-m-d',
+        ariaDateFormat: 'Y-m-d',
         locale: 'de',
         minDate: 'today',
         defaultDate: [item.rentalStart, item.rentalEnd],
@@ -1790,7 +1878,7 @@ async function saveCartItemRentalPeriod() {
             modal.hide();
         }
 
-        await loadCart();
+        await loadCart({ refresh: true });
         showAlert('Mietzeitraum wurde aktualisiert.', 'success');
     } catch (error) {
         console.error('Fehler beim Aktualisieren des Mietzeitraums:', error);
@@ -1799,11 +1887,11 @@ async function saveCartItemRentalPeriod() {
 }
 
 function allowOnlyDigits(input) {
-    input.value = input.value.replace(/[^0-9]/g, '');
+    input.setCustomValidity((input.id.toLowerCase().includes('phone') ? window.ContactContract.isValidPhone(input.value) : window.ContactContract.isValidPostalCode(input.value)) ? '' : 'Bitte die Kontaktdaten prüfen.');
 }
 
 function allowAddressChars(input) {
-    input.value = input.value.replace(/[^a-zA-Z0-9äöüÄÖÜß\s]/g, '');
+    input.setCustomValidity(window.ContactContract.isSafeAddress(input.value) ? '' : 'Bitte eine gültige Adresse eingeben.');
 }
 
 function initCustomerInputValidation() {
@@ -1939,17 +2027,7 @@ function selectCategoryFilter(category) {
 }
 
 function applyProductFilters() {
-    if (selectedCategory === 'all') {
-        filteredRentalProducts = [...rentalProducts];
-    } else {
-        filteredRentalProducts = rentalProducts.filter(product =>
-            getProductCategoryNames(product)
-                .some(category =>
-                    category.toLowerCase() === selectedCategory.toLowerCase()
-                )
-        );
-    }
-
+    filteredRentalProducts = window.CatalogState.filter(rentalProducts, selectedCategory, document.getElementById('productSearchInput')?.value || '');
     currentProductPage = 1;
     renderCategoryFilters();
     renderProductPage();
@@ -2117,7 +2195,7 @@ function renderModalProductReviews(showAll = false) {
 
             <div class="small text-muted">
                 ${escapeHtml(review.displayName || 'Kunde')}
-                · ${escapeHtml(review.createdAt || '')}
+                · ${escapeHtml(window.SegnitzDate.formatInstant(review.createdAt))}
             </div>
 
             <div>

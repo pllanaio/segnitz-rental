@@ -39,5 +39,16 @@
         ].join('-');
     }
 
-    return Object.freeze({ addIsoCalendarDays, formatLocalDate });
+    function formatInstant(value) {
+        if (!value) return '-';
+        const text = String(value);
+        // Older responses without an offset were Berlin wall time; do not
+        // silently reinterpret them in the browser's own timezone.
+        if (!(value instanceof Date) && !/(?:Z|[+-]\d{2}:\d{2})$/u.test(text)) return text;
+        const date = value instanceof Date ? value : new Date(text);
+        if (!Number.isFinite(date.getTime())) return '-';
+        return new Intl.DateTimeFormat('de-DE', { timeZone: 'Europe/Berlin', dateStyle: 'medium', timeStyle: 'short' }).format(date);
+    }
+
+    return Object.freeze({ addIsoCalendarDays, formatLocalDate, formatInstant });
 }));

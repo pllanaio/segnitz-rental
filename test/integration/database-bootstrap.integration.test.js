@@ -101,6 +101,8 @@ async function startServer() {
             PORT: String(PORT),
             BASE_URL,
             NODE_ENV: 'test',
+            MOLLIE_TEST_MODE: '1',
+            DISABLE_EMAILS: '1',
             ADMIN_SETUP_TOKEN: SETUP_TOKEN,
             DISABLE_PERIODIC_CLEANUP: '1',
             MOLLIE_API_KEY: process.env.MOLLIE_API_KEY || TEST_MOLLIE_API_KEY

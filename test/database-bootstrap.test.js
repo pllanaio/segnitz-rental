@@ -120,6 +120,11 @@ test('bindet Migration-Version, Up-Logik und Helper in die Prüfsumme ein', () =
 
 test('bindet SQL-Lese- und Kommentarlogik in jede Migrationsprüfsumme ein', () => {
     for (const migration of migrations) {
+        if (!migration.checksumDependencies?.length) {
+            // New self-contained migrations bind the entire immutable file.
+            assert.match(migration.checksumSource, /fs\.readFileSync\(__filename/);
+            continue;
+        }
         const dependencySources = (migration.checksumDependencies || [])
             .map(dependency => Function.prototype.toString.call(dependency))
             .join('\n');
@@ -238,6 +243,7 @@ test('normalisiert echte MySQL-8.4-Fremdschlüsselmetadaten strukturell', () => 
 test('normalisiert echte MySQL-8.4-Metadaten gespeicherter generierter Spalten', () => {
     const carts = parseCanonicalSchema().get('rental_carts').columns;
     const guestColumn = normalizeActualColumn({
+        charset: 'utf8mb4', collation: 'utf8mb4_0900_ai_ci',
         columnType: 'varchar(255)',
         defaultValue: null,
         extra: 'STORED GENERATED',
@@ -247,6 +253,7 @@ test('normalisiert echte MySQL-8.4-Metadaten gespeicherter generierter Spalten',
         isNullable: 'YES'
     });
     const userColumn = normalizeActualColumn({
+        charset: 'utf8mb4', collation: 'utf8mb4_0900_ai_ci',
         columnType: 'varchar(255)',
         defaultValue: null,
         extra: 'STORED GENERATED',
@@ -421,6 +428,7 @@ test('normalisiert echte MySQL-Klammerung ohne AND/OR-Präzedenz zu verlieren', 
 test('liefert bei Schema-Drift normalisierte Expected/Actual-Metadaten', async () => {
     const contract = new Map([['test_table', {
         columns: new Map([['generated_value', {
+            autoIncrement: false, onUpdate: null, charset: null, collation: null,
             columnType: 'varchar(255)',
             defaultValue: null,
             generationExpression: "case when status='active' then source_value else null end",
@@ -428,7 +436,7 @@ test('liefert bei Schema-Drift normalisierte Expected/Actual-Metadaten', async (
             nullable: true
         }]]),
         constraints: new Map([['chk_test_status', {
-            type: 'CHECK',
+            type: 'CHECK', enforced: true,
             clause: normalizeCheckClause("status IN ('active', 'converted')")
         }]]),
         indexes: new Map()
@@ -448,7 +456,7 @@ test('liefert bei Schema-Drift normalisierte Expected/Actual-Metadaten', async (
         [[]],
         [[{
             tableName: 'test_table',
-            constraintName: 'chk_test_status',
+            constraintName: 'chk_test_status', enforced: 'YES',
             checkClause: "`status` in (_utf8mb4'active',_utf8mb4'archived')"
         }]],
         [[...Array(7).keys()].map(weekday => ({ weekday }))]
@@ -470,18 +478,18 @@ test('liefert bei Schema-Drift normalisierte Expected/Actual-Metadaten', async (
                 identifier: 'test_table.chk_test_status',
                 kind: 'constraint',
                 expected: {
-                    type: 'CHECK',
+                    type: 'CHECK', enforced: true,
                     clause: "status in('active','converted')"
                 },
                 actual: {
                     clause: "status in('active','archived')",
-                    type: 'CHECK'
+                    type: 'CHECK', enforced: true
                 }
             }]);
             assert.deepEqual(error.mismatchDetails, [
                 'constraint test_table.chk_test_status: ' +
-                'expected={"type":"CHECK","clause":"status in(\'active\',\'converted\')"} ' +
-                'actual={"clause":"status in(\'active\',\'archived\')","type":"CHECK"}'
+                'expected={"type":"CHECK","enforced":true,"clause":"status in(\'active\',\'converted\')"} ' +
+                'actual={"clause":"status in(\'active\',\'archived\')","type":"CHECK","enforced":true}'
             ]);
             const inspectedError = require('node:util').inspect(error);
             assert.match(inspectedError, /expected=.*converted/u);
@@ -557,4 +565,28 @@ test('erzwingt für den ersten Admin eine starke und normalisierte Anmeldung', (
         }),
         /72 Bytes/
     );
+});
+
+
+test('wirksame Spaltenattribute AUTO_INCREMENT und ON UPDATE sind Teil des Vertrags', () => {
+    const base = { columnType: 'int', isNullable: 'NO', defaultValue: null, extra: '' };
+    assert.equal(schemaPartsEqual(normalizeActualColumn(base), normalizeActualColumn({ ...base, extra: 'auto_increment' })), false);
+    const timestamp = { columnType: 'timestamp', isNullable: 'NO', defaultValue: 'CURRENT_TIMESTAMP', extra: 'DEFAULT_GENERATED' };
+    assert.equal(schemaPartsEqual(normalizeActualColumn(timestamp), normalizeActualColumn({ ...timestamp, extra: 'DEFAULT_GENERATED on update CURRENT_TIMESTAMP' })), false);
+});
+
+test('prüft alle historischen Checksummen bevor vorgezogene UTC-Up-Logik Daten verändern darf', async () => {
+    let changed = false;
+    const migrationList = [
+        { version: 'old_01', checksumSource: 'immutable', async up() {} },
+        { version: 'new_utc', checksumSource: 'utc', runBeforeLegacy: true, async up() { changed = true; } }
+    ];
+    const connection = {
+        async execute(sql) {
+            if (sql.includes('SELECT version, checksum')) return [[{ version: 'old_01', checksum: 'drift' }]];
+            return [{ affectedRows: 1 }];
+        }
+    };
+    await assert.rejects(runAutomaticMigrations(connection, migrationList), /nachträglich verändert/);
+    assert.equal(changed, false, 'checksum drift must stop before any UTC or other DML');
 });

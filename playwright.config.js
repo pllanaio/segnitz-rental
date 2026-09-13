@@ -1,5 +1,6 @@
 'use strict';
 
+const TEST_LEGAL_ENV = require('./test/support/legal-fixture');
 const { defineConfig, devices } = require('@playwright/test');
 
 const port = Number(process.env.E2E_PORT || 3102);
@@ -16,9 +17,10 @@ module.exports = defineConfig({
         : 'list',
     use: {
         baseURL,
-        trace: 'retain-on-failure',
-        screenshot: 'only-on-failure',
-        video: 'retain-on-failure'
+        trace: 'off',
+        screenshot: 'off',
+        video: 'off',
+        ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ? { launchOptions: { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH, args: process.env.PLAYWRIGHT_LOCAL_SINGLE_PROCESS === '1' ? ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--no-zygote', '--single-process'] : [] } } : {})
     },
     projects: [
         {
@@ -35,6 +37,10 @@ module.exports = defineConfig({
             ...process.env,
             PORT: String(port),
             NODE_ENV: 'test',
+            MOLLIE_TEST_MODE: '1',
+            MAIL_DELIVERY_PAUSED: '1',
+            DISABLE_EMAILS: '1',
+            ...TEST_LEGAL_ENV,
             DISABLE_PERIODIC_CLEANUP: '1',
             MOLLIE_API_KEY: process.env.MOLLIE_API_KEY || testMollieApiKey
         }

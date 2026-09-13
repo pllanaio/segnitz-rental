@@ -1,4 +1,5 @@
 'use strict';
+const TEST_LEGAL_ENV = require('../support/legal-fixture');
 
 const assert = require('node:assert/strict');
 const { spawn } = require('node:child_process');
@@ -8,6 +9,8 @@ const { setTimeout: delay } = require('node:timers/promises');
 const path = require('node:path');
 const bcrypt = require('bcrypt');
 const mysql = require('mysql2/promise');
+const { hashAuthToken } = require('../../services/authTokenService');
+const { readAuthMailToken } = require('../support/auth-mail');
 const dbConfig = require('../../config/db');
 const { createOperationKey } = require('../../services/externalEffectsOutbox');
 const { ORDER_ACCESS_COOKIE, hashOrderAccessToken } = require('../../services/orderAccessService');
@@ -139,9 +142,11 @@ before(async () => {
             ...process.env,
             PORT: String(PORT),
             NODE_ENV: 'test',
+            ...TEST_LEGAL_ENV,
             DISABLE_PERIODIC_CLEANUP: '1',
             MOLLIE_API_KEY: process.env.MOLLIE_API_KEY || TEST_MOLLIE_API_KEY,
             MOLLIE_TEST_MODE: '1',
+            MAIL_DELIVERY_PAUSED: '1',
             BASE_URL
         },
         stdio: ['ignore', 'pipe', 'pipe']
@@ -582,7 +587,7 @@ test('Checkout-Lock verhindert Positionsverlust bei parallelem Cart-Add', async 
             await guestVerificationConnection.execute(
                 `INSERT INTO guest_verifications (email, verification_token, expires_at)
                  VALUES ('cart-lock-guest@example.com', ?, DATE_ADD(NOW(), INTERVAL 15 MINUTE))`,
-                [verificationToken]
+                [hashAuthToken(verificationToken)]
             );
         } finally {
             await guestVerificationConnection.end();
@@ -605,7 +610,9 @@ test('Checkout-Lock verhindert Positionsverlust bei parallelem Cart-Add', async 
                 { name: 'CustomerAddress', value: 'Teststrasse 1' },
                 { name: 'CustomerZip', value: '97070' },
                 { name: 'CustomerCity', value: 'Wuerzburg' },
-                { name: 'Signature', value: 'data:image/png;base64,dGVzdA==' },
+                { name: 'Signature', value: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=' },
+                { name: 'termsVersion', value: 'fixture-terms-v1' },
+                { name: 'privacyVersion', value: 'fixture-privacy-v1' },
                 { name: 'agbs', checked: true },
                 { name: 'dsgvo', checked: true }
             ]
@@ -998,7 +1005,8 @@ test('bindet die Kontoaktivierung an einen neuen Passwortabschluss aus der Mailb
             [email]
         );
         originalUserId = Number(users[0].id);
-        originalToken = users[0].verification_token;
+        originalToken = await readAuthMailToken(connection, email);
+        assert.equal(users[0].verification_token === hashAuthToken(originalToken), true);
         const originalOperationKey = createOperationKey('mail-verify', {
             email,
             token: originalToken
@@ -1038,8 +1046,8 @@ test('bindet die Kontoaktivierung an einen neuen Passwortabschluss aus der Mailb
              FROM users WHERE username = ?`,
             [email]
         );
-        victimVerificationToken = users[0].verification_token;
-        assert.equal(users[0].verification_token, originalToken);
+        victimVerificationToken = await readAuthMailToken(verificationConnection, email);
+        assert.equal(users[0].verification_token === hashAuthToken(originalToken), true);
         assert.deepEqual({
             firstName: users[0].first_name,
             lastName: users[0].last_name,
@@ -1078,7 +1086,7 @@ test('bindet die Kontoaktivierung an einen neuen Passwortabschluss aus der Mailb
             'SELECT verification_token FROM users WHERE username = ?',
             [email]
         );
-        assert.equal(users[0].verification_token, victimVerificationToken);
+        assert.equal(users[0].verification_token === hashAuthToken(victimVerificationToken), true);
     } finally {
         await raceConnection.end();
     }
@@ -1102,7 +1110,7 @@ test('bindet die Kontoaktivierung an einen neuen Passwortabschluss aus der Mailb
                 [email]
             );
             assert.equal(Number(users[0].email_verified), 0);
-            assert.equal(users[0].verification_token, victimVerificationToken);
+            assert.equal(users[0].verification_token === hashAuthToken(victimVerificationToken), true);
         } finally {
             await stateConnection.end();
         }
@@ -1151,7 +1159,7 @@ test('bindet die Kontoaktivierung an einen neuen Passwortabschluss aus der Mailb
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ username: email, password })
         });
-        assert.equal(loginResponse.status, 401, `${password}: ${await loginResponse.text()}`);
+        assert.equal(loginResponse.status, 401, await loginResponse.text());
     }
 
     const completionResponse = await new SessionClient().request('/password-reset', {
@@ -1185,6 +1193,30 @@ test('Passwortwechsel widerruft alte Kunden- und Admin-Sessions über auth_versi
                 assert.equal(loginResponse.status, 200, await loginResponse.text());
             }
 
+            const resetRequest = await changingClient.request('/password-reset-request', {
+                method: 'POST', headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ email: account.email })
+            });
+            assert.equal(resetRequest.status, 200);
+            const mailbox = await mysql.createConnection(dbConfig);
+            let resetToken;
+            try {
+                resetToken = await readAuthMailToken(mailbox, account.email, 'reset');
+                const [users] = await mailbox.execute('SELECT reset_token FROM users WHERE username = ?', [account.email]);
+                assert.equal(users[0].reset_token === hashAuthToken(resetToken), true);
+                const [effects] = await mailbox.execute(
+                    "SELECT operation_key FROM external_effects_outbox WHERE effect_type = 'mail.send' AND operation_key LIKE 'mail-password-reset%'"
+                );
+                assert.equal(effects.some(effect => effect.operation_key.includes(resetToken)), false);
+            } finally { await mailbox.end(); }
+            if (account === TEST_ADMIN) {
+                const weakReset = await changingClient.request('/password-reset', {
+                    method: 'POST', headers: { 'content-type': 'application/json' },
+                    body: JSON.stringify({ token: resetToken, password: 'klein1!a' })
+                });
+                assert.equal(weakReset.status, 400);
+            }
+
             const changeResponse = await changingClient.request('/my-profile/password', {
                 method: 'PUT',
                 headers: { 'content-type': 'application/json' },
@@ -1195,6 +1227,12 @@ test('Passwortwechsel widerruft alte Kunden- und Admin-Sessions über auth_versi
                 })
             });
             assert.equal(changeResponse.status, 200, await changeResponse.text());
+            const revokedReset = await new SessionClient().request('/password-reset', {
+                method: 'POST', headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ token: resetToken, password: 'PreviouslyIssuedReset1!' })
+            });
+            assert.equal(revokedReset.status, 400);
+
             assert.equal((await changingClient.request('/my-profile')).status, 200);
 
             for (const assetPath of ['/css/style.css', '/img/logo.png']) {
@@ -1249,6 +1287,65 @@ test('Passwortwechsel widerruft alte Kunden- und Admin-Sessions über auth_versi
     await assertSessionRevocation(TEST_ADMIN, 'ChangedAdminPassword1!', '/admin/orders');
 });
 
+test('serialisiert parallelen regulären Passwortwechsel und Reset unter derselben Benutzersperre', async () => {
+    const token = 'f'.repeat(64);
+    const changingClient = new SessionClient();
+    const resetClient = new SessionClient();
+    const login = await changingClient.request('/login', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ username: TEST_USER.email, password: TEST_USER.password })
+    });
+    assert.equal(login.status, 200);
+    const connection = await mysql.createConnection(dbConfig);
+    const observer = await mysql.createConnection(dbConfig);
+    let pending;
+    try {
+        await connection.execute(
+            'UPDATE users SET reset_token = ?, reset_token_expires = DATE_ADD(NOW(), INTERVAL 30 MINUTE) WHERE username = ?',
+            [hashAuthToken(token), TEST_USER.email]
+        );
+        await connection.beginTransaction();
+        await connection.execute('SELECT id FROM users WHERE username = ? FOR UPDATE', [TEST_USER.email]);
+        pending = Promise.all([
+            changingClient.request('/my-profile/password', {
+                method: 'PUT', headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ currentPassword: TEST_USER.password, newPassword: 'RaceRegularPassword1!', newPasswordConfirm: 'RaceRegularPassword1!' })
+            }),
+            resetClient.request('/password-reset', {
+                method: 'POST', headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ token, password: 'RaceResetPassword1!' })
+            })
+        ]);
+        let waiting = false;
+        for (let attempt = 0; attempt < 150; attempt += 1) {
+            const [processes] = await observer.query('SHOW FULL PROCESSLIST');
+            if (processes.filter(process => /FROM users[\s\S]*FOR UPDATE/iu.test(String(process.Info || ''))).length >= 2) {
+                waiting = true;
+                break;
+            }
+            await delay(20);
+        }
+        assert.equal(waiting, true, 'Beide konkurrierenden Mutationen müssen den echten MySQL-Benutzerlock erreichen.');
+        await connection.commit();
+        const responses = await pending;
+        assert.equal(responses.filter(response => response.status === 200).length, 1);
+        assert.equal(responses.every(response => [200, 400, 401].includes(response.status)), true);
+        const [users] = await observer.execute('SELECT password, reset_token FROM users WHERE username = ?', [TEST_USER.email]);
+        assert.equal(users[0].reset_token, null);
+        const valid = await Promise.all(['RaceRegularPassword1!', 'RaceResetPassword1!'].map(password => bcrypt.compare(password, users[0].password)));
+        assert.equal(valid.filter(Boolean).length, 1);
+    } finally {
+        await connection.rollback();
+        if (pending) await pending.catch(() => {});
+        await observer.execute(
+            'UPDATE users SET password = ?, reset_token = NULL, reset_token_expires = NULL, auth_version = auth_version + 1 WHERE username = ?',
+            [await bcrypt.hash(TEST_USER.password, 4), TEST_USER.email]
+        );
+        await connection.end();
+        await observer.end();
+    }
+});
+
 test('Passwort-Reset-Token kann bei parallelen Requests nur einmal verbraucht werden', async () => {
     const token = 'a'.repeat(64);
     const staleClient = new SessionClient();
@@ -1264,7 +1361,7 @@ test('Passwort-Reset-Token kann bei parallelen Requests nur einmal verbraucht we
             `UPDATE users
              SET reset_token = ?, reset_token_expires = DATE_ADD(NOW(), INTERVAL 30 MINUTE)
              WHERE username = ?`,
-            [token, TEST_USER.email]
+            [hashAuthToken(token), TEST_USER.email]
         );
     } finally {
         await connection.end();

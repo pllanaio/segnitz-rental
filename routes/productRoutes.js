@@ -1,3 +1,4 @@
+const { errorStatus } = require('../utils/httpErrors');
 const express = require('express');
 const router = express.Router();
 const mysql = require('mysql2/promise');
@@ -6,7 +7,7 @@ const fs = require('fs');
 
 const dbConfig = require('../config/db');
 const { checkAdmin } = require('../middleware/auth');
-const { removeUploadedFiles, uploadProductImages } = require('../utils/uploads');
+const { removeUploadedFiles, uploadProductImages, validatePositiveId } = require('../utils/uploads');
 const { checkProductAvailability } = require('../utils/availability');
 const { runInTransactionWithRetry } = require('../utils/dbRetry');
 const { formatDateInTimeZone } = require('../utils/businessDate');
@@ -36,7 +37,7 @@ router.get('/categories', async (req, res) => {
 
     } catch (error) {
         console.error(error);
-        res.status(500).json({
+        res.status(errorStatus(error)).json({
             error: 'Kategorien konnten nicht geladen werden.'
         });
     } finally {
@@ -129,7 +130,7 @@ router.get('/products', async (req, res) => {
 
     } catch (error) {
         console.error('Fehler beim Laden der Produkte:', error);
-        res.status(500).json({
+        res.status(errorStatus(error)).json({
             error: 'Produkte konnten nicht geladen werden.'
         });
     } finally {
@@ -167,7 +168,7 @@ router.get('/products/:id/availability', async (req, res) => {
         res.json(blockedPeriods);
     } catch (error) {
         console.error('Fehler beim Laden der Produktverfügbarkeit:', error);
-        res.status(500).json({
+        res.status(errorStatus(error)).json({
             error: 'Produktverfügbarkeit konnte nicht geladen werden.'
         });
     } finally {
@@ -237,7 +238,7 @@ router.post('/products', checkAdmin, async (req, res) => {
     } catch (error) {
         if (connection) await connection.rollback();
         console.error('Fehler beim Erstellen des Produkts:', error);
-        res.status(500).json({ error: 'Produkt konnte nicht gespeichert werden.' });
+        res.status(errorStatus(error)).json({ error: 'Produkt konnte nicht gespeichert werden.' });
     } finally {
         if (connection) await connection.end();
     }
@@ -307,7 +308,7 @@ router.put('/products/:id', checkAdmin, async (req, res) => {
     } catch (error) {
         if (connection) await connection.rollback();
         console.error('Fehler beim Aktualisieren des Produkts:', error);
-        res.status(500).json({ error: 'Produkt konnte nicht aktualisiert werden.' });
+        res.status(errorStatus(error)).json({ error: 'Produkt konnte nicht aktualisiert werden.' });
     } finally {
         if (connection) await connection.end();
     }
@@ -356,11 +357,11 @@ router.delete('/products/:id', checkAdmin, async (req, res) => {
             return res.status(error.statusCode).json({ error: error.message });
         }
         console.error('Fehler beim Deaktivieren des Produkts:', error);
-        res.status(500).json({ error: 'Produkt konnte nicht deaktiviert werden.' });
+        res.status(errorStatus(error)).json({ error: 'Produkt konnte nicht deaktiviert werden.' });
     }
 });
 
-router.post('/products/:id/images', checkAdmin, uploadProductImages.array('images', 10), async (req, res) => {
+router.post('/products/:id/images', checkAdmin, validatePositiveId('id'), uploadProductImages.array('images', 10), async (req, res) => {
     const productId = req.params.id;
     const uploadedFiles = Array.isArray(req.files) ? req.files : [];
     let connection;
@@ -431,7 +432,7 @@ router.post('/products/:id/images', checkAdmin, uploadProductImages.array('image
 
         if (!committed) await removeUploadedFiles(uploadedFiles);
         console.error('Fehler beim Bilderupload:', error);
-        res.status(500).json({ error: 'Bilder konnten nicht hochgeladen werden.' });
+        res.status(errorStatus(error)).json({ error: 'Bilder konnten nicht hochgeladen werden.' });
     } finally {
         if (connection) await connection.end();
     }
@@ -466,7 +467,7 @@ router.put('/products/:id/images/order', checkAdmin, async (req, res) => {
         res.json({ message: 'Bildreihenfolge gespeichert.' });
     } catch (error) {
         console.error('Fehler beim Speichern der Bildreihenfolge:', error);
-        res.status(500).json({ error: 'Bildreihenfolge konnte nicht gespeichert werden.' });
+        res.status(errorStatus(error)).json({ error: 'Bildreihenfolge konnte nicht gespeichert werden.' });
     } finally {
         if (connection) await connection.end();
     }
@@ -501,7 +502,7 @@ router.delete('/product-images/:id', checkAdmin, async (req, res) => {
         res.json({ message: 'Bild gelöscht.' });
     } catch (error) {
         console.error('Fehler beim Löschen des Bildes:', error);
-        res.status(500).json({ error: 'Bild konnte nicht gelöscht werden.' });
+        res.status(errorStatus(error)).json({ error: 'Bild konnte nicht gelöscht werden.' });
     } finally {
         if (connection) await connection.end();
     }
@@ -611,7 +612,7 @@ router.get('/products/bestsellers', async (req, res) => {
 
     } catch (error) {
         console.error('Fehler beim Laden der Bestseller:', error);
-        res.status(500).json({
+        res.status(errorStatus(error)).json({
             error: 'Bestseller konnten nicht geladen werden.'
         });
     } finally {
@@ -643,7 +644,7 @@ router.get('/products/:id/current-availability', async (req, res) => {
     } catch (error) {
         console.error('Fehler beim Prüfen der Produktverfügbarkeit:', error);
 
-        return res.status(500).json({
+        return res.status(errorStatus(error)).json({
             error: 'Verfügbarkeit konnte nicht geprüft werden.'
         });
 
@@ -664,7 +665,7 @@ router.get('/products/:id/reviews', async (req, res) => {
             `SELECT
                 pr.rating,
                 pr.review_text AS reviewText,
-                DATE_FORMAT(pr.created_at, '%Y-%m-%d %H:%i:%s') AS createdAt,
+                DATE_FORMAT(pr.created_at, '%Y-%m-%dT%H:%i:%sZ') AS createdAt,
                 CONCAT(
                     COALESCE(NULLIF(TRIM(u.first_name), ''), 'Kunde'),
                     CASE
@@ -682,7 +683,7 @@ router.get('/products/:id/reviews', async (req, res) => {
         res.json(reviews);
     } catch (error) {
         console.error('Fehler beim Laden der Produktbewertungen:', error);
-        res.status(500).json({ error: 'Produktbewertungen konnten nicht geladen werden.' });
+        res.status(errorStatus(error)).json({ error: 'Produktbewertungen konnten nicht geladen werden.' });
     } finally {
         if (connection) await connection.end();
     }
@@ -776,7 +777,7 @@ router.post('/products/:id/reviews', async (req, res) => {
         res.json({ message: 'Bewertung wurde gespeichert.' });
     } catch (error) {
         console.error('Fehler beim Speichern der Produktbewertung:', error);
-        res.status(500).json({ error: 'Bewertung konnte nicht gespeichert werden.' });
+        res.status(errorStatus(error)).json({ error: 'Bewertung konnte nicht gespeichert werden.' });
     } finally {
         if (connection) await connection.end();
     }
@@ -799,8 +800,8 @@ router.get('/my-reviews', async (req, res) => {
                 pr.order_id AS orderId,
                 pr.rating,
                 pr.review_text AS reviewText,
-                DATE_FORMAT(pr.created_at, '%Y-%m-%d %H:%i:%s') AS createdAt,
-                DATE_FORMAT(pr.updated_at, '%Y-%m-%d %H:%i:%s') AS updatedAt,
+                DATE_FORMAT(pr.created_at, '%Y-%m-%dT%H:%i:%sZ') AS createdAt,
+                DATE_FORMAT(pr.updated_at, '%Y-%m-%dT%H:%i:%sZ') AS updatedAt,
                 p.title AS productTitle,
                 ro.order_no AS orderNo
              FROM product_reviews pr
@@ -814,7 +815,7 @@ router.get('/my-reviews', async (req, res) => {
         res.json(reviews);
     } catch (error) {
         console.error('Fehler beim Laden eigener Bewertungen:', error);
-        res.status(500).json({ error: 'Eigene Bewertungen konnten nicht geladen werden.' });
+        res.status(errorStatus(error)).json({ error: 'Eigene Bewertungen konnten nicht geladen werden.' });
     } finally {
         if (connection) await connection.end();
     }

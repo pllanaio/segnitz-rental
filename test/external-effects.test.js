@@ -491,7 +491,7 @@ test('Payment-Sync trennt Ursprungszahlung und Refund-Ledger trotz gemeinsamer M
         source.indexOf("app.post('/admin/order-payments/manual'")
     );
     const webhookRoute = source.slice(
-        source.indexOf("app.post('/webhooks/mollie'"),
+        source.indexOf("async function reconcileMolliePayment"),
         source.indexOf('let cleanupTimer = null')
     );
     const cancellationHelper = source.slice(
@@ -523,7 +523,7 @@ test('Payment-Sync trennt Ursprungszahlung und Refund-Ledger trotz gemeinsamer M
         webhookRoute,
         /rop\.payment_type IN \([\s\S]*?'initial_payment'[\s\S]*?'return_additional_charge'[\s\S]*?\)/u
     );
-    assert.match(syncRoute, /updateMollieSourcePaymentStatus/u);
+    assert.match(syncRoute, /reconcileMolliePayment/u);
     assert.match(webhookRoute, /updateMollieSourcePaymentStatus/u);
     assert.doesNotMatch(
         syncRoute,

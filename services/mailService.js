@@ -1,5 +1,8 @@
+const { loadOrderFinance, itemFinancials } = require('./orderFinanceService');
+const financeView = require('../public/js/finance-summary');
 const crypto = require('node:crypto');
 const fetch = require('node-fetch');
+const { assertMailDeliveryAvailable } = require('./mailDeliveryPolicy');
 const {
     EFFECT_TYPES,
     createOperationKey,
@@ -82,7 +85,7 @@ async function getGraphAccessToken() {
     const result = await response.json();
 
     if (!response.ok) {
-        throw new Error(`Graph Token Fehler: ${response.status} ${JSON.stringify(result)}`);
+        throw new Error(`Graph Token Fehler: HTTP ${response.status}`);
     }
 
     cachedGraphToken = result.access_token;
@@ -105,9 +108,7 @@ function normalizeRecipients(value) {
 }
 
 async function deliverGraphMail({ to, cc, bcc, subject, html, text, operationKey }) {
-    if (process.env.DISABLE_EMAILS === '1') {
-        return { disabled: true };
-    }
+    assertMailDeliveryAvailable();
 
     const token = await getGraphAccessToken();
     const graphMailUser = getGraphMailUser();
@@ -144,8 +145,9 @@ async function deliverGraphMail({ to, cc, bcc, subject, html, text, operationKey
     );
 
     if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Graph Mail Fehler: ${response.status} ${errorText}`);
+        // Provider bodies can contain recipient data, tokens or mail content.
+        // They must not enter the durable outbox error field or application logs.
+        throw new Error(`Graph Mail Fehler: HTTP ${response.status}`);
     }
 }
 
@@ -183,6 +185,9 @@ async function sendOrderEmail(
         return false;
     }
 
+    const financialSummary = deliveryOptions.connection && orderSummary.id
+        ? await loadOrderFinance(deliveryOptions.connection, orderSummary.id)
+        : orderSummary.financialSummary;
     const itemsHtml = orderSummary.items.map(item => `
         <tr>
             <td>${escapeHtml(item.title)}</td>
@@ -232,6 +237,8 @@ async function sendOrderEmail(
             Kaution: ${Number(orderSummary.totals.depositTotal || 0).toFixed(2)} €<br>
             Gesamt vor Kautionsrückgabe: ${Number(orderSummary.totals.grandTotalBeforeDepositReturn || 0).toFixed(2)} €
         </p>
+
+        ${financeView.render(financialSummary)}
 
         <h3>Zahlung</h3>
         <p>
@@ -540,6 +547,10 @@ async function sendPaymentReceiptEmail(order, payment, deliveryOptions = {}) {
 }
 
 async function sendReturnSummaryEmail(order, item, payments = [], deliveryOptions = {}) {
+    const orderId = order.id || item.orderId || item.order_id;
+    const financialSummary = deliveryOptions.connection && orderId
+        ? await loadOrderFinance(deliveryOptions.connection, orderId)
+        : order.financialSummary;
     const depositRefund = payments.find(payment =>
         payment.paymentType === 'deposit_refund' ||
         payment.payment_type === 'deposit_refund'
@@ -564,8 +575,7 @@ async function sendReturnSummaryEmail(order, item, payments = [], deliveryOption
     const lateDays = actualDate && plannedDate && actualDate > plannedDate
         ? Math.ceil((actualDate - plannedDate) / (1000 * 60 * 60 * 24))
         : 0;
-    const pricePerDay = Number(item.adjustedPricePerDay || item.adjusted_price_per_day || item.pricePerDay || item.price_per_day || 0);
-    const lateFee = lateDays * pricePerDay;
+    const lateFee = itemFinancials(item).lateFee;
 
     const statusLabels = {
         returned_ok: 'Ordnungsgemäß zurückgegeben',
@@ -609,6 +619,7 @@ async function sendReturnSummaryEmail(order, item, payments = [], deliveryOption
                 ${item.returnNotes || item.return_notes ? `Hinweise: ${escapeHtml(item.returnNotes || item.return_notes)}<br>` : ''}
             </p>
 
+            ${financeView.render(financialSummary)}
             <h3>Kaution und Nachzahlungen</h3>
             <p>
                 Kaution: ${Number(item.deposit || 0).toFixed(2)} €<br>

@@ -7,14 +7,9 @@
     <title>Segnitz Rental - Mein Bereich</title>
 
     <!-- CSS -->
-    <link rel="stylesheet" href="css/bootstrap.min.css">
+    <link rel="stylesheet" href="/vendor/bootstrap-5.3.8/bootstrap.min.css">
     <link rel="stylesheet" href="css/style.css">
     <link rel="stylesheet" href="css/bootstrap-icons-1.11.3/font/bootstrap-icons.min.css">
-    <link rel="stylesheet" href="css/fonts.css">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
-        rel="stylesheet">
     <!--FAVICON-->
     <link rel="apple-touch-icon" sizes="180x180" href="img/apple-touch-icon.png">
     <link rel="icon" type="image/png" sizes="32x32" href="img/favicon-32x32.png">
@@ -23,6 +18,7 @@
     <link rel="mask-icon" href="img/safari-pinned-tab.svg" color="#ffffff">
     <meta name="msapplication-TileColor" content="#ffffff">
     <meta name="theme-color" content="#ffffff">
+<script src="/js/contact-contract.js" defer></script>
 </head>
 
 <body>
@@ -231,7 +227,7 @@
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">Bestelldetails</h5>
-                    <button class="btn-close" data-bs-dismiss="modal"></button>
+                    <button class="btn-close" aria-label="Schließen" data-bs-dismiss="modal"></button>
                 </div>
 
                 <div class="modal-body" id="myOrderDetailsBody"></div>
@@ -245,10 +241,12 @@
         </div>
     </div>
 
-    <script src="js/bootstrap.bundle.min.js"></script>
+    <script src="/vendor/bootstrap-5.3.8/bootstrap.bundle.min.js"></script>
     <script src="js/csrf.js"></script>
     <script src="js/safe_html.js"></script>
     <script src="js/alerts.js"></script>
+    <script src="/js/pending-actions.js"></script>
+    <script src="/js/finance-summary.js"></script>
     <script src="js/profile_config.js"></script>
 
 </body>

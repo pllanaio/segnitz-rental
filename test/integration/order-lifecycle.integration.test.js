@@ -1,4 +1,5 @@
 'use strict';
+const TEST_LEGAL_ENV = require('../support/legal-fixture');
 
 const assert = require('node:assert/strict');
 const { spawn } = require('node:child_process');
@@ -93,7 +94,9 @@ function orderForm(email) {
                 { name: 'CustomerAddress', value: 'Testweg 1' },
                 { name: 'CustomerZip', value: '97070' },
                 { name: 'CustomerCity', value: 'Wuerzburg' },
-                { name: 'Signature', value: 'data:image/png;base64,dGVzdA==' },
+                { name: 'Signature', value: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=' },
+                { name: 'termsVersion', value: 'fixture-terms-v1' },
+                { name: 'privacyVersion', value: 'fixture-privacy-v1' },
                 { name: 'agbs', value: 'on', checked: true },
                 { name: 'dsgvo', value: 'on', checked: true }
             ]
@@ -225,6 +228,7 @@ before(async () => {
             PORT: String(PORT),
             BASE_URL,
             NODE_ENV: 'test',
+            ...TEST_LEGAL_ENV,
             DISABLE_PERIODIC_CLEANUP: '1',
             DISABLE_EMAILS: '1',
             MOLLIE_TEST_MODE: '1',
@@ -533,15 +537,9 @@ test('bindet Gastbestellungen dauerhaft an die erzeugende Session, auch nachdem 
     assert.equal(unverifiedResponse.status, 403, JSON.stringify(unverifiedBody));
     assert.equal(unverifiedBody.verificationRequired, true);
 
-    const [challenge] = await queryRows(
-        `SELECT verification_token
-         FROM guest_verifications
-         WHERE email = ?
-         ORDER BY id DESC
-         LIMIT 1`,
-        ['bound.guest@example.com']
-    );
-    await completeEmailVerification(guest, challenge.verification_token);
+    const mailbox = await mysql.createConnection(dbConfig);
+    try { await completeEmailVerification(guest, await readAuthMailToken(mailbox, 'bound.guest@example.com')); }
+    finally { await mailbox.end(); }
 
     const createResponse = await submitOrder();
     const order = await createResponse.json();
@@ -603,17 +601,9 @@ test('bestätigt Gast-Barbestellungen einmalig und sessiongebunden mit kurzer TT
     assert.equal(firstResult.verificationRequired, true);
     assert.equal(firstResult.verificationEmailSent, true);
 
-    const [firstChallenge] = await queryRows(
-        `SELECT verification_token
-         FROM guest_verifications
-         WHERE email = ?
-         ORDER BY id DESC
-         LIMIT 1`,
-        [guestEmail]
-    );
-    assert.match(firstChallenge.verification_token, /^[a-f0-9]{64}$/);
-
-    await completeEmailVerification(guest, firstChallenge.verification_token);
+    const mailbox = await mysql.createConnection(dbConfig);
+    try { await completeEmailVerification(guest, await readAuthMailToken(mailbox, guestEmail)); }
+    finally { await mailbox.end(); }
 
     await execute(
         `UPDATE user_sessions
@@ -627,15 +617,9 @@ test('bestätigt Gast-Barbestellungen einmalig und sessiongebunden mit kurzer TT
     assert.equal(expiredAttempt.status, 403, JSON.stringify(expiredResult));
     assert.equal(expiredResult.verificationRequired, true);
 
-    const [secondChallenge] = await queryRows(
-        `SELECT verification_token
-         FROM guest_verifications
-         WHERE email = ?
-         ORDER BY id DESC
-         LIMIT 1`,
-        [guestEmail]
-    );
-    await completeEmailVerification(guest, secondChallenge.verification_token);
+    const secondMailbox = await mysql.createConnection(dbConfig);
+    try { await completeEmailVerification(guest, await readAuthMailToken(secondMailbox, guestEmail)); }
+    finally { await secondMailbox.end(); }
 
     const confirmedAttempt = await submitCashOrder();
     const confirmedOrder = await confirmedAttempt.json();
@@ -888,7 +872,7 @@ test('kassiert Barzahlung, blockiert vorzeitige Abholung und verarbeitet Rückga
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-            actualReturnDate: rentalEnd,
+            actualReturnDate: futureDate(0),
             additionalChargePaymentMethod: 'cash',
             adjustedRentalStart: rentalStart,
             adjustedRentalEnd: rentalEnd,
@@ -1001,7 +985,7 @@ test('validiert Schäden und nutzt für Rückgabe-Nachzahlungen den gewählten M
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-            actualReturnDate: rentalEnd,
+            actualReturnDate: futureDate(0),
             adjustedRentalStart: rentalStart,
             adjustedRentalEnd: rentalEnd,
             adjustedPricePerDay: TEST_PRODUCT.pricePerDay,
@@ -1018,7 +1002,7 @@ test('validiert Schäden und nutzt für Rückgabe-Nachzahlungen den gewählten M
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-            actualReturnDate: rentalEnd,
+            actualReturnDate: futureDate(0),
             adjustedRentalStart: rentalStart,
             adjustedRentalEnd: rentalEnd,
             adjustedPricePerDay: TEST_PRODUCT.pricePerDay,
@@ -1035,7 +1019,7 @@ test('validiert Schäden und nutzt für Rückgabe-Nachzahlungen den gewählten M
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-            actualReturnDate: rentalEnd,
+            actualReturnDate: futureDate(0),
             adjustedRentalStart: rentalStart,
             adjustedRentalEnd: rentalEnd,
             adjustedPricePerDay: TEST_PRODUCT.pricePerDay,
@@ -1062,7 +1046,7 @@ test('validiert Schäden und nutzt für Rückgabe-Nachzahlungen den gewählten M
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-            actualReturnDate: rentalEnd,
+            actualReturnDate: futureDate(0),
             adjustedRentalStart: rentalStart,
             adjustedRentalEnd: rentalEnd,
             adjustedPricePerDay: TEST_PRODUCT.pricePerDay,
@@ -1174,7 +1158,7 @@ test('erfasst eine ausdrücklich bar gewählte Rückgabe-Nachzahlung auch bei On
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-            actualReturnDate: rentalEnd,
+            actualReturnDate: futureDate(0),
             adjustedRentalStart: rentalStart,
             adjustedRentalEnd: rentalEnd,
             adjustedPricePerDay: TEST_PRODUCT.pricePerDay,
@@ -1273,7 +1257,7 @@ test('schließt einen gemischten Auftrag nach letzter Stornierung und wartet auf
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-            actualReturnDate: firstEnd,
+            actualReturnDate: futureDate(0),
             adjustedRentalStart: firstStart,
             adjustedRentalEnd: firstEnd,
             adjustedPricePerDay: TEST_PRODUCT.pricePerDay,
@@ -1486,7 +1470,7 @@ test('verlängert eine bezahlte Bar-Miete atomar und verrechnet offene Verlänge
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-            actualReturnDate: extendedEnd,
+            actualReturnDate: futureDate(0),
             adjustedRentalStart: rentalStart,
             adjustedRentalEnd: extendedEnd,
             adjustedPricePerDay: TEST_PRODUCT.pricePerDay,
@@ -1598,7 +1582,7 @@ test('erstattet eine Online-Kaution auch mit historischer Zahlung nur am Auftrag
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-            actualReturnDate: extendedEnd,
+            actualReturnDate: futureDate(0),
             adjustedRentalStart: rentalStart,
             adjustedRentalEnd: extendedEnd,
             adjustedPricePerDay: TEST_PRODUCT.pricePerDay,
@@ -1680,7 +1664,7 @@ test('erstattet eine verspätete Online-Verlängerungszahlung, wenn sie bei Rüc
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-            actualReturnDate: extendedEnd,
+            actualReturnDate: futureDate(0),
             adjustedRentalStart: rentalStart,
             adjustedRentalEnd: extendedEnd,
             adjustedPricePerDay: TEST_PRODUCT.pricePerDay,
@@ -2454,4 +2438,59 @@ test('verweigert unverifizierte Logins und gibt Verbindungen auf allen Fehlpfade
         afterConnections <= beforeConnections + 1,
         `Fehlgeschlagene Logins erhöhten Threads_connected von ${beforeConnections} auf ${afterConnections}`
     );
+});
+
+for (const entry of ['webhook', 'status-sync']) {
+    test(`lost hold without cleanup: ${entry} refunds A and preserves B's only physical occupancy`, async () => {
+        const customer = new SessionClient();
+        const other = new SessionClient();
+        await login(customer, TEST_CUSTOMER);
+        await login(other, TEST_OTHER_CUSTOMER);
+        const day = entry === 'webhook' ? 800 : 810;
+        const orderA = await createOrder(customer, 'online', futureDate(day), futureDate(day + 1));
+        await execute('UPDATE rental_orders SET reserved_until = DATE_SUB(NOW(), INTERVAL 1 SECOND) WHERE id = ?', [orderA.orderId]);
+        await addCartItem(other, futureDate(day), futureDate(day + 1));
+        const createB = await other.request('/data', {
+            method: 'POST', headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ paymentMethod: 'cash', form: orderForm(TEST_OTHER_CUSTOMER.email) })
+        });
+        const orderB = await createB.json();
+        assert.equal(createB.status, 200, JSON.stringify(orderB));
+        const paymentId = `tr_test_paid_lost_hold_${orderA.orderId}`;
+        await execute('UPDATE rental_orders SET mollie_payment_id = ? WHERE id = ?', [paymentId, orderA.orderId]);
+        await execute('UPDATE rental_order_payments SET mollie_payment_id = ? WHERE order_id = ?', [paymentId, orderA.orderId]);
+        const notify = () => entry === 'webhook'
+            ? customer.request('/webhooks/mollie', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: paymentId }) })
+            : customer.request(`/orders/${orderA.orderId}/payment-status/sync`, { method: 'POST' });
+        const responses = await Promise.all([notify(), notify()]);
+        for (const response of responses) assert.equal(response.status, 200, await response.text());
+        const rows = await queryRows('SELECT id, status FROM rental_orders WHERE id IN (?, ?) ORDER BY id', [orderA.orderId, orderB.orderId]);
+        assert.equal(rows.find(row => Number(row.id) === Number(orderA.orderId)).status, 'expired');
+        assert.equal(rows.find(row => Number(row.id) === Number(orderB.orderId)).status, 'confirmed');
+        const refunds = await queryRows("SELECT id FROM rental_order_payments WHERE order_id = ? AND payment_type = 'order_cancellation_refund'", [orderA.orderId]);
+        assert.equal(refunds.length, 1);
+    });
+}
+
+test('stale Open after Paid through status-sync never regresses settled source rows', async () => {
+    const customer = new SessionClient();
+    await login(customer, TEST_CUSTOMER);
+    const order = await createOrder(customer, 'online', futureDate(820), futureDate(821));
+    const id = `tr_test_paid_reordered_${order.orderId}`;
+    await execute('UPDATE rental_orders SET mollie_payment_id = ? WHERE id = ?', [id, order.orderId]);
+    await execute('UPDATE rental_order_payments SET mollie_payment_id = ? WHERE order_id = ?', [id, order.orderId]);
+    const paid = await customer.request('/webhooks/mollie', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id }) });
+    assert.equal(paid.status, 200, await paid.text());
+    const fs = require('node:fs/promises');
+    const fixture = path.join(require('../support/mollie-fixtures').directory, `${id}.json`);
+    const snapshot = JSON.parse(await fs.readFile(fixture, 'utf8'));
+    await fs.writeFile(fixture, JSON.stringify({ ...snapshot, status: 'open' }));
+    const stale = await customer.request(`/orders/${order.orderId}/payment-status/sync`, { method: 'POST' });
+    const body = await stale.json();
+    assert.equal(stale.status, 200, JSON.stringify(body));
+    assert.equal(body.payment_status, 'paid');
+    assert.equal(body.status, 'confirmed');
+    const ledger = await queryRows("SELECT payment_status FROM rental_order_payments WHERE mollie_payment_id = ? AND payment_type IN ('initial_payment', 'rental', 'deposit')", [id]);
+    assert.ok(ledger.length > 0);
+    assert.ok(ledger.every(row => row.payment_status === 'paid'));
 });

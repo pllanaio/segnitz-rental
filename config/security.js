@@ -1,7 +1,7 @@
 'use strict';
 
 function isProduction(environment = process.env) {
-    return environment.NODE_ENV === 'production';
+    return environment.NODE_ENV === 'production' || environment.DEPLOYMENT_ENV === 'production';
 }
 
 function assertSecurityEnvironment(environment = process.env) {
@@ -13,6 +13,12 @@ function assertSecurityEnvironment(environment = process.env) {
 
     if (sessionSecret.length < 32) {
         throw new Error('SESSION_SECRET muss in Produktion mindestens 32 Zeichen lang sein.');
+    }
+
+    for (const setting of ['MOLLIE_TEST_MODE', 'DISABLE_EMAILS']) {
+        if (environment[setting] === '1') {
+            throw new Error(`${setting}=1 ist in Produktion nicht erlaubt.`);
+        }
     }
 }
 
