@@ -89,6 +89,7 @@ const {
     runInTransactionWithRetry
 } = require('./utils/dbRetry');
 const { lockBookingForProviderPayment, resolveInitialPaymentBooking } = require('./services/bookingPaymentService');
+const { settleZeroAmountBooking } = require('./services/zeroAmountBookingService');
 const { ensureDuplicatePaymentRefund } = require('./services/duplicateRefundService');
 const { applyRefundObservation, applyChargebackObservations } = require('./services/paymentObservationService');
 const { allocateCustomerNumber } = require('./services/customerNumberService');
@@ -1139,8 +1140,12 @@ app.post('/data', guestOrderLimiter, async (req, res) => {
         }
 
         const orderNo = await generateOrderNo(connection);
-        const initialOrderStatus = paymentMethod === 'cash' ? 'confirmed' : 'reserved';
+        let initialOrderStatus = paymentMethod === 'cash' ? 'confirmed' : 'reserved';
         const orderSummary = buildOrderSummary(orderNo, cartItems, initialOrderStatus);
+        if (orderSummary.totals.grandTotalBeforeDepositReturn === 0) {
+            initialOrderStatus = 'confirmed';
+            orderSummary.status = 'confirmed';
+        }
         orderSummary.acceptedDocuments = legalAcceptance.snapshot;
 
         const [orderResult] = await connection.execute(
@@ -1206,18 +1211,8 @@ app.post('/data', guestOrderLimiter, async (req, res) => {
 
         // A genuinely free rental has no payable provider intent. Retain the
         // selected method as context and record the zero EUR settlement locally.
-        if (orderSummary.totals.grandTotalBeforeDepositReturn === 0) {
-            await connection.execute(
-                `UPDATE rental_orders SET payment_method = ?, payment_status = 'paid',
-                 status = 'confirmed', reserved_until = NULL, paid_at = NOW() WHERE id = ?`,
-                [paymentMethod, orderId]
-            );
-            await connection.execute(
-                `INSERT INTO rental_order_payments
-                 (order_id, payment_type, payment_method, payment_status, amount, paid_at, note)
-                 VALUES (?, 'rental', ?, 'paid', 0, NOW(), 'Kostenfreier Mietauftrag; keine Providerzahlung erforderlich')`,
-                [orderId, paymentMethod]
-            );
+        if (await settleZeroAmountBooking(connection, { orderId, paymentMethod,
+            totalAmount: orderSummary.totals.grandTotalBeforeDepositReturn, items: cartItems })) {
             await connection.execute('DELETE FROM rental_carts WHERE id = ?', [cartId]);
             await sendOrderEmail([email], { ...orderSummary, id: orderId },
                 { firstName, lastName, company, email, phone, address, zip, city }, signatureDataUrl,
@@ -5530,6 +5525,14 @@ app.post('/orders/:id/mollie-checkout', async (req, res) => {
                 alreadyPaid: true,
                 message: 'Die ursprüngliche Online-Zahlung ist bereits eingegangen.'
             });
+        }
+
+        if (await settleZeroAmountBooking(connection, { orderId: order.id, paymentMethod: 'online', totalAmount: order.totalAmount, items })) {
+            if (order.cartId) await connection.execute('DELETE FROM rental_carts WHERE id = ?', [order.cartId]);
+            await connection.commit();
+            delete req.session.cartKey;
+            return res.json({ success: true, alreadyPaid: true, noPaymentRequired: true,
+                message: 'Kostenfreie Miete bestätigt; keine Providerzahlung erforderlich.' });
         }
 
         const [pendingCheckoutEffects] = await connection.execute(

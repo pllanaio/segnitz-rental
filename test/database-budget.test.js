@@ -138,3 +138,28 @@ test('normal end keeps capacity until transport closes and rolls back an unfinis
     }
     assert.equal(budget.active, 0);
 });
+
+test('readonly transaction marker follows begin, commit, rollback, destruction and close', async () => {
+    const key = Symbol.for('segnitz.mysql.transaction-active');
+    const budget = new ConnectionBudget();
+    const connection = boundConnection(rawConnection(), await budget.acquire(), { budget });
+    assert.equal(connection[key], false);
+    assert.throws(() => { connection[key] = true; }, TypeError);
+    assert.equal(Object.getOwnPropertyDescriptor(connection, key).enumerable, false);
+    await connection.beginTransaction();
+    assert.equal(connection[key], true);
+    await connection.commit();
+    assert.equal(connection[key], false);
+    await connection.beginTransaction();
+    assert.equal(connection[key], true);
+    await connection.rollback();
+    assert.equal(connection[key], false);
+    await connection.beginTransaction();
+    await connection.end();
+    assert.equal(connection[key], false);
+    const destroyed = boundConnection(rawConnection(), await budget.acquire(), { budget });
+    await destroyed.beginTransaction();
+    assert.equal(destroyed[key], true);
+    destroyed.destroy();
+    assert.equal(destroyed[key], false);
+});

@@ -108,3 +108,18 @@ test('concurrent obsolete-checkout worker and webhook cannot allocate duplicate 
         }
     } finally { await Promise.allSettled([first.rollback(), second.rollback()]); await Promise.allSettled([first.end(), second.end()]); }
 });
+
+test('public calendar periods and transactional availability agree for disputed and partially completed physical rentals', async () => {
+    const { listProductBlockedPeriods } = require('../../utils/availability');
+    const connection = await mysql.createConnection(dbConfig);
+    try {
+        for (const [index, status] of ['payment_dispute', 'partially_returned', 'partially_cancelled'].entries()) {
+            const date = `2027-01-${String(index + 10).padStart(2, '0')}`;
+            const [order] = await connection.execute('INSERT INTO rental_orders (order_no, status, payment_status) VALUES (?, ?, ?)', [`CALENDAR-${index}`, status, 'charged_back']);
+            await connection.execute("INSERT INTO rental_order_items (order_id, product_id, rental_start, rental_end, item_status) VALUES (?, ?, ?, ?, 'picked_up')", [order.insertId, TEST_PRODUCT.id, date, date]);
+            const periods = await listProductBlockedPeriods(connection, TEST_PRODUCT.id);
+            assert.ok(periods.some(period => period.rentalStart === date && period.rentalEnd === date));
+            assert.equal(await checkProductAvailability(connection, TEST_PRODUCT.id, date, date), false);
+        }
+    } finally { await connection.end(); }
+});

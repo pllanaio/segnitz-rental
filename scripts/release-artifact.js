@@ -88,6 +88,22 @@ function validateScanReport(scan, configDigest) {
 }
 
 async function main(mode, directory) {
+    if (mode === 'scan-summary') {
+        const reportPath = path.join(directory, 'trivy.json');
+        if (!fs.existsSync(reportPath)) {
+            console.log(JSON.stringify({ scanReport: 'absent' }));
+            return;
+        }
+        const scan = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
+        console.log(JSON.stringify({ imageId: scan.Metadata?.ImageID,
+            vulnerabilities: (scan.Results || []).flatMap(result => (result.Vulnerabilities || []).map(finding => ({
+                id: finding.VulnerabilityID, package: finding.PkgName, installed: finding.InstalledVersion,
+                fixed: finding.FixedVersion, severity: finding.Severity
+            }))),
+            secretFindingCount: (scan.Results || []).reduce((count, result) => count + (result.Secrets || []).length, 0)
+        }));
+        return;
+    }
     const metadata = JSON.parse(fs.readFileSync(path.join(directory, 'build-metadata.json'), 'utf8'));
     const manifestPath = path.join(directory, 'release.json');
     const checksum = await sha256(path.join(directory, 'image.tar'));

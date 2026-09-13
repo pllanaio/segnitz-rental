@@ -49,7 +49,10 @@ async function createTimeZoneAwareConnection(createConnection, config, options =
     try {
         await connection.execute('SET SESSION time_zone = ?', ['+00:00']);
         const queryMs = options.migration ? Number(process.env.DB_MIGRATION_TIMEOUT_MS || 120000) : Number(process.env.DB_QUERY_TIMEOUT_MS || 5000);
-        await connection.execute('SET SESSION max_execution_time = ?, innodb_lock_wait_timeout = ?', [queryMs, Math.max(1, Math.ceil(queryMs / 1000))]);
+        // mysql2's prepared protocol encodes JS Numbers as DOUBLE. MySQL integer
+        // system variables reject that type; text protocol emits escaped integer
+        // literals while preserving parameterization.
+        await connection.query('SET SESSION max_execution_time = ?, innodb_lock_wait_timeout = ?', [queryMs, Math.max(1, Math.ceil(queryMs / 1000))]);
     } catch (error) {
         await connection.end();
         throw error;

@@ -2494,3 +2494,34 @@ test('stale Open after Paid through status-sync never regresses settled source r
     assert.ok(ledger.length > 0);
     assert.ok(ledger.every(row => row.payment_status === 'paid'));
 });
+
+for (const [index, method] of ['cash', 'online'].entries()) {
+    test(`zero total ${method} checkout and legacy retry settle locally with consistent confirmation`, async () => {
+        const productId = 9001 + index;
+        await execute("INSERT INTO rental_products (id, product_key, title, price_per_day, deposit, is_active) VALUES (?, ?, 'Kostenfreie Testmiete', 0, 0, 1)", [productId, `ZERO-RENTAL-${index}`]);
+        const customer = new SessionClient();
+        await login(customer, TEST_CUSTOMER);
+        const cart = await customer.request('/cart/items', {
+            method: 'POST', headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ productId, rentalStart: futureDate(830), rentalEnd: futureDate(831) })
+        });
+        assert.equal(cart.status, 201, await cart.text());
+        const checkout = await customer.request('/data', { method: 'POST', headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ paymentMethod: method, form: orderForm(TEST_CUSTOMER.email) }) });
+        const created = await checkout.json();
+        assert.equal(checkout.status, 200, JSON.stringify(created));
+        assert.equal(created.noPaymentRequired, true);
+        const [stored] = await queryRows("SELECT status, payment_status, JSON_UNQUOTE(JSON_EXTRACT(confirmation_json, '$.status')) AS summaryStatus FROM rental_orders WHERE id = ?", [created.orderId]);
+        assert.deepEqual(stored, { status: 'confirmed', payment_status: 'paid', summaryStatus: 'confirmed' });
+        if (method === 'online') {
+            await execute("UPDATE rental_orders SET status = 'expired', payment_status = 'pending' WHERE id = ?", [created.orderId]);
+            await execute("UPDATE rental_order_items SET item_status = 'expired' WHERE order_id = ?", [created.orderId]);
+        }
+        const retry = await customer.request(`/orders/${created.orderId}/mollie-checkout`, { method: 'POST' });
+        const result = await retry.json();
+        assert.equal(retry.status, method === 'online' ? 200 : 409, JSON.stringify(result));
+        if (method === 'online') assert.equal(result.noPaymentRequired, true);
+        const intents = await queryRows("SELECT id FROM external_effects_outbox WHERE effect_type = 'mollie.payment.create' AND JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.payment.id')) = ?", [String(created.orderId)]);
+        assert.equal(intents.length, 0);
+    });
+}

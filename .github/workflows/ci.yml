@@ -206,17 +206,22 @@ jobs:
             --output type=oci,dest=release-image/image.tar \
             --metadata-file release-image/build-metadata.json .
           node scripts/release-artifact.js create release-image
+          python3 scripts/prepare-oci-scan.py release-image/image.tar release-scan
       - name: Scan the candidate OCI archive including unfixed high vulnerabilities
         uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
         env:
           TRIVY_LIST_ALL_PKGS: "true"
         with:
-          input: release-image/image.tar
+          input: release-scan
+          list-all-pkgs: true
           format: json
           output: release-image/trivy.json
           exit-code: "1"
           ignore-unfixed: false
           severity: CRITICAL,HIGH
+      - name: Summarize scan diagnostics without secret matches
+        if: always()
+        run: node scripts/release-artifact.js scan-summary release-image
       - name: Validate artifact and scan evidence
         env:
           RELEASE_SHA: ${{ github.sha }}

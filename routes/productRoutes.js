@@ -8,7 +8,7 @@ const fs = require('fs');
 const dbConfig = require('../config/db');
 const { checkAdmin } = require('../middleware/auth');
 const { removeUploadedFiles, uploadProductImages, validatePositiveId } = require('../utils/uploads');
-const { checkProductAvailability } = require('../utils/availability');
+const { checkProductAvailability, listProductBlockedPeriods } = require('../utils/availability');
 const { runInTransactionWithRetry } = require('../utils/dbRetry');
 const { formatDateInTimeZone } = require('../utils/businessDate');
 const {
@@ -144,26 +144,7 @@ router.get('/products/:id/availability', async (req, res) => {
     try {
         connection = await mysql.createConnection(dbConfig);
 
-        const [blockedPeriods] = await connection.execute(
-            `SELECT 
-        DATE_FORMAT(COALESCE(roi.adjusted_rental_start, roi.rental_start), '%Y-%m-%d') AS rentalStart,
-        DATE_FORMAT(COALESCE(roi.adjusted_rental_end, roi.rental_end), '%Y-%m-%d') AS rentalEnd
-     FROM rental_order_items roi
-     JOIN rental_orders ro ON ro.id = roi.order_id
-     WHERE roi.product_id = ?
-     AND ro.status IN (
-        'reserved', 'pending_payment', 'payment_failed',
-        'paid', 'confirmed', 'active', 'picked_up'
-     )
-     AND (
-        ro.status NOT IN ('reserved', 'pending_payment', 'payment_failed')
-        OR ro.reserved_until > NOW()
-     )
-     AND roi.returned_at IS NULL
-     AND COALESCE(roi.item_status, 'active') != 'cancelled'
-     ORDER BY COALESCE(roi.adjusted_rental_start, roi.rental_start) ASC`,
-            [req.params.id]
-        );
+        const blockedPeriods = await listProductBlockedPeriods(connection, req.params.id);
 
         res.json(blockedPeriods);
     } catch (error) {

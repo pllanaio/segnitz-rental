@@ -228,6 +228,17 @@ async function getExternalEffect(operationKey, options = {}) {
     }
 }
 
+async function redactDeadAuthPayload(connection, effect) {
+    if (effect.effect_type !== EFFECT_TYPES.MAIL_SEND ||
+        !/^(?:mail-password-reset|mail-verify)(?:[:-]|$)/u.test(effect.operation_key)) return;
+    // Retain the immutable payload hash and operation key for deduplication.
+    // Only pending/retry auth mail needs its plaintext link for delivery.
+    await connection.execute(
+        "UPDATE external_effects_outbox SET payload_json = JSON_OBJECT('redacted', TRUE) WHERE id = ?",
+        [effect.id]
+    );
+}
+
 async function claimExternalEffect({
     operationKey = null,
     workerId,
@@ -261,6 +272,7 @@ async function claimExternalEffect({
             if (applyDead) {
                 await applyDead(connection, expiredEffect, new Error(expiredLeaseMessage));
             }
+            await redactDeadAuthPayload(connection, expiredEffect);
             await connection.execute(
                 `UPDATE external_effects_outbox
                  SET status = 'dead',
@@ -424,14 +436,7 @@ async function failExternalEffect(effect, error, applyFailure = null) {
 
         const exhausted = Number(lockedEffect.attempt_count) >= Number(lockedEffect.max_attempts);
         const nextStatus = exhausted ? OUTBOX_STATUSES.DEAD : OUTBOX_STATUSES.RETRY;
-        const redactDeadAuthMail = exhausted && lockedEffect.effect_type === EFFECT_TYPES.MAIL_SEND &&
-            /^(?:mail-password-reset|mail-verify)/u.test(lockedEffect.operation_key);
-        if (redactDeadAuthMail) {
-            await connection.execute(
-                "UPDATE external_effects_outbox SET payload_json = JSON_OBJECT('redacted', TRUE) WHERE id = ?",
-                [lockedEffect.id]
-            );
-        }
+        if (exhausted) await redactDeadAuthPayload(connection, lockedEffect);
         const backoffSeconds = calculateBackoffSeconds(lockedEffect.attempt_count);
         if (exhausted && applyFailure) {
             await applyFailure(connection, lockedEffect, error);

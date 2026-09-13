@@ -81,6 +81,11 @@ function boundConnection(connection, release, { budget, queryTimeoutMs = 5000, t
     let transactionTimer = null;
     let fatalError = null;
     const pending = new Set();
+    Object.defineProperty(connection, Symbol.for('segnitz.mysql.transaction-active'), {
+        configurable: false,
+        enumerable: false,
+        get: () => Boolean(transactionTimer && !closed)
+    });
     const original = Object.fromEntries(['execute', 'query', 'ping', 'beginTransaction', 'commit', 'rollback', 'end', 'destroy']
         .filter(name => typeof connection[name] === 'function').map(name => [name, connection[name].bind(connection)]));
     // mysql2 calls its end() callback when COM_QUIT is queued, before the

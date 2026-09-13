@@ -91,6 +91,46 @@ function normalizePayment(payment) {
     };
 }
 
+function initialReceipts(payments, originalRentalCents, originalDepositCents) {
+    const groups = new Map();
+    for (const payment of payments) {
+        if (!['initial_payment', 'rental', 'deposit'].includes(payment.type)) continue;
+        const key = payment.provider ? `provider:${payment.provider}` : `method:${payment.method}`;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(payment);
+    }
+    let rental = 0;
+    let deposit = 0;
+    let received = 0;
+    let unallocated = 0;
+    for (const rows of groups.values()) {
+        const paid = rows.filter(payment => payment.status === 'paid');
+        const aggregates = paid.filter(payment => payment.type === 'initial_payment').map(payment => payment.cents);
+        // A provider ID represents exactly one receipt. Cash can have several
+        // recorded receipts. Allocation rows describe that money, not extra cash.
+        const aggregate = rows[0].provider ? aggregates.reduce((maximum, amount) => Math.max(maximum, amount), 0) : sum(aggregates);
+        let rentalPart = sum(paid.filter(payment => payment.type === 'rental').map(payment => payment.cents));
+        let depositPart = sum(paid.filter(payment => payment.type === 'deposit').map(payment => payment.cents));
+        const captured = Math.max(aggregate, sum([rentalPart, depositPart]));
+        let remaining = captured - rentalPart - depositPart;
+        const rentalRows = rows.filter(payment => payment.type === 'rental');
+        const depositRows = rows.filter(payment => payment.type === 'deposit');
+        const rentalTarget = rentalRows.length ? sum(rentalRows.map(payment => payment.cents)) : originalRentalCents;
+        const depositTarget = depositRows.length ? sum(depositRows.map(payment => payment.cents)) : originalDepositCents;
+        const rentalCredit = Math.min(remaining, Math.max(rentalTarget - rentalPart, 0));
+        rentalPart += rentalCredit;
+        remaining -= rentalCredit;
+        const depositCredit = Math.min(remaining, Math.max(depositTarget - depositPart, 0));
+        depositPart += depositCredit;
+        remaining -= depositCredit;
+        rental = sum([rental, rentalPart]);
+        deposit = sum([deposit, depositPart]);
+        received = sum([received, captured]);
+        unallocated = sum([unallocated, remaining]);
+    }
+    return { rental, deposit, received, unallocated };
+}
+
 function summarizeOrderFinance(order) {
     const items = order.items || [];
     const active = items.filter(item => !['cancelled', 'expired'].includes(field(item, 'itemStatus', 'item_status')));
@@ -99,19 +139,20 @@ function summarizeOrderFinance(order) {
     const paid = payments.filter(payment => payment.status === 'paid');
     const rentalContractCents = sum(details.map(item => item.cents.originalRentalTotal));
     const depositContractCents = sum(details.map(item => item.cents.deposit));
-    let rentalReceivedCents = sum(paid.filter(payment => payment.type === 'rental').map(payment => payment.cents));
-    let depositReceivedCents = sum(paid.filter(payment => payment.type === 'deposit').map(payment => payment.cents));
-    const initialOnly = paid.filter(payment => payment.type === 'initial_payment' && !paid.some(component =>
-        ['rental', 'deposit'].includes(component.type) && (payment.provider ? component.provider === payment.provider : !component.provider)
-    ));
-    for (const payment of initialOnly) {
-        const rentalShare = Math.min(Math.max(rentalContractCents - rentalReceivedCents, 0), payment.cents);
-        rentalReceivedCents += rentalShare;
-        depositReceivedCents += Math.min(Math.max(payment.cents - rentalShare, 0), Math.max(depositContractCents - depositReceivedCents, 0));
-    }
+    // Receipts survive cancellation and refund. Use the original full contract
+    // to classify legacy aggregate-only receipts; active items govern amounts due.
+    const originalDetails = items.map(itemFinancials);
+    const receipts = initialReceipts(payments,
+        sum(originalDetails.map(item => item.cents.originalRentalTotal)),
+        sum(originalDetails.map(item => item.cents.deposit)));
+    const rentalReceivedCents = receipts.rental;
+    const depositReceivedCents = receipts.deposit;
+    const unallocatedReceivedCents = receipts.unallocated;
     const openStatuses = new Set(['pending', 'open', 'authorized', 'failed', 'cancelled', 'expired']);
     const additional = payments.filter(payment => ['rental_adjustment', 'return_additional_charge'].includes(payment.type));
-    const additionalDueCents = sum(additional.filter(payment => openStatuses.has(payment.status)).map(payment => Math.max(payment.cents, 0)));
+    const inactiveItemIds = new Set(items.filter(item => !active.includes(item)).map(item => String(item.id)));
+    const additionalDueCents = sum(additional.filter(payment => active.length > 0 &&
+        !inactiveItemIds.has(String(payment.item)) && openStatuses.has(payment.status)).map(payment => Math.max(payment.cents, 0)));
     const offsetCents = sum(additional.filter(payment => payment.status === 'offset').map(payment => payment.cents));
 
     // Retry rows may replace a failed refund. A provider refund ID identifies a
@@ -137,7 +178,16 @@ function summarizeOrderFinance(order) {
             const existing = refunds.get(key);
             if (!existing || existing.status !== 'paid') refunds.set(key, payment);
         });
-    const refundRows = [...refunds.values()];
+    const transfers = new Map();
+    for (const [intent, payment] of refunds) {
+        const identity = payment.refund ? `refund:${payment.refund}` : intent;
+        const existing = transfers.get(identity);
+        if (existing && (existing.cents !== payment.cents || existing.provider !== payment.provider)) {
+            throw new TypeError('Widersprüchliche Buchungen zu derselben Provider-Erstattung.');
+        }
+        if (!existing || existing.status !== 'paid') transfers.set(identity, payment);
+    }
+    const refundRows = [...transfers.values()];
     const refundedCents = sum(refundRows.filter(payment => payment.status === 'paid').map(payment => Math.abs(payment.cents)));
     const pendingRefunds = refundRows.filter(payment => payment.status !== 'paid');
     const recordedDepositClaims = sum(refundRows.filter(payment => payment.type === 'deposit_refund').map(payment => Math.abs(payment.cents)));
@@ -152,11 +202,11 @@ function summarizeOrderFinance(order) {
     const depositDueCents = Math.max(unreturnedDeposit - depositReceivedCents, 0);
     const customerDueCents = sum([rentalDueCents, depositDueCents, additionalDueCents]);
     const disputedCents = sum(payments.filter(payment => payment.type === 'chargeback' && payment.status === 'charged_back').map(payment => Math.abs(payment.cents)));
-    const receivedCents = sum([rentalReceivedCents, depositReceivedCents, ...paid.filter(payment => ['rental_adjustment', 'return_additional_charge'].includes(payment.type)).map(payment => payment.cents)]);
+    const receivedCents = sum([receipts.received, ...paid.filter(payment => ['rental_adjustment', 'return_additional_charge'].includes(payment.type)).map(payment => payment.cents)]);
     const balanceCents = customerDueCents - refundDueCents;
     const status = disputedCents > 0 ? 'disputed' : customerDueCents > 0 ? 'payment_due' : refundFailedCents > 0 ? 'refund_failed' : refundDueCents > 0 ? 'refund_due' : depositHeldCents > 0 ? 'deposit_held' : 'settled';
     const statusLabels = { disputed: 'Zahlung in Klärung', payment_due: 'Zahlung offen', refund_failed: 'Erstattung fehlgeschlagen', refund_due: 'Erstattung offen', deposit_held: 'Miete bezahlt; Kaution wird gehalten', settled: 'Bestellung vollständig ausgeglichen' };
-    return { version: 1, currency: 'EUR', rentalContractCents, depositContractCents, rentalReceivedCents, depositReceivedCents, rentalDueCents, depositDueCents, depositHeldCents, depositRetainedCents, additionalDueCents, offsetCents, receivedCents, refundedCents, refundDueCents, refundFailedCents, refundPendingCents, disputedCents, customerDueCents, balanceCents, status, statusLabel: statusLabels[status] };
+    return { version: 1, currency: 'EUR', rentalContractCents, depositContractCents, rentalReceivedCents, depositReceivedCents, unallocatedReceivedCents, rentalDueCents, depositDueCents, depositHeldCents, depositRetainedCents, additionalDueCents, offsetCents, receivedCents, refundedCents, refundDueCents, refundFailedCents, refundPendingCents, disputedCents, customerDueCents, balanceCents, status, statusLabel: statusLabels[status] };
 }
 
 function attachOrderFinance(order) {

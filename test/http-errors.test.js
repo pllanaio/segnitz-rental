@@ -26,11 +26,12 @@ test('database saturation and deadlines produce bounded JSON 503 without error d
 });
 
 test('catalog route preserves database capacity failure as JSON 503', async () => {
+    const router = require('../routes/productRoutes');
     const mysql = require('mysql2/promise');
     const original = mysql.createConnection;
     mysql.createConnection = async () => { throw Object.assign(new Error('private capacity detail'), { code: 'DB_QUEUE_FULL' }); };
     const app = express();
-    app.use(require('../routes/productRoutes'));
+    app.use(router);
     app.use(jsonErrors);
     const server = app.listen(0, '127.0.0.1');
     await once(server, 'listening');
