@@ -85,6 +85,13 @@ function normalizeReferentialRule(rule) {
     return normalized === 'NO ACTION' ? 'RESTRICT' : normalized;
 }
 
+function lowercaseOutsideSqlLiterals(value) {
+    // JSON paths and binary/case-sensitive literals are part of enforcement.
+    // Case-fold SQL keywords/identifiers only, preserving quoted content.
+    return String(value).replace(/'(?:''|\\.|[^'\\])*'|[^']+/gsu,
+        token => token.startsWith("'") ? token : token.toLowerCase());
+}
+
 function normalizeCheckClause(clause) {
     let normalized = String(clause || '')
         .replace(/`/gu, '')
@@ -107,12 +114,11 @@ function normalizeCheckClause(clause) {
             /(^|[\s,(=])_(?:utf8mb4|utf8mb3|utf8|latin1|binary)(?=')/giu,
             '$1'
         )
-        .toLowerCase()
         .replace(/\s+/gu, ' ')
         .replace(/\s*([(),=<>])\s*/gu, '$1')
         .trim();
 
-    normalized = removeRedundantExpressionParentheses(normalized);
+    normalized = removeRedundantExpressionParentheses(lowercaseOutsideSqlLiterals(normalized));
 
     return normalized;
 }
@@ -129,8 +135,21 @@ const atomicBetweenPredicate = new RegExp(
     'iu'
 );
 
+function isJsonFunctionComparison(expression) {
+    const match = /^(?:json_type|json_contains_path|json_extract)\(/iu.exec(expression);
+    if (!match) return false;
+    const opening = expression.indexOf('(');
+    const closing = findParenthesisPairs(expression).find(pair => pair.start === opening)?.end;
+    if (closing === undefined) return false;
+    // Only unwrap one complete scalar comparison. In particular, do not treat
+    // an AND/OR expression containing multiple function calls as one predicate.
+    return new RegExp(`^\\s*(?:=|<>|!=|<=|>=|<|>)\\s*${scalarPredicateValue}$`, 'iu')
+        .test(expression.slice(closing + 1));
+}
+
 function isAtomicPredicate(expression) {
-    return atomicInPredicate.test(expression) || atomicBetweenPredicate.test(expression);
+    return atomicInPredicate.test(expression) || atomicBetweenPredicate.test(expression) ||
+        isJsonFunctionComparison(expression);
 }
 
 function hasBooleanBoundaryBefore(expression, index) {

@@ -70,7 +70,9 @@ function validateScanReport(scan, configDigest) {
     if (scan.SchemaVersion !== 2 || scan.ArtifactType !== 'container_image' ||
         scan.Metadata?.ImageID !== configDigest || !Array.isArray(scan.Results) || !scan.Results.length) throw new Error('Missing or mismatched container scan identity');
     const os = scan.Results.find(result => result.Class === 'os-pkgs' && result.Type === 'alpine');
-    const npm = scan.Results.filter(result => result.Class === 'lang-pkgs' && result.Type === 'npm');
+    // Trivy distinguishes an npm lockfile from installed Node package metadata.
+    // The runtime image must contain scanned installed dependencies.
+    const npm = scan.Results.filter(result => result.Class === 'lang-pkgs' && result.Type === 'node-pkg');
     if (!Array.isArray(os?.Packages) || !os.Packages.length || !npm.length) throw new Error('OS and npm package coverage required');
     for (const result of [os, ...npm]) {
         if (!Array.isArray(result.Packages) || !result.Packages.length || result.Packages.some(pkg => typeof pkg.Name !== 'string' || !pkg.Name || typeof pkg.Version !== 'string' || !pkg.Version)) throw new Error('Incomplete scanned package inventory');
@@ -96,6 +98,7 @@ async function main(mode, directory) {
         }
         const scan = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
         console.log(JSON.stringify({ imageId: scan.Metadata?.ImageID,
+            coverage: (scan.Results || []).map(result => ({ class: result.Class, type: result.Type, packages: result.Packages?.length || 0 })),
             vulnerabilities: (scan.Results || []).flatMap(result => (result.Vulnerabilities || []).map(finding => ({
                 id: finding.VulnerabilityID, package: finding.PkgName, installed: finding.InstalledVersion,
                 fixed: finding.FixedVersion, severity: finding.Severity

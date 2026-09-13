@@ -13,9 +13,10 @@ async function publishPaymentFixtures(connection) {
          GROUP BY mollie_payment_id, order_id`
     );
     for (const row of rows) {
-        let status = 'open';
-        for (const value of ['paid', 'failed', 'expired', 'authorized']) if (row.id.includes(`_${value}_`)) status = value;
-        if (row.id.includes('_cancelled_') || row.id.includes('_canceled_')) status = 'canceled';
+        // IDs also contain scenario descriptions (e.g. paid_cancelled_extension).
+        // Those labels must never override the explicit provider observation.
+        const declared = /^tr_test_(open|pending|paid|failed|expired|authorized|cancelled|canceled)_/.exec(row.id)?.[1];
+        const status = declared === 'cancelled' ? 'canceled' : declared || 'open';
         const fixture = { resource: 'payment', id: row.id, status, method: status === 'paid' ? 'ideal' : null,
             amount: { currency: 'EUR', value: Number(row.amount).toFixed(2) }, metadata: { orderId: String(row.order_id) } };
         const file = path.join(directory, `${row.id}.json`);

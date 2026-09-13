@@ -3,7 +3,7 @@
 const bcrypt = require('bcrypt');
 const mysql = require('mysql2/promise');
 const dbConfig = require('../../config/db');
-const { rebuildDatabaseSchema } = require('./database-schema');
+const { assertTestDatabaseName, rebuildDatabaseSchema } = require('./database-schema');
 
 const TEST_USER = Object.freeze({
     email: 'test@example.com',
@@ -24,6 +24,23 @@ const TEST_PRODUCT = Object.freeze({
     productKey: 'TEST-RUETTELPLATTE',
     title: 'Test-Rüttelplatte'
 });
+
+async function expireTestUserSessions() {
+    assertTestDatabaseName(dbConfig.database);
+    const connection = await mysql.createConnection(dbConfig);
+    try {
+        // Persisted-store TTL only, scoped to the known synthetic fixture user.
+        // No session IDs, cookies, CSRF values or payloads leave this helper.
+        const [result] = await connection.execute(
+            `UPDATE user_sessions SET expires = UNIX_TIMESTAMP() - 1
+             WHERE JSON_UNQUOTE(JSON_EXTRACT(data, '$.user')) = ?`,
+            [TEST_USER.email]
+        );
+        return Number(result.affectedRows);
+    } finally {
+        await connection.end();
+    }
+}
 
 async function resetTestDatabase() {
     const connection = await mysql.createConnection(dbConfig);
@@ -98,6 +115,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+    expireTestUserSessions,
     resetTestDatabase,
     TEST_ADMIN,
     TEST_FOREIGN_USER,

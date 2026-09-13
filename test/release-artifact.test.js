@@ -30,7 +30,7 @@ function fixture(root) {
 function scan(configDigest) {
     return { SchemaVersion: 2, ArtifactType: 'container_image', Metadata: { ImageID: configDigest }, Results: [
         { Class: 'os-pkgs', Type: 'alpine', Packages: [{ Name: 'alpine-baselayout', Version: 'synthetic' }] },
-        { Class: 'lang-pkgs', Type: 'npm', Packages: ['express', 'mysql2', 'multer'].map(Name => ({ Name, Version: 'synthetic' })) }
+        { Class: 'lang-pkgs', Type: 'node-pkg', Packages: ['express', 'mysql2', 'multer'].map(Name => ({ Name, Version: 'synthetic' })) }
     ] };
 }
 

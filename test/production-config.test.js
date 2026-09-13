@@ -94,3 +94,26 @@ test('operator document configuration rejects unsafe links and invalid versions'
         assert.throws(() => validateRuntimeConfig(validConfig(changes)), /LEGAL_/);
     }
 });
+
+test('optional migration credentials require a complete nonempty pair without disclosing values', () => {
+    assert.doesNotThrow(() => validateRuntimeConfig(validConfig()));
+    const credentials = { DB_MIGRATION_USER: 'synthetic-migration-user', DB_MIGRATION_PW: ' synthetic-password-fixture ' };
+    const environment = validConfig(credentials);
+    const config = validateRuntimeConfig(environment);
+    assert.equal(environment.DB_MIGRATION_PW, credentials.DB_MIGRATION_PW);
+    assert.equal(JSON.stringify(config).includes('synthetic-password-fixture'), false);
+    for (const changes of [
+        { DB_MIGRATION_USER: credentials.DB_MIGRATION_USER },
+        { DB_MIGRATION_PW: credentials.DB_MIGRATION_PW },
+        { DB_MIGRATION_USER: '', DB_MIGRATION_PW: '' },
+        { ...credentials, DB_MIGRATION_USER: '  ' },
+        { ...credentials, DB_MIGRATION_PW: '  ' },
+        { ...credentials, DB_MIGRATION_PW: null },
+        { ...credentials, DB_MIGRATION_USER: 123 }
+    ]) assert.throws(() => validateRuntimeConfig(validConfig(changes)), error => {
+        assert.match(error.message, /DB_MIGRATION_(USER|PW)/);
+        assert.equal(error.message.includes(credentials.DB_MIGRATION_USER), false);
+        assert.equal(error.message.includes('synthetic-password-fixture'), false);
+        return true;
+    });
+});

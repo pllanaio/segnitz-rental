@@ -38,6 +38,7 @@ uploads/
 docs/
 scripts/ops/
 release-image/
+release-scan/
 release-evidence/
 *.age
 *.sql.gz

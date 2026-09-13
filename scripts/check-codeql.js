@@ -156,6 +156,21 @@ function main(directory) {
             try { sarif = JSON.parse(contents); } catch { requireContract(false, 'INVALID_JSON'); }
             failures += securityFailures(sarif).length;
             console.log(JSON.stringify({ codeql_file_index: fileIndex, ...summarizeSarif(sarif) }));
+            // Static repository coordinates only; never emit source snippets,
+            // result messages, environment or dataflow values from SARIF.
+            const findings = sarif.runs.flatMap(run => run.results.flatMap(result => {
+                const rule = resolveRule(run.tool, result);
+                if (result.kind === 'pass' || result.kind === 'notApplicable') return [];
+                const severity = Number(rule.properties?.['security-severity'] || 0);
+                if (severity < 7 && result.level !== 'error' && rule.defaultConfiguration?.level !== 'error') return [];
+                const location = result.locations?.[0]?.physicalLocation;
+                const uri = location?.artifactLocation?.uri;
+                return [{ rule: /^[A-Za-z0-9_/-]{1,200}$/.test(rule.id) ? rule.id : 'unavailable',
+                    path: typeof uri === 'string' && /^(?!\/)(?!.*\.\.)[A-Za-z0-9_./-]{1,300}$/.test(uri) ? uri : 'unavailable',
+                    line: Number.isSafeInteger(location?.region?.startLine) ? location.region.startLine : null,
+                    severity, level: result.level || rule.defaultConfiguration?.level || 'warning' }];
+            }));
+            console.log(JSON.stringify({ codeql_blocking_locations: findings.slice(0, 1000), truncated: findings.length > 1000 }));
         }
         console.log(JSON.stringify({ codeql_files: files.length, blocking_findings: failures }));
         return failures ? 1 : 0;

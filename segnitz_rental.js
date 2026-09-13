@@ -6348,6 +6348,10 @@ app.post('/admin/order-payments/:id/retry-refund', checkAdmin, adminReturnMutati
         if (providerReferences[0]?.mollie_payment_id) {
             try { await reconcileMolliePayment(providerReferences[0].mollie_payment_id); }
             catch (error) {
+                console.warn('refund_retry_reconciliation_failed', {
+                    paymentRecordId: Number(req.params.id),
+                    code: error.code || 'PROVIDER_ERROR'
+                });
                 return res.status(503).json({ error: 'Vor einem neuen Erstattungsversuch muss der Providerabgleich erfolgreich abgeschlossen sein.' });
             }
         }

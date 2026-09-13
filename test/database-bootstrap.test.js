@@ -590,3 +590,18 @@ test('prüft alle historischen Checksummen bevor vorgezogene UTC-Up-Logik Daten 
     await assert.rejects(runAutomaticMigrations(connection, migrationList), /nachträglich verändert/);
     assert.equal(changed, false, 'checksum drift must stop before any UTC or other DML');
 });
+
+test('CHECK normalization preserves case-sensitive JSON paths and other string literal content', () => {
+    const expected = "JSON_CONTAINS_PATH(snapshot_json, 'one', '$.schemaVersion') = 1";
+    const drifted = "JSON_CONTAINS_PATH(snapshot_json, 'one', '$.schemaversion') = 1";
+    assert.notEqual(normalizeCheckClause(expected), normalizeCheckClause(drifted));
+    assert.equal(normalizeCheckClause(expected), normalizeCheckClause("json_contains_path(`snapshot_json`, 'one', '$.schemaVersion')=1"));
+    assert.equal(normalizeCheckClause("label = 'Don''t change CASE'"), "label='Don''t change CASE'");
+});
+
+test('matches MySQL 8.4 JSON CHECK predicate wrappers without erasing boolean grouping', () => {
+    const expected = "JSON_TYPE(snapshot_json) = 'OBJECT' AND JSON_CONTAINS_PATH(snapshot_json, 'one', '$.schemaVersion') = 1 AND JSON_EXTRACT(snapshot_json, '$.schemaVersion') = 1";
+    const actual = "((json_type(`snapshot_json`) = _utf8mb4'OBJECT') and (json_contains_path(`snapshot_json`,_utf8mb4'one',_utf8mb4'$.schemaVersion') = 1) and (json_extract(`snapshot_json`,_utf8mb4'$.schemaVersion') = 1))";
+    assert.equal(normalizeCheckClause(actual), normalizeCheckClause(expected));
+    assert.notEqual(normalizeCheckClause("(json_type(snapshot_json)='OBJECT' OR status='ready') AND active=1"), normalizeCheckClause("json_type(snapshot_json)='OBJECT' OR (status='ready' AND active=1)"));
+});

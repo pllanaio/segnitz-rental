@@ -39,7 +39,17 @@ async function checkout(page, method) {
     await page.locator('#categoryFilterList button').filter({ hasText: 'Baumaschinen' }).click();
     const card = page.locator('#productGrid .product-card').filter({ hasText: TEST_PRODUCT.title });
     await expect(card).toHaveCount(1);
-    await card.getByRole('button', { name: 'Details' }).click();
+    const detailsButton = card.getByRole('button', { name: 'Details' });
+    await detailsButton.focus();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('#productDetailsModal')).toBeVisible();
+    await expect.poll(() => page.locator('#productDetailsModal').evaluate(modal => modal.contains(document.activeElement))).toBe(true);
+    await page.keyboard.press('Tab');
+    await expect.poll(() => page.locator('#productDetailsModal').evaluate(modal => modal.contains(document.activeElement))).toBe(true);
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#productDetailsModal')).not.toBeVisible();
+    await detailsButton.focus();
+    await page.keyboard.press('Enter');
     await expect(page.locator('#modalCalendarContainer .flatpickr-calendar')).toBeVisible();
     const calendarLayout = await page.locator('#modalCalendarContainer').evaluate(container => {
         const calendar = container.querySelector('.flatpickr-calendar');
@@ -71,12 +81,15 @@ async function checkout(page, method) {
     // Doppelklick darf nur einen Schritt weiterführen, trotz asynchronem Cart.
     await page.locator('#next-btn').evaluate(button => { button.click(); button.click(); });
     await expect(page.locator('#cartReviewItems')).toBeVisible();
+    await expect(page.locator('#page1 h4').first()).toBeFocused();
     await page.locator('#next-btn').click();
+    await expect.poll(() => page.locator('#page2').evaluate(step => step.contains(document.activeElement))).toBe(true);
     await page.locator('#CustomerAddress').fill("Jean-Paul-Str. 12/3");
     await page.locator('#CustomerPhone').fill('+49 (0)931 123-456');
     await page.locator('#next-btn').click();
     const canvas = page.locator('#signature-pad canvas');
     await expect(canvas).toBeVisible();
+    await expect.poll(() => page.locator('#page3').evaluate(step => step.contains(document.activeElement))).toBe(true);
     const box = await canvas.boundingBox();
     await page.mouse.move(box.x + 20, box.y + 50);
     await page.mouse.down();

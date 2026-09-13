@@ -104,7 +104,7 @@ async function migrateUtcInstants(connection, { env = process.env, afterBatch } 
             await connection.beginTransaction();
             try {
                 const [rows] = await connection.execute(
-                    `SELECT CAST(id AS CHAR) AS id, ${columns.map(column => `CAST(\`${column}\` AS CHAR) AS \`${column}\``).join(', ')} FROM \`${table}\` WHERE id > ? ORDER BY id LIMIT 200 FOR UPDATE`, [lastId]
+                    `SELECT CAST(id AS CHAR) AS id, ${columns.map(column => `CAST(\`${column}\` AS CHAR) AS \`${column}\``).join(', ')} FROM \`${table}\` WHERE id > ? ORDER BY \`${table}\`.id LIMIT 200 FOR UPDATE`, [lastId]
                 );
                 if (rows.some(row => columns.some(column => row[column] !== null))) {
                     if (!['berlin', 'utc'].includes(env.DB_LEGACY_DATETIME_MODE) || env.DB_LEGACY_WRITERS_STOPPED !== '1') {
@@ -145,7 +145,7 @@ async function inspectLegacyDatetimes(connection, { env, overrides, overrideHash
         let after = String(checkpoints[0]?.last_id || '0');
         while (true) {
             const [rows] = await connection.execute(
-                `SELECT CAST(id AS CHAR) AS id, ${columns.map(column => `CAST(\`${column}\` AS CHAR) AS \`${column}\``).join(', ')} FROM \`${table}\` WHERE id > ? ORDER BY id LIMIT 200`, [after]
+                `SELECT CAST(id AS CHAR) AS id, ${columns.map(column => `CAST(\`${column}\` AS CHAR) AS \`${column}\``).join(', ')} FROM \`${table}\` WHERE id > ? ORDER BY \`${table}\`.id LIMIT 200`, [after]
             );
             for (const row of rows) for (const column of columns) {
                 if (row[column] === null) continue;

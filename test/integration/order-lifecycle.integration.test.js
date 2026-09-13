@@ -213,10 +213,37 @@ async function createOrder(client, paymentMethod, rentalStart, rentalEnd) {
         })
     });
 
-    const body = await response.json();
-    assert.equal(response.status, 200, JSON.stringify(body));
+    return readCreatedOrder(response, paymentMethod);
+}
 
-    return body;
+async function readCreatedOrder(response, paymentMethod) {
+    const body = await response.json();
+    if (paymentMethod !== 'online' || response.status !== 202) {
+        assert.equal(response.status, 200, JSON.stringify(body));
+        return body;
+    }
+
+    // The HTTP request and persistent worker may contend for this intent. A 202
+    // is accepted only when the same real intent subsequently finishes; do not
+    // replace its provider ID while the worker could still commit its result.
+    assert.equal(body.paymentPending, true);
+    assert.ok(Number.isSafeInteger(body.orderId) && body.orderId > 0);
+    const prepared = await waitForDatabaseRow(
+        `SELECT ro.mollie_payment_id, ro.mollie_checkout_url AS checkoutUrl,
+                ro.status, ro.payment_status
+         FROM rental_orders ro
+         JOIN rental_order_payments payment ON payment.order_id = ro.id
+          AND payment.payment_type = 'initial_payment'
+          AND payment.mollie_payment_id = ro.mollie_payment_id
+         JOIN external_effects_outbox effect ON effect.operation_key = payment.external_operation_key
+         WHERE ro.id = ? AND effect.status = 'succeeded'`,
+        [body.orderId],
+        row => Boolean(row.mollie_payment_id && row.checkoutUrl),
+        'Persistierter Online-Checkout nach HTTP 202'
+    );
+    assert.equal(prepared.status, 'reserved');
+    assert.equal(prepared.payment_status, 'pending');
+    return { ...body, checkoutUrl: prepared.checkoutUrl };
 }
 
 before(async () => {
@@ -1852,7 +1879,7 @@ test('erstattet eine zweite Initialzahlung nach Checkout-Retry, ohne den aktiven
     assert.equal(Number(duplicateRefund.amount), -460);
 });
 
-test('startet eine fehlgeschlagene Online-Erstattung kontrolliert und betragsbegrenzt erneut', async () => {
+test('startet eine fehlgeschlagene Online-Erstattung kontrolliert und betragsbegrenzt erneut', async t => {
     const customer = new SessionClient();
     await login(customer, TEST_CUSTOMER);
     const order = await createOrder(customer, 'online', futureDate(90), futureDate(91));
@@ -1882,19 +1909,34 @@ test('startet eine fehlgeschlagene Online-Erstattung kontrolliert und betragsbeg
         { method: 'POST' }
     );
     const retryBody = await retryResponse.json();
+    if (retryResponse.status !== 200) {
+        for (const line of serverOutput.split('\n')) {
+            let event;
+            try { event = JSON.parse(line); } catch { continue; }
+            if (!event.values?.includes('refund_retry_reconciliation_failed')) continue;
+            const detail = event.values.find(value => value && typeof value === 'object');
+            if (detail?.paymentRecordId === failedRefundResult.insertId) {
+                // Emit only the allowlisted category, never application output,
+                // provider responses, operations keys or mailbox payloads.
+                t.diagnostic(`refund retry reconciliation category: ${/^[A-Z][A-Z0-9_]{0,80}$/.test(detail.code) ? detail.code : 'PROVIDER_ERROR'}`);
+            }
+        }
+    }
     assert.equal(retryResponse.status, 200, JSON.stringify(retryBody));
-    assert.equal(retryBody.paymentStatus, 'paid');
+    assert.ok(['pending', 'paid'].includes(retryBody.paymentStatus), JSON.stringify(retryBody));
 
-    const retryRows = await queryRows(
+    const settledRetry = await waitForDatabaseRow(
         `SELECT payment_status, amount, mollie_refund_id
          FROM rental_order_payments
          WHERE order_id = ? AND payment_type = 'duplicate_payment_refund'
          ORDER BY id DESC`,
-        [order.orderId]
+        [order.orderId],
+        row => row.payment_status === 'paid',
+        'Persistierte Wiederholung der Online-Erstattung'
     );
-    assert.equal(retryRows[0].payment_status, 'paid');
-    assert.equal(Number(retryRows[0].amount), -25);
-    assert.match(retryRows[0].mollie_refund_id, /^re_test_paid_/);
+    assert.equal(settledRetry.payment_status, 'paid');
+    assert.equal(Number(settledRetry.amount), -25);
+    assert.match(settledRetry.mollie_refund_id, /^re_test_paid_/);
 });
 
 test('dedupliziert einen bereits pending Refund-Retry vor der Kapazitätsberechnung', async () => {
@@ -1971,8 +2013,7 @@ test('erstattet Teilstorno und anschließenden Reststorno einer bezahlten Online
             form: orderForm(TEST_CUSTOMER.email)
         })
     });
-    const order = await createResponse.json();
-    assert.equal(createResponse.status, 200, JSON.stringify(order));
+    const order = await readCreatedOrder(createResponse, 'online');
 
     const paidPaymentId = `tr_test_paid_partial_cancel_${order.orderId}`;
     await execute('UPDATE rental_orders SET mollie_payment_id = ? WHERE id = ?', [paidPaymentId, order.orderId]);

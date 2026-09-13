@@ -3,7 +3,7 @@
 // Deliberate, narrowly scoped HTTP faults exercise error presentation. These
 // secondary tests do not replace the unmocked production-primary lifecycle.
 const { test, expect } = require('@playwright/test');
-const { TEST_USER, TEST_PRODUCT } = require('../support/test-database');
+const { expireTestUserSessions, TEST_USER, TEST_PRODUCT } = require('../support/test-database');
 
 async function login(page) {
     await page.goto('/login.html');
@@ -77,6 +77,26 @@ test('serverseitig beendete Session verhindert eine Änderung aus dem noch offen
     await expect(page.locator('#globalAlertContainer .alert-danger')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Daten speichern' })).toBeEnabled();
     await expect(address).toHaveValue('Nicht gespeicherter Testweg 99');
+    await login(page);
+    await page.goto('/profile.html');
+    await expect(page.getByLabel('Adresse', { exact: true })).toHaveValue('Teststrasse 1');
+});
+
+test('abgelaufene persistierte Session verhindert eine Profiländerung trotz vorhandenem Browsercookie', async ({ page }) => {
+    await login(page);
+    await page.goto('/profile.html');
+    const address = page.getByLabel('Adresse', { exact: true });
+    await expect(address).toHaveValue('Teststrasse 1');
+    // Real session-store expiry; preserve browser cookies and the rendered form.
+    // The helper touches only TEST_USER rows in a guarded test/ci database.
+    expect((await expireTestUserSessions()) > 0).toBe(true);
+    await address.fill('Abgelaufener Testweg 77');
+    const result = page.waitForResponse(response => response.url().endsWith('/my-profile') && response.request().method() === 'PUT');
+    await page.getByRole('button', { name: 'Daten speichern' }).click();
+    expect([401, 403].includes((await result).status())).toBe(true);
+    await expect(page.locator('#globalAlertContainer .alert-danger')).toBeVisible();
+    await expect(address).toHaveValue('Abgelaufener Testweg 77');
+    await expect(page.getByRole('button', { name: 'Daten speichern' })).toBeEnabled();
     await login(page);
     await page.goto('/profile.html');
     await expect(page.getByLabel('Adresse', { exact: true })).toHaveValue('Teststrasse 1');

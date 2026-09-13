@@ -80,6 +80,10 @@ function validateRuntimeConfig(environment = process.env) {
     }
 
     for (const name of ['DB_HOST', 'DB_USER', 'DB_NAME', 'SESSION_SECRET', 'BASE_URL']) requireValue(environment, name);
+    if (environment.DB_MIGRATION_USER !== undefined || environment.DB_MIGRATION_PW !== undefined) {
+        requireValue(environment, 'DB_MIGRATION_USER');
+        requireValue(environment, 'DB_MIGRATION_PW');
+    }
     if (!/^[A-Za-z0-9_]+$/u.test(environment.DB_NAME)) throw new Error('DB_NAME enthält unzulässige Zeichen.');
     if (production) {
         requireValue(environment, 'DB_PW');
