@@ -701,7 +701,7 @@ test('Bar-Mietverlängerung persistiert Status und Mail atomar', () => {
         source.indexOf("app.put('/admin/order-items/:itemId/return'")
     );
     const mailPosition = adjustmentRoute.indexOf('await sendRentalAdjustmentEmailWithPayment(');
-    const commitPosition = adjustmentRoute.indexOf('await connection.commit();');
+    const commitPosition = adjustmentRoute.indexOf('await commitAdminMutation(connection, req);');
 
     assert.notEqual(mailPosition, -1, 'Mietverlängerungs-Mail fehlt');
     assert.notEqual(commitPosition, -1, 'Transaktions-Commit fehlt');

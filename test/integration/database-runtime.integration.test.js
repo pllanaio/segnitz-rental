@@ -130,6 +130,11 @@ test('query deadline kills only the owned server thread and keeps independent co
     const observer = await createConnection();
     const threadId = timed.threadId;
     try {
+        // Exercise the application's cancellation path deliberately. MySQL's
+        // server-side limit may interrupt sole SLEEP() by returning 1 instead
+        // of an error. Disable only that competing timeout on this isolated
+        // test connection; every ordinary connection retains its server limit.
+        await timed.query('SET SESSION max_execution_time = 0');
         await assert.rejects(timed.query('SELECT SLEEP(30)'), error => ['DB_QUERY_TIMEOUT', 'ER_QUERY_TIMEOUT', 'ER_QUERY_INTERRUPTED'].includes(error.code));
         let running = true;
         for (let retry = 0; retry < 100; retry += 1) {

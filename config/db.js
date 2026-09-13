@@ -148,7 +148,9 @@ module.exports = {
     timezone: '+00:00',
     dateStrings: ['DATE'],
     supportBigNumbers: true,
-    bigNumberStrings: true,
+    // Preserve numeric COUNT/safe IDs; mysql2 still returns unsafe BIGINT as
+    // strings when supportBigNumbers is enabled.
+    bigNumberStrings: false,
     connectTimeout: Number(process.env.DB_CONNECT_TIMEOUT_MS || 3000),
     ssl: tlsConfig()
 };

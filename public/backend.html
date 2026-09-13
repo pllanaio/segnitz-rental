@@ -107,7 +107,7 @@
                                 </div>
 
                                 <div class="col-12 col-lg-4">
-                                    <label class="form-label">Kategorien</label>
+                                    <label for="category" class="form-label">Kategorien</label>
 
                                     <input type="hidden" id="category">
 
@@ -317,12 +317,12 @@
                     <input type="hidden" id="rentalPeriodItemId">
 
                     <div class="mb-3">
-                        <label class="form-label">Mietbeginn</label>
+                        <label for="rentalPeriodStart" class="form-label">Mietbeginn</label>
                         <input type="date" class="form-control" id="rentalPeriodStart">
                     </div>
 
                     <div class="mb-3">
-                        <label class="form-label">Mietende</label>
+                        <label for="rentalPeriodEnd" class="form-label">Mietende</label>
                         <input type="date" class="form-control" id="rentalPeriodEnd">
                     </div>
 
@@ -392,17 +392,17 @@
 
                     <div class="row g-3">
                         <div class="col-12 col-md-4">
-                            <label class="form-label">Rückgabedatum</label>
+                            <label for="returnActualDate" class="form-label">Rückgabedatum</label>
                             <input type="date" class="form-control" id="returnActualDate">
                         </div>
 
                         <div class="col-12 col-md-4">
-                            <label class="form-label">Mietbeginn</label>
+                            <label for="returnAdjustedStart" class="form-label">Mietbeginn</label>
                             <input type="date" class="form-control" id="returnAdjustedStart">
                         </div>
 
                         <div class="col-12 col-md-4">
-                            <label class="form-label">Mietende</label>
+                            <label for="returnAdjustedEnd" class="form-label">Mietende</label>
                             <input type="date" class="form-control" id="returnAdjustedEnd">
                         </div>
 
@@ -428,13 +428,13 @@
                         </div>
 
                         <div class="col-12 col-md-8">
-                            <label class="form-label">Zusätzliche Reparaturkosten / Forderung</label>
+                            <label for="returnAdditionalChargeReason" class="form-label">Zusätzliche Reparaturkosten / Forderung</label>
                             <input type="text" class="form-control" id="returnAdditionalChargeReason"
                                 placeholder="z.B. Reparatur Lüftermotor, Ersatzteil, Reinigung">
                         </div>
 
                         <div class="col-12 col-md-4">
-                            <label class="form-label">Zusätzlicher Betrag</label>
+                            <label for="returnAdditionalChargeAmount" class="form-label">Zusätzlicher Betrag</label>
                             <input type="number" step="0.01" min="0" class="form-control"
                                 id="returnAdditionalChargeAmount">
                         </div>
@@ -450,12 +450,12 @@
                         </div>
 
                         <div class="col-12">
-                            <label class="form-label">Interne Notiz</label>
+                            <label for="returnNotes" class="form-label">Interne Notiz</label>
                             <textarea class="form-control" id="returnNotes" rows="2"></textarea>
                         </div>
 
                         <div class="col-12">
-                            <label class="form-label">Rückgabefotos</label>
+                            <label for="returnImageUpload" class="form-label">Rückgabefotos</label>
                             <input type="file" class="form-control" id="returnImageUpload" accept="image/*" multiple>
                             <div id="returnSelectedImagePreview"></div>
                             <div id="returnExistingImages" class="row g-2 mt-2"></div>
@@ -498,12 +498,12 @@
                     <input type="hidden" id="manualPaymentType">
 
                     <div class="mb-3">
-                        <label class="form-label">Betrag</label>
+                        <label for="manualPaymentAmount" class="form-label">Betrag</label>
                         <input type="number" step="0.01" min="0.01" class="form-control" id="manualPaymentAmount">
                     </div>
 
                     <div class="mb-3">
-                        <label class="form-label">Notiz</label>
+                        <label for="manualPaymentNote" class="form-label">Notiz</label>
                         <textarea class="form-control" id="manualPaymentNote" rows="3"
                             placeholder="z.B. Barzahlung im Ladengeschäft erhalten"></textarea>
                     </div>

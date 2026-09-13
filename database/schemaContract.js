@@ -516,6 +516,16 @@ async function verifyCanonicalSchema(connection, contract = parseCanonicalSchema
         }
     }
 
+    if (contract.has('admin_mutation_events')) {
+        const { readTriggers, assertAuditTriggers } = require('./migrations/20260913_admin_audit');
+        try { assertAuditTriggers(await readTriggers(connection)); }
+        catch (error) {
+            if (error.code !== 'ADMIN_AUDIT_TRIGGER_DRIFT') throw error;
+            recordSchemaMismatch(issues, mismatches, { actual: null, expected: { updateAndDeleteBlocked: true },
+                identifier: 'admin_mutation_events', kind: 'trigger', message: 'Append-only Audit-Trigger fehlen oder weichen ab' });
+        }
+    }
+
     const weekdays = openingHourRows.map(row => Number(row.weekday));
     if (weekdays.length !== 7 || weekdays.some((weekday, index) => weekday !== index)) {
         issues.push('opening_hours muss genau die Wochentage 0 bis 6 enthalten');

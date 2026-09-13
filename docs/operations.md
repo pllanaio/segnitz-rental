@@ -59,7 +59,8 @@ in der Zieltopologie prüfen. Keine TLS-Ausnahme aus einer lokalen Testkonfigura
 übernehmen.
 
 Der derzeitige automatische Bootstrap braucht auf dem Anwendungsschema
-`SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX, REFERENCES`; für
+`SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX, REFERENCES` sowie
+`TRIGGER` für den neuen Auditvertrag; für
 Metadaten-/Verifikationsabfragen entsprechende Leserechte. Schemaweite
 `CREATE`-Rechte sind für eine bereits bereitgestellte Datenbank ausreichend;
 serverweite Datenbankanlage ist optional und sollte der Betreiber separat erledigen.
@@ -190,12 +191,37 @@ SQL-/Error-, Daten-URL- und Größenbegrenzung. URLs mit Querystrings, Cookies,
 Requestbodies, Signaturen und Mailpayloads gehören nicht in Zugriffslogs.
 Operatorlogs ebenfalls zugriffsbeschränken und nach bestätigter Policy aufbewahren.
 
-Erfolgreiche authentifizierte Adminmutationen erzeugen eine nicht sensible
-`admin.mutation.receipt` mit Rollen-/Akteursreferenz, Aktion, Objekt-ID und Status.
-Dies belegt eine HTTP-Mutation; es ist **kein transaktionaler Vorher-/Nachher-
-Finanzaudit**. Vorhandene `recorded_by_user_id`-Ledgerdaten bleiben erhalten. Eine
-vollständige transaktionale Änderungsprüfung aller Admin-Finanz-/Mietzustände ist
-separat nachzuweisen und darf aus diesen Request-Logs nicht abgeleitet werden.
+Erfolgreiche authentifizierte Adminmutationen erzeugen weiterhin eine nicht
+sensible HTTP-`admin.mutation.receipt`. Für die ausdrücklich angebundenen Finanz-
+und Mietmutationen schreibt `commitAdminMutation(connection, req)` zusätzlich
+**innerhalb derselben bestehenden Transaktion vor COMMIT** einen dauerhaften
+`admin_mutation_events`-Datensatz. Schlägt die Auditaufnahme fehl, wird die gesamte
+Änderung zurückgerollt. Der schreibgeschützte Transaktionsmarker verhindert einen
+versehentlichen Aufruf im Autocommitmodus.
+
+Das Ereignis enthält die stabile Administrator-ID/Referenz, die aktuell nochmals
+geprüfte Rolle/Authversion, serverseitige Request-ID, Aktion, Auftrag/Position und
+den gesperrt gelesenen **resultierenden** Finanz-/Mietzustand. Geldwerte und
+Ledgergruppen werden als exakte Cent-Strings protokolliert. Namen, Adressen,
+E-Mailadressen, Signaturen, Foto-/Mailinhalte, Bemerkungen, Provider-/Auth-Tokens und
+freie Requestdaten sind ausgeschlossen. Es wird kein unbelegtes Vorher-Bild
+erfunden. Die HTTP-Receipt allein ersetzt den dauerhaften Ereignisdatensatz nicht.
+
+Die neue unveränderliche Migration `20260913_03_admin_audit` ergänzt die Tabelle
+und zwei MySQL-Trigger, die UPDATE und DELETE ablehnen. Es gibt keine kaskadierenden
+Fremdschlüssel; das Ereignis überlebt eine spätere fachlich genehmigte Löschung des
+Benutzers oder Auftrags. Readiness kontrolliert Namen, Anzahl, Ereignis, Zeitpunkt
+und Body der Trigger. Migration und Leseverifikation benötigen die in der tatsächlichen
+MySQL-Topologie erforderlichen `TRIGGER`-/Metadatenrechte. Bei aktiviertem Binarylog
+können zusätzliche DDL-Definerrechte erforderlich sein; mit dem DBA vorab prüfen,
+keine globale Serveroption automatisch lockern. Der Runtime-Account soll keine
+DROP-/TRUNCATE-Rechte erhalten. Ein privilegierter DBA kann Schema/Trigger verändern;
+diese Betriebsrechte bleiben geschützt und auditpflichtig. Eine spätere Löschung
+von Auditereignissen benötigt eine eigens genehmigte Aufbewahrungsregel.
+
+Die genaue Routenzuordnung, lokale Rot-/Grünnachweise, fünf vorbereitete echte
+MySQL-Transaktionstests und verbleibende Integrationsprüfungen stehen in
+[evidence-admin-audit.md](evidence-admin-audit.md).
 
 `GET /admin/operations-metrics` ist nur für `global_admin`, mit `no-store`, gedacht:
 HTTP-Anzahl/Fehler/Abbrüche/Latenzbuckets/In-flight, DB-Budget/Timeouts, Worker-

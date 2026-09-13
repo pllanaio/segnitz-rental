@@ -1,6 +1,7 @@
 'use strict';
 
 const { expect, test } = require('@playwright/test');
+const { attachOrderFinance } = require('../../services/orderFinanceService');
 const { TEST_ADMIN, TEST_PRODUCT, TEST_USER } = require('../support/test-database');
 
 function futureDate(offsetDays) {
@@ -395,7 +396,7 @@ test('führt die Rückgabemaske mit Schadensdokumentation und wählbarem Zahlung
     await page.route('**/admin/orders/77', route => route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify(orderDetails)
+        body: JSON.stringify(attachOrderFinance(orderDetails))
     }));
     await page.route('**/img/returns/return-test.png', route => route.fulfill({
         status: 200,
@@ -476,7 +477,7 @@ test('führt die Rückgabemaske mit Schadensdokumentation und wählbarem Zahlung
     const returnRequest = await returnRequestPromise;
     const payload = returnRequest.postDataJSON();
 
-    expect(returnRequest.headers()['x-csrf-token']).toMatch(/^[a-f0-9]{64}$/);
+    expect(/^[a-f0-9]{64}$/.test(String(returnRequest.headers()['x-csrf-token'] || ''))).toBe(true);
     expect(payload.isDamaged).toBe(true);
     expect(payload.damageDescription).toBe('Hydraulikleitung gerissen');
     expect(payload.additionalChargeReason).toBe('Reparatur der Hydraulikleitung');
@@ -526,7 +527,7 @@ test('verarbeitet den paginierten Kundenauftrags-Vertrag und zeigt vor Rückgabe
     await page.route('**/my-orders/1', route => route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({
+        body: JSON.stringify(attachOrderFinance({
             id: 1,
             order_no: 'R202600001',
             status: 'confirmed',
@@ -552,7 +553,7 @@ test('verarbeitet den paginierten Kundenauftrags-Vertrag und zeigt vor Rückgabe
                 { paymentType: 'deposit', paymentMethod: 'cash', paymentStatus: 'pending', amount: 150 }
             ],
             returnImages: []
-        })
+        }))
     }));
 
     await page.goto('/profile.html');
@@ -563,8 +564,8 @@ test('verarbeitet den paginierten Kundenauftrags-Vertrag und zeigt vor Rückgabe
     await expect(page.locator('#myOrdersList')).toContainText('1 Bestellung gefunden');
     await page.getByRole('button', { name: 'Details anzeigen' }).click();
     await expect(page.locator('#myOrderDetailsModal')).toBeVisible();
-    await expect(page.locator('#myOrderDetailsBody')).toContainText('Kaution zurück');
-    await expect(page.locator('#myOrderDetailsBody')).toContainText('0.00 €');
+    await expect(page.locator('#myOrderDetailsBody')).toContainText('Kaution noch einzuzahlen');
+    await expect(page.locator('#myOrderDetailsBody')).toContainText('249,80 €');
     expect(apiErrors).toEqual([]);
 });
 

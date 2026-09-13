@@ -1,3 +1,4 @@
+const { commitAdminMutation } = require('./services/adminMutationAudit');
 const { errorStatus } = require('./utils/httpErrors');
 const { acceptedDocumentSnapshot, getLegalDocuments } = require('./services/legalDocumentService');
 const { isActualReturnDay, isAgreedRentalPrice, isBookableRentalPeriod } = require('./utils/rentalBoundary');
@@ -268,6 +269,9 @@ function parseOrderId(value) {
 }
 
 function sendTransactionFailure(res, error, fallbackMessage) {
+    if (error?.code === 'ADMIN_AUDIT_ACTOR_CHANGED') {
+        return res.status(401).json({ error: 'Die Anmeldung hat sich geändert. Bitte melden Sie sich erneut an.' });
+    }
     if (isRetryableTransactionError(error)) {
         res.set('Retry-After', '1');
         return res.status(503).json({
@@ -275,7 +279,9 @@ function sendTransactionFailure(res, error, fallbackMessage) {
         });
     }
 
-    return res.status(500).json({ error: fallbackMessage });
+    const status = errorStatus(error);
+    if (status === 503) res.set('Retry-After', '2');
+    return res.status(status).json({ error: fallbackMessage });
 }
 
 const sessionStore = new MySQLStore({
@@ -3211,7 +3217,7 @@ app.put('/admin/order-items/:itemId/pickup', checkAdmin, async (req, res) => {
             [pickedUpByUserId, item.order_id]
         );
 
-        await connection.commit();
+        await commitAdminMutation(connection, req);
 
         res.json({ message: 'Artikel wurde als abgeholt markiert.' });
 
@@ -3288,7 +3294,7 @@ app.put('/admin/orders/:id/pick-up', checkAdmin, async (req, res) => {
             operationKey: `mail-picked-up-${order.id}`
         });
 
-        await connection.commit();
+        await commitAdminMutation(connection, req);
 
         res.json({ message: 'Bestellung wurde als abgeholt markiert.' });
 
@@ -3403,7 +3409,7 @@ app.put('/admin/orders/:id/cancel', checkAdmin, async (req, res) => {
             operationKey: `mail-order-cancelled-${order.id}`
         });
 
-        await connection.commit();
+        await commitAdminMutation(connection, req);
 
         res.json({
             message: 'Bestellung wurde storniert.'
@@ -3708,7 +3714,7 @@ FOR UPDATE`,
             }
         );
 
-        await connection.commit();
+        await commitAdminMutation(connection, req);
 
         res.json({
             message: 'Artikel wurde storniert.'
@@ -3751,6 +3757,14 @@ app.post('/admin/order-items/:itemId/return-images', checkAdmin, adminReturnMuta
 
         connection = await mysql.createConnection(dbConfig);
         await connection.beginTransaction();
+
+        // Match the parent-before-item lock order used by finance and returns.
+        const [references] = await connection.execute(
+            'SELECT order_id FROM rental_order_items WHERE id = ?', [req.params.itemId]
+        );
+        if (references.length) {
+            await connection.execute('SELECT id FROM rental_orders WHERE id = ? FOR UPDATE', [references[0].order_id]);
+        }
 
         const [items] = await connection.execute(
             `SELECT id, order_id, item_status
@@ -3802,7 +3816,7 @@ app.post('/admin/order-items/:itemId/return-images', checkAdmin, adminReturnMuta
             );
         }
 
-        await connection.commit();
+        await commitAdminMutation(connection, req);
         committed = true;
 
         res.json({ message: 'Rückgabefotos für den Artikel wurden hochgeladen.' });
@@ -4232,7 +4246,7 @@ FOR UPDATE`,
             );
         }
 
-        await connection.commit();
+        await commitAdminMutation(connection, req);
 
         if (paymentOperationKey) {
             try {
@@ -4925,7 +4939,7 @@ FOR UPDATE`,
         }
 
         await refreshReturnCaseStatus(connection, item.order_id);
-        await connection.commit();
+        await commitAdminMutation(connection, req);
 
         if (returnChargeOperationKey) {
             try {
@@ -6135,7 +6149,7 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
                 operationKey: `mail-payment-receipt-${cashInitialPayment.insertId}`
             });
 
-            await connection.commit();
+            await commitAdminMutation(connection, req);
 
             return res.json({
                 message: 'Barzahlung für Miete und Kaution wurde erfasst.'
@@ -6201,7 +6215,7 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
                     });
                     await refundEligibleDepositsAfterPaymentsSettled(connection, orderId);
                     await refreshReturnCaseStatus(connection, orderId);
-                    await connection.commit();
+                    await commitAdminMutation(connection, req);
                     return res.status(409).json({
                         error: 'Diese Nachzahlung ist inzwischen online bezahlt worden und darf nicht zusätzlich bar verbucht werden.'
                     });
@@ -6301,7 +6315,7 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
             operationKey: `mail-payment-receipt-${receiptPaymentRecordId}`
         });
 
-        await connection.commit();
+        await commitAdminMutation(connection, req);
 
         res.json({ message: 'Barzahlung wurde erfasst.' });
 
@@ -6396,7 +6410,7 @@ app.post('/admin/order-payments/:id/retry-refund', checkAdmin, adminReturnMutati
 
         if (existingRetry && ['pending', 'processing', 'retry'].includes(existingRetry.status)) {
             const operationKey = existingRetry.operationKey;
-            await connection.commit();
+            await commitAdminMutation(connection, req);
 
             let refundStatus = 'pending';
             try {
@@ -6480,7 +6494,7 @@ app.post('/admin/order-payments/:id/retry-refund', checkAdmin, adminReturnMutati
 
         await refreshReturnCaseStatus(connection, failedRefund.order_id);
 
-        await connection.commit();
+        await commitAdminMutation(connection, req);
 
         let refundStatus = 'pending';
         try {
@@ -6635,7 +6649,7 @@ app.post('/admin/order-payments/manual-refund', checkAdmin, adminReturnMutationL
                 operationKey: `mail-payment-receipt-${openRefunds[0].id}`
             });
 
-            await connection.commit();
+            await commitAdminMutation(connection, req);
 
             return res.json({ message: 'Bar-Rückerstattung wurde erfasst.' });
         }

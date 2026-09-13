@@ -1,0 +1,34 @@
+[
+  {
+    "checksum": "b694652fa3b8ce3c3ca483722393a8dc4a05b14c2dafee3fe995107a63840678",
+    "version": "20260813_01_align_dump_with_application"
+  },
+  {
+    "checksum": "2abc4abfc52f83a4146e3722209e88474058e79dd2ecc6638d388e7bce55c0e5",
+    "version": "20260813_02_harden_return_lifecycle"
+  },
+  {
+    "checksum": "0bd4b2f77396592f3e5a3d44b98a7462b5a6e16249789802652b77658488f399",
+    "version": "20260813_03_schema_invariants_and_opening_hours"
+  },
+  {
+    "checksum": "e95b354a0f63465c03a5ec212bc87bb8d643604dc77b5b2bd0ac2d58bcfdf70c",
+    "version": "20260813_04_business_data_concurrency"
+  },
+  {
+    "checksum": "980fb9679d871d4cb961d9f4658314b57ef8dc81a36a8149cd2ded0871296123",
+    "version": "20260813_05_external_effects_outbox"
+  },
+  {
+    "checksum": "f787ae0a56cf499f674e656e67a996e712ea942fbee7711990a9781aa843cb0b",
+    "version": "20260813_06_user_auth_version"
+  },
+  {
+    "checksum": "c299dd991e0f3029d6c196e4258e1a52b19589c3dae68160a69cc88ead42f7ab",
+    "version": "20260913_01_utc_instants"
+  },
+  {
+    "checksum": "a873f83c1c2162c77a7ffda0b0ba018edef296b9380a99f35185ef348e6d9536",
+    "version": "20260913_02_auth_secrets"
+  }
+]

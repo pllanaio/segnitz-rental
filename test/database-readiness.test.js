@@ -24,6 +24,7 @@ test('koalesziert parallele tiefe Schema-Prüfungen und cached deren Ergebnis', 
                 if (sql.includes('information_schema.STATISTICS')) return [[]];
                 if (sql.includes('information_schema.KEY_COLUMN_USAGE')) return [[]];
                 if (sql.includes('information_schema.TABLE_CONSTRAINTS')) return [[]];
+                if (sql.includes('information_schema.TRIGGERS')) return [[]];
                 if (sql.includes('opening_hours')) return [[]];
                 throw new Error(sql);
             },

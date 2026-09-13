@@ -7,6 +7,7 @@ const { setTimeout: delay } = require('node:timers/promises');
 const path = require('node:path');
 const mysql = require('mysql2/promise');
 const dbConfig = require('../../config/db');
+const { buildMigrationManifest } = require('../../database/bootstrap');
 const { dropDatabaseSchema } = require('../support/database-schema');
 const { resetTestDatabase } = require('../support/test-database');
 
@@ -451,14 +452,7 @@ test('repariert ein unvollständiges Bestandsschema beim nächsten Start automat
         );
         assert.deepEqual(
             migrationRows.map(row => row.version),
-            [
-                '20260813_01_align_dump_with_application',
-                '20260813_02_harden_return_lifecycle',
-                '20260813_03_schema_invariants_and_opening_hours',
-                '20260813_04_business_data_concurrency',
-                '20260813_05_external_effects_outbox',
-                '20260813_06_user_auth_version'
-            ]
+            buildMigrationManifest().map(migration => migration.version).sort()
         );
     } finally {
         await verificationConnection.end();

@@ -138,5 +138,5 @@ function operationsMetricsHandler(options) {
     };
 }
 
-module.exports = { log, redact, redactString, installConsoleRedaction, requestObservability, recordWorkerProgress,
+module.exports = { currentRequestId: () => context.getStore()?.requestId || null, log, redact, redactString, installConsoleRedaction, requestObservability, recordWorkerProgress,
     recordDbTimeout, operationsSnapshot, operationsMetricsHandler, setLogSink: value => { sink = value; } };

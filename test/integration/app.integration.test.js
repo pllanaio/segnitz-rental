@@ -27,6 +27,7 @@ const BASE_URL = `http://127.0.0.1:${PORT}`;
 const TEST_MOLLIE_API_KEY = 'test_abcdefghijklmnopqrstuvwxyz1234';
 let serverProcess;
 let serverOutput = '';
+let nextClientAddress = 1;
 
 function readSessionCookie(response) {
     const values = typeof response.headers.getSetCookie === 'function'
@@ -43,16 +44,22 @@ function readSessionCookie(response) {
 
 class SessionClient {
     constructor() {
+        // The child app trusts only our loopback test proxy. Each logical client
+        // gets a stable TEST-NET address; real limiter thresholds remain active.
+        assert.ok(nextClientAddress <= 254, 'TEST-NET fixture address budget exhausted');
+        this.clientAddress = `192.0.2.${nextClientAddress++}`;
         this.cookie = '';
         this.csrfToken = '';
     }
 
     async request(pathname, options = {}) {
         const headers = new Headers(options.headers || {});
+        if (!headers.has('x-forwarded-for')) headers.set('x-forwarded-for', this.clientAddress);
         const method = String(options.method || 'GET').toUpperCase();
 
         if (this.csrfToken === '' && !['GET', 'HEAD', 'OPTIONS'].includes(method)) {
-            const csrfHeaders = this.cookie ? { cookie: this.cookie } : {};
+            const csrfHeaders = { 'x-forwarded-for': headers.get('x-forwarded-for') };
+            if (this.cookie) csrfHeaders.cookie = this.cookie;
             const csrfResponse = await fetch(`${BASE_URL}/csrf-token`, {
                 headers: csrfHeaders
             });
@@ -142,6 +149,7 @@ before(async () => {
             ...process.env,
             PORT: String(PORT),
             NODE_ENV: 'test',
+            TRUST_PROXY: '127.0.0.1/32,::1/128',
             ...TEST_LEGAL_ENV,
             DISABLE_PERIODIC_CLEANUP: '1',
             MOLLIE_API_KEY: process.env.MOLLIE_API_KEY || TEST_MOLLIE_API_KEY,
@@ -1470,4 +1478,18 @@ test('behandelt unbekannte Verifikationstoken ohne Schemafehler', async () => {
 
     assert.equal(response.status, 400);
     assert.match(await response.text(), /ungültig oder abgelaufen/i);
+});
+
+
+test('behält fünf echte Kontoanfragen je Testclient und sperrt den sechsten Versuch', async () => {
+    const client = new SessionClient();
+    const request = target => target.request('/password-reset-request', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email: 'nonexistent-rate-limit-fixture@example.com' })
+    });
+    for (let attempt = 0; attempt < 5; attempt++) assert.equal((await request(client)).status, 200);
+    const limited = await request(client);
+    assert.equal(limited.status, 429);
+    assert.ok(Number(limited.headers.get('retry-after')) > 0);
+    assert.equal((await request(new SessionClient())).status, 200);
 });

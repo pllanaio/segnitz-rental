@@ -11,6 +11,8 @@ const TEST_USER = Object.freeze({
     role: 'customer'
 });
 
+const TEST_FOREIGN_USER = Object.freeze({ email: 'foreign@example.com', password: 'ForeignTestPassword123!', role: 'customer' });
+
 const TEST_ADMIN = Object.freeze({
     email: 'admin@example.com',
     password: 'AdminPassword123!',
@@ -39,6 +41,12 @@ async function resetTestDatabase() {
              (username, password, role, first_name, last_name, phone, address, zip, city, customer_no, email_verified)
              VALUES (?, ?, ?, 'Test', 'Kunde', '0123456789', 'Teststrasse 1', '97070', 'Wuerzburg', 'TEST-0001', 1)`,
             [TEST_USER.email, passwordHash, TEST_USER.role]
+        );
+
+        await connection.execute(
+            `INSERT INTO users (username, password, role, first_name, last_name, customer_no, email_verified)
+             VALUES (?, ?, 'customer', 'Fremder', 'Testkunde', 'TEST-0002', 1)`,
+            [TEST_FOREIGN_USER.email, await bcrypt.hash(TEST_FOREIGN_USER.password, 4)]
         );
 
         await connection.execute(
@@ -92,6 +100,7 @@ if (require.main === module) {
 module.exports = {
     resetTestDatabase,
     TEST_ADMIN,
+    TEST_FOREIGN_USER,
     TEST_PRODUCT,
     TEST_USER
 };

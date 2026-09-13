@@ -1,6 +1,6 @@
 # Anwendung / Finanzen – Umsetzungsnachweise
 
-Arbeitsbasis: isolierter Branch `rc/frontend` auf Basis des vom Hauptagenten ermittelten Repository-HEAD. Keine Produktionsdaten, Providerkontakte oder Deployments wurden ausgeführt.
+Arbeitsbasis: isolierter Branch `codex/rc-frontend-20260913` auf Basis des vom Hauptagenten ermittelten Repository-HEAD. Keine Produktionsdaten, Providerkontakte oder Deployments wurden ausgeführt.
 
 | Befund | Umsetzung | Verhaltenstest / bisheriges Ergebnis |
 | --- | --- | --- |
@@ -37,3 +37,25 @@ Arbeitsbasis: isolierter Branch `rc/frontend` auf Basis des vom Hauptagenten erm
 ## Browserasset-Updates
 
 `public/vendor/manifest.json` enthält offizielle npm-Archiv-URLs, SHA-512 der Archive und SHA-256 jeder ausgelieferten Datei. Updates müssen bewusst eine feste Version wählen, nur die aufgeführten Distributionsdateien und die Lizenz extrahieren, Manifest/HTMLpfade anpassen und `node scripts/verify-browser-assets.js` sowie den echten Kalenderablauf ausführen. Kein automatisches Überschreiben aus einer unversionierten CDN-URL.
+
+## Zweiter Checkpoint: echte Kalenderdarstellung und vorbereiteter Hauptablauf
+
+- Chromium **153.0.8010.0** wurde lokal tatsächlich gestartet. Zwei isolierte gerenderte Komponentenprüfungen mit den echten lokalen Flatpickr-/Bootstrap-/Signaturdateien bestanden: Desktop 1280×1000 bei DPR 1, schmale Ansicht 390×844 bei DPR 4. Auswahl zweier echter Kalendertage, zwei Miettage, gemeinsamer Finanzrenderer mit 250,00 EUR offen, kein horizontaler Overflow und keine Browser-/Konsolenfehler. Das gezeichnete Signaturcanvas blieb bei 212.040 beziehungsweise 1.112.640 Pixeln unter dem Backendlimit.
+- Dabei reproduzierter Darstellungsdefekt: Die vorhandene Vollbreite des Kalenders mit Flatpickrs 39-Pixel-Maximum ordnete auf Desktop mehr als sieben Tage pro Woche an. Die Tagesbreite ist jetzt konsistent ein Siebtel der Woche; erneute Prüfung aller sichtbaren Kalenderzeilen erfolgreich.
+- Dies sind **Komponentenprüfungen ohne Datenbank**, kein behaupteter vollständiger App-/API-Nachweis. Die lokalen Ergebnisse/Screenshots sind unter `frontend-browser-evidence` im gemeinsamen Arbeitsverzeichnis hinterlegt.
+- `npx playwright test --list` sammelt **11 Tests in 2 Dateien**, darunter den neuen echten Hauptablauf in `test/e2e/production-primary.spec.js` auf Desktop und schmaler Ansicht. Sammlung ist kein bestandener Browserlauf.
+- Der vorbereitete Hauptablauf verwendet eigene echte Express-APIs und eine isolierte MySQL-Fixture mit ausdrücklich verifizierten synthetischen Kunden-/Admin-/Fremdnutzeridentitäten. Er bedient Suche und Kategorie, echte Kalenderauswahl und Cartänderung, Unicode-Kontaktfelder, gezeichnete Unterschrift, versionierte Akzeptanz und semantischen Enter-Submit. Ein echter Offline-Cartabruf wird wiederholt, veraltete Dokumentversionen erzeugen einen echten 409 und gleichzeitige Weiter-Klicks bleiben bei einem Schritt.
+- Fachlicher Ablauf: Barzahlung kassieren, abholen, online vorgemerkte Verlängerung, beschädigte tatsächliche Rückgabe mit Bild, offene Verlängerung gegen Kaution verrechnen, Barerstattung, gleiche Kunden-/Adminbeträge und private Bilder mit Fremdnutzer-404. Anschließend Onlinezahlung über extern isolierten vertragsgetreuen Provideradapter, Return/Pending/Retry, Paid-Webhook, Anzeige und Storno/Erstattung. Kein eigener API-Endpunkt und kein Flatpickr wird im Hauptablauf gemockt. Nur die externe Checkout-Domain wird als Provideroberfläche isoliert.
+- `playwright.config.js` setzt die isolierten Provider-/Mailflags explizit, teilt das lokale Providerfixture-Verzeichnis mit den Testprozessen und speichert keine Auth-/CSRF-haltigen Traces, Videos oder Screenshots. Die vorhandenen sekundären UI-Fehler-/XSS-Tests bleiben separat und zählen nicht als Ersatz für den Hauptablauf.
+- Der vollständige Hauptablauf ist lokal mangels echtem MySQL **vorbereitet, nicht ausgeführt**. Browservarianten für 429/503 und Sessionablauf folgen separat.
+
+## Dritter Checkpoint: Fehlerzustände und Sessioninvalidierung
+
+`test/e2e/network-failures.spec.js` ergänzt drei ausdrücklich sekundäre Browserfälle: gezielter HTTP-429 beim Login mit erhaltenen Eingaben, Pending und Wiederholung gegen das echte Login; gezielter HTTP-503 für Cart/Verfügbarkeit mit gesperrter Auswahl statt Leer-/Freistatus und Rückkehr zum echten Kalender; echte serverseitige Sessioninvalidierung durch Logout bei weiter geöffnetem Profil, abgewiesene Mutation und unveränderte Daten nach erneutem Login. 429/503 sind hier klar benannte HTTP-Fault-Injections, kein eigener-API-Mock im Hauptablauf. Der Sessionfall verwendet durchgehend echte Endpunkte. Zugehörige Formularlabels besitzen jetzt explizite `for`-Verknüpfungen, unter anderem für Tastatur-/Assistenzzugriff auf Profildaten.
+
+- Ausgeführt: `npm run check:syntax`: **106 Dateien**; `npm run test:unit`: **176 bestanden**, 0 fehlgeschlagen/übersprungen; `npx playwright test --list`: **14 Tests in 3 Dateien** gesammelt.
+- Die drei neuen Browserfälle sind mangels lokalem MySQL vorbereitet, **nicht als bestanden ausgewiesen**. Die CI muss diese gemeinsam mit dem ungemockten Hauptablauf am integrierten Release-Commit ausführen. Der Logout-Fall beweist serverseitige Invalidierung einer noch geöffneten Oberfläche; er ist kein separater zeitgesteuerter Test einer Cookie-TTL.
+
+Drei weitere echte HTTP-/MySQL-Regressionen sind in `order-lifecycle.integration.test.js` vorbereitet: zukünftige tatsächliche Rückgabe eines bezahlten abgeholten Artikels wird 400 und lässt Belegung/Ledger unverändert; ein alter abgelaufener Auftrag mit Mietdaten in der Vergangenheit bekommt beim Retry 409 ohne neue Zahlungsabsicht; Nullmiete mit positiver Kaution erzeugt weiterhin den positiven Kautionsintent und dieselbe offene Kaution im Kunden-API-Finanzstatus. Syntax geprüft, mangels lokalem MySQL noch nicht ausgeführt. Finanzielle Assertiondiagnostik enthält keine Signaturen, Authgrants, Operationsschlüssel oder Mailpayloads.
+
+Ergänzende visuelle Kalenderprüfung: Auch der innere Flatpickr-Container muss die verfügbare Breite übernehmen. Eine echte Chromium-Assertion war zunächst rot (1114 Pixel Kalender gegen 678 Pixel Tagesraster), nach der gezielten CSS-Korrektur Desktop/mobil grün. Der Hauptablauf prüft jetzt zusätzlich sieben Spalten und identische Kalender-/Tagesrasterbreite.

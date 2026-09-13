@@ -6,6 +6,7 @@ const { spawn } = require('node:child_process');
 const { after, before, test } = require('node:test');
 const { setTimeout: delay } = require('node:timers/promises');
 const path = require('node:path');
+const mysql = require('mysql2/promise');
 const {
     execute,
     queryRows,
@@ -2525,3 +2526,79 @@ for (const [index, method] of ['cash', 'online'].entries()) {
         assert.equal(intents.length, 0);
     });
 }
+async function boundaryStateSnapshot(orderId) {
+    // Financial state only: do not include confirmation/signature, auth grants,
+    // mail payloads or operation keys in assertion diagnostics.
+    return {
+        orders: await queryRows('SELECT status, payment_status, return_status, return_case_status FROM rental_orders WHERE id = ?', [orderId]),
+        items: await queryRows('SELECT id, item_status, return_status, actual_return_date, deposit_refund_amount FROM rental_order_items WHERE order_id = ? ORDER BY id', [orderId]),
+        payments: await queryRows('SELECT id, payment_type, payment_status, payment_method, amount FROM rental_order_payments WHERE order_id = ? ORDER BY id', [orderId]),
+        effects: await queryRows(`SELECT COUNT(*) AS count FROM external_effects_outbox WHERE JSON_EXTRACT(payload_json, '$.application.orderId') = ?`, [orderId])
+    };
+}
+
+test('zukünftige tatsächliche Rückgabe verändert weder Belegung noch Finanzbuchungen', async () => {
+    const customer = new SessionClient();
+    await login(customer, TEST_CUSTOMER);
+    const start = futureDate(3600);
+    const end = futureDate(3601);
+    const order = await createOrder(customer, 'cash', start, end);
+    const [item] = await queryRows('SELECT id FROM rental_order_items WHERE order_id = ?', [order.orderId]);
+    const admin = new SessionClient();
+    await login(admin, TEST_ADMIN);
+    const collected = await admin.request('/admin/order-payments/manual', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ orderId: order.orderId, paymentType: 'initial_payment', amount: 2 * TEST_PRODUCT.pricePerDay + TEST_PRODUCT.deposit, note: 'Isolierter Datumsgrenztest' })
+    });
+    assert.equal(collected.status, 200, await collected.text());
+    const pickup = await admin.request(`/admin/order-items/${item.id}/pickup`, { method: 'PUT' });
+    assert.equal(pickup.status, 200, await pickup.text());
+    const beforeState = await boundaryStateSnapshot(order.orderId);
+    const rejected = await admin.request(`/admin/order-items/${item.id}/return`, {
+        method: 'PUT', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ actualReturnDate: futureDate(2), adjustedRentalStart: start, adjustedRentalEnd: end,
+            adjustedPricePerDay: TEST_PRODUCT.pricePerDay, isDamaged: true, damageDescription: 'Darf nicht gespeichert werden',
+            additionalChargeReason: 'Darf nicht gebucht werden', additionalChargeAmount: 25, additionalChargePaymentMethod: 'cash' })
+    });
+    assert.equal(rejected.status, 400);
+    assert.match((await rejected.json()).error, /bis einschließlich heute/);
+    assert.deepEqual(await boundaryStateSnapshot(order.orderId), beforeState);
+    assert.equal(beforeState.items[0].item_status, 'picked_up');
+});
+
+test('Checkout-Retry eines inzwischen vergangenen Auftrags legt keine neue Zahlungsabsicht an', async () => {
+    const customer = new SessionClient();
+    await login(customer, TEST_CUSTOMER);
+    const order = await createOrder(customer, 'online', futureDate(3610), futureDate(3611));
+    // Explicitly isolated fixture state models an old expired hold; no cleanup
+    // process is necessary to reject a past rental period.
+    await execute('UPDATE rental_order_items SET rental_start = ?, rental_end = ?, item_status = \'expired\' WHERE order_id = ?', [futureDate(-4), futureDate(-3), order.orderId]);
+    await execute("UPDATE rental_orders SET status = 'expired', reserved_until = DATE_SUB(NOW(), INTERVAL 1 DAY) WHERE id = ?", [order.orderId]);
+    const beforeState = await boundaryStateSnapshot(order.orderId);
+    const response = await customer.request(`/orders/${order.orderId}/mollie-checkout`, { method: 'POST' });
+    assert.equal(response.status, 409);
+    assert.match((await response.json()).error, /Mietzeitraum ist nicht mehr gültig/);
+    assert.deepEqual(await boundaryStateSnapshot(order.orderId), beforeState);
+});
+
+test('Nullmiete mit positiver Kaution bleibt ein echter positiver Online-Zahlungsintent', async () => {
+    const customer = new SessionClient();
+    await login(customer, TEST_CUSTOMER);
+    await execute('UPDATE rental_products SET price_per_day = 0 WHERE id = ?', [TEST_PRODUCT.id]);
+    try {
+        const order = await createOrder(customer, 'online', futureDate(3620), futureDate(3621));
+        assert.equal(Boolean(order.noPaymentRequired), false);
+        assert.equal(typeof order.checkoutUrl, 'string');
+        const [intent] = await queryRows("SELECT amount, payment_status FROM rental_order_payments WHERE order_id = ? AND payment_type = 'initial_payment'", [order.orderId]);
+        assert.equal(Number(intent.amount), TEST_PRODUCT.deposit);
+        assert.equal(intent.payment_status, 'pending');
+        const response = await customer.request(`/my-orders/${order.orderId}`);
+        assert.equal(response.status, 200);
+        const result = await response.json();
+        assert.equal(result.financialSummary.rentalDueCents, 0);
+        assert.equal(result.financialSummary.depositDueCents, TEST_PRODUCT.deposit * 100);
+        assert.equal(result.financialSummary.customerDueCents, TEST_PRODUCT.deposit * 100);
+    } finally {
+        await execute('UPDATE rental_products SET price_per_day = ? WHERE id = ?', [TEST_PRODUCT.pricePerDay, TEST_PRODUCT.id]);
+    }
+});

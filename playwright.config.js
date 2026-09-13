@@ -1,6 +1,11 @@
 'use strict';
 
 const TEST_LEGAL_ENV = require('./test/support/legal-fixture');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+if (!process.env.MOLLIE_TEST_FIXTURES_DIR) process.env.MOLLIE_TEST_FIXTURES_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'segnitz-e2e-provider-'));
+fs.mkdirSync(process.env.MOLLIE_TEST_FIXTURES_DIR, { recursive: true });
 const { defineConfig, devices } = require('@playwright/test');
 
 const port = Number(process.env.E2E_PORT || 3102);
@@ -30,12 +35,15 @@ module.exports = defineConfig({
     ],
     webServer: {
         command: 'npm start',
+        stdout: 'pipe',
+        stderr: 'pipe',
         url: `${baseURL}/auth-status`,
         reuseExistingServer: !process.env.CI,
         timeout: 120000,
         env: {
             ...process.env,
             PORT: String(port),
+            BASE_URL: baseURL,
             NODE_ENV: 'test',
             MOLLIE_TEST_MODE: '1',
             MAIL_DELIVERY_PAUSED: '1',

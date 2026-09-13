@@ -262,6 +262,9 @@ async function seedCanonicalDefaults(connection) {
 async function initializeFreshSchema(connection) {
     await ensureCanonicalTables(connection);
     await seedCanonicalDefaults(connection);
+    // Fresh installs record migration checksums without executing every legacy up.
+    // The new audit table additionally needs its immutable append-only triggers.
+    await require('./migrations/20260913_admin_audit').up(connection);
     return recordFreshSchemaMigrations(connection);
 }
 
