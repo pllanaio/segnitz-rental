@@ -6,7 +6,7 @@ const { attachOrderFinance, summarizeOrderFinance } = require('./services/orderF
 const { businessPeriodBounds, withBusinessPeriod } = require('./utils/businessPeriod');
 const express = require("express");
 const app = express();
-const { requestObservability, operationsMetricsHandler } = require('./services/observability');
+const { log, actorReference, requestObservability, operationsMetricsHandler } = require('./services/observability');
 app.use(requestObservability);
 const path = require("path");
 const bcrypt = require('bcrypt');
@@ -20,8 +20,13 @@ const {
 } = require('./config/security');
 
 assertSecurityEnvironment();
+app.set('trust proxy', require('./config/proxy').parseTrustProxy());
 app.use(helmet(createHelmetOptions()));
-require('./services/healthRoutes').registerHealthRoutes(app);
+const closeHealthRequestLimits = require('./services/healthRoutes').registerHealthRoutes(app);
+const requestLimits = require('./middleware/requestLimits').createRequestLimitOptions();
+// Admit bounded work before parsing bodies, loading sessions or checking their
+// auth_version in MySQL. All mounted routers and private files inherit this.
+app.use(rateLimit(requestLimits.global), rateLimit(requestLimits.client));
 app.use(express.json({
     limit: '1mb'
 }));
@@ -305,8 +310,6 @@ const sessionStore = new MySQLStore({
         }
     }
 }, dbConfig.createSessionConnection());
-app.set('trust proxy', require('./config/proxy').parseTrustProxy());
-
 app.use(session({
     key: 'segnitz.sid',
     secret: process.env.SESSION_SECRET,
@@ -474,10 +477,7 @@ app.post('/setup-admin', setupLimiter, async (req, res) => {
             req.session.save(error => error ? reject(error) : resolve());
         });
 
-        console.log(
-            `${new Date().toISOString()} - Ersteinrichtung abgeschlossen: ` +
-            `globales Adminkonto ${admin.email} wurde erstellt`
-        );
+        log('info', 'auth.setup.completed', { actorRef: actorReference(admin.email) });
 
         res.set('X-CSRF-Token', csrfToken);
 
@@ -840,13 +840,7 @@ app.post('/login', loginLimiter, async (req, res) => {
         const redirectAfterLogin = req.session.redirectAfterLogin || null;
         delete req.session.redirectAfterLogin;
 
-        console.log(
-            new Date().toISOString(),
-            '- Anmeldung: Benutzer',
-            normalizedUsername,
-            'erfolgreich angemeldet mit Rolle',
-            rows[0].role
-        );
+        log('info', 'auth.login.succeeded', { actorRef: actorReference(normalizedUsername), role: rows[0].role });
 
         const csrfToken = getOrCreateCsrfToken(req);
 
@@ -874,14 +868,8 @@ app.post('/login', loginLimiter, async (req, res) => {
 });
 
 app.post('/logout', (req, res) => {
-    const timestamp = new Date();
     if (req.session.user) {
-        console.log(
-            timestamp.toISOString(),
-            '- Abmeldung: Benutzer',
-            req.session.user,
-            'erfolgreich abgemeldet'
-        ); // Zugriff auf den gespeicherten Benutzernamen
+        log('info', 'auth.logout.succeeded', { actorRef: actorReference(req.session.user) });
         req.session.destroy(err => {
             if (err) {
                 console.log('Fehler beim Beenden der Sitzung:', err);
@@ -1568,11 +1556,7 @@ app.post('/register-customer', accountMutationLimiter, async (req, res) => {
         );
         const { customerNo, verificationResent } = registration;
 
-        console.log(
-            verificationResent
-                ? `${new Date().toISOString()} - Registrierung: Bestätigungsmail für ${email} wurde erneut vorgemerkt`
-                : `${new Date().toISOString()} - Registrierung: Neuer Benutzer ${firstName} ${lastName} (E-Mail: ${email}, Kundennummer: ${customerNo}) wurde erfolgreich registriert und eine Bestätigungsmail wurde vorgemerkt`
-        );
+        log('info', 'auth.registration.queued', { actorRef: actorReference(email), verificationResent });
 
         res.status(verificationResent ? 202 : 201).json({
             message: verificationResent
@@ -3932,7 +3916,7 @@ app.post('/admin/order-items/:itemId/send-return-summary', checkAdmin, async (re
         });
 
     } catch (error) {
-        console.error('Fehler beim Versand der Rückgabe-Abschlussmail:', error);
+        log('error', 'rental.return-mail.failed', { itemId: Number(req.params.itemId), error });
         res.status(errorStatus(error)).json({
             error: 'Abschlussmail konnte nicht versendet werden.'
         });
@@ -4253,10 +4237,7 @@ FOR UPDATE`,
                 const payment = await processExternalEffectByKey(paymentOperationKey);
                 paymentUrl = payment.checkoutUrl || null;
             } catch (paymentError) {
-                console.error(
-                    'Mietzeitraum gespeichert; Mollie-Nachzahlung wird erneut versucht:',
-                    paymentError.message
-                );
+                log('warn', 'payment.adjustment.deferred', { itemId: Number(req.params.itemId), error: paymentError });
             }
         }
 
@@ -4273,7 +4254,7 @@ FOR UPDATE`,
                 console.error('Rollback der Mietverlängerung fehlgeschlagen:', rollbackError);
             }
         }
-        console.error('Fehler beim Speichern des angepassten Mietzeitraums:', error);
+        log('error', 'rental.adjustment.failed', { itemId: Number(req.params.itemId), error });
         return sendTransactionFailure(res, error, 'Mietzeitraum konnte nicht gespeichert werden.');
     } finally {
         if (connection) await connection.end();
@@ -4948,10 +4929,7 @@ FOR UPDATE`,
                     console.error('Mollie-Nachzahlung wurde ohne Checkout-URL abgeschlossen.');
                 }
             } catch (paymentError) {
-                console.error(
-                    'Rückgabe gespeichert; Mollie-Nachzahlung wird erneut versucht:',
-                    paymentError.message
-                );
+                log('warn', 'payment.return-charge.deferred', { itemId: Number(req.params.itemId), error: paymentError });
             }
         }
 
@@ -4971,7 +4949,7 @@ FOR UPDATE`,
                 console.error('Rollback der Positionsrückgabe fehlgeschlagen:', rollbackError);
             }
         }
-        console.error('Fehler bei Positionsrückgabe:', error);
+        log('error', 'rental.return.failed', { itemId: Number(req.params.itemId), error });
         return sendTransactionFailure(res, error, 'Positionsrückgabe konnte nicht gespeichert werden.');
     } finally {
         if (connection) await connection.end();
@@ -6327,7 +6305,7 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
                 console.error('Rollback der manuellen Zahlung fehlgeschlagen:', rollbackError);
             }
         }
-        console.error('Fehler beim Erfassen der Barzahlung:', error);
+        log('error', 'payment.cash-record.failed', { orderId: Number(req.body.orderId), error });
         return sendTransactionFailure(res, error, 'Zahlung konnte nicht erfasst werden.');
     } finally {
         if (connection) await connection.end();
@@ -7343,6 +7321,8 @@ async function stopApplication() {
         await closeHttpServer(httpServer, {
             graceMs: Number(process.env.APP_HTTP_SHUTDOWN_GRACE_MS || 8000)
         });
+        requestLimits.shutdown();
+        closeHealthRequestLimits();
 
         await withDeadline(paymentDrain, Number(process.env.APP_CLEANUP_SHUTDOWN_GRACE_MS || 5000));
 

@@ -11,12 +11,32 @@ const { removeUploadedFiles, uploadProductImages, validatePositiveId } = require
 const { checkProductAvailability, listProductBlockedPeriods } = require('../utils/availability');
 const { runInTransactionWithRetry } = require('../utils/dbRetry');
 const { formatDateInTimeZone } = require('../utils/businessDate');
+const { parseCatalogQuery, readCatalogPage } = require('../services/catalogService');
 const {
     syncProductCategories,
     deleteUnusedCategories
 } = require('../utils/categories');
 
 module.exports = router;
+
+// Public rental catalog has its own bounded contract. Keep /products unchanged
+// for existing administrative callers that need its role-dependent array.
+router.get('/catalog', async (req, res) => {
+    let connection;
+    res.set({ 'Cache-Control': 'private, no-store', Vary: 'Cookie' });
+    try {
+        const options = parseCatalogQuery(req.query);
+        connection = await mysql.createConnection(dbConfig);
+        await connection.query('SET TRANSACTION READ ONLY');
+        await connection.beginTransaction();
+        const catalog = await readCatalogPage(connection, options);
+        await connection.commit();
+        res.json(catalog);
+    } catch (error) {
+        if (connection) await connection.rollback();
+        res.status(errorStatus(error)).json({ error: error.status === 400 ? error.message : 'Produkte konnten nicht geladen werden.' });
+    } finally { if (connection) await connection.end(); }
+});
 
 router.get('/categories', async (req, res) => {
     let connection;

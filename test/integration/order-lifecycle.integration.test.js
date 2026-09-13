@@ -7,6 +7,7 @@ const { after, before, test } = require('node:test');
 const { setTimeout: delay } = require('node:timers/promises');
 const path = require('node:path');
 const mysql = require('mysql2/promise');
+const dbConfig = require('../../config/db');
 const {
     execute,
     queryRows,
@@ -1893,6 +1894,12 @@ test('startet eine fehlgeschlagene Online-Erstattung kontrolliert und betragsbeg
     });
     assert.equal(paymentWebhook.status, 200, await paymentWebhook.text());
 
+    const [confirmationBeforeRetry] = await queryRows(
+        'SELECT id, payload_hash, status FROM external_effects_outbox WHERE operation_key = ?',
+        [`mail-order-confirmation-${order.orderId}`]
+    );
+    assert.equal(confirmationBeforeRetry.status, 'pending');
+
     const failedRefundResult = await execute(
         `INSERT INTO rental_order_payments
          (order_id, payment_type, payment_method, payment_status, amount,
@@ -1937,6 +1944,11 @@ test('startet eine fehlgeschlagene Online-Erstattung kontrolliert und betragsbeg
     assert.equal(settledRetry.payment_status, 'paid');
     assert.equal(Number(settledRetry.amount), -25);
     assert.match(settledRetry.mollie_refund_id, /^re_test_paid_/);
+    const [confirmationAfterRetry] = await queryRows(
+        'SELECT id, payload_hash, status FROM external_effects_outbox WHERE operation_key = ?',
+        [`mail-order-confirmation-${order.orderId}`]
+    );
+    assert.deepEqual(confirmationAfterRetry, confirmationBeforeRetry);
 });
 
 test('dedupliziert einen bereits pending Refund-Retry vor der Kapazitätsberechnung', async () => {

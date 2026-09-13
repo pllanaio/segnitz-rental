@@ -6,7 +6,7 @@
 const { test, expect } = require('@playwright/test');
 const fs = require('node:fs/promises');
 const path = require('node:path');
-const { TEST_USER, TEST_ADMIN, TEST_FOREIGN_USER, TEST_PRODUCT } = require('../support/test-database');
+const { createPrimaryScenarioFixtures, TEST_ADMIN, TEST_FOREIGN_USER } = require('../support/test-database');
 const { addIsoCalendarDays } = require('../../utils/businessDate');
 
 const today = () => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Berlin' }).format(new Date());
@@ -30,14 +30,41 @@ async function selectRange(page, container, start, end) {
         await page.locator(`${container} .flatpickr-day[aria-label="${day}"]:not(.hidden):not(.flatpickr-disabled)`).click();
     }
 }
-async function checkout(page, method) {
+async function waitForPreparedPayment(page, orderId) {
+    await expect.poll(async () => {
+        const order = await readOrder(page, orderId);
+        const latest = order.payments.filter(payment => payment.paymentType === 'initial_payment')
+            .sort((first, second) => Number(second.id) - Number(first.id))[0];
+        return typeof latest?.checkoutUrl === 'string' && latest.checkoutUrl.length > 0;
+    }, { timeout: 30000, intervals: [100, 250, 500] }).toBe(true);
+}
+async function retryCheckoutThroughUi(page, orderId) {
+    for (let attempt = 0; attempt < 3; attempt++) {
+        const responsePromise = page.waitForResponse(response => response.url().endsWith(`/orders/${orderId}/mollie-checkout`) && response.request().method() === 'POST');
+        await page.locator('[data-frontend-action="retry-payment"]').click();
+        const response = await responsePromise;
+        const result = await response.json();
+        if (response.status() === 200) {
+            expect(typeof result.checkoutUrl).toBe('string');
+            await expect(page).toHaveURL(/^https:\/\/checkout\.test\.mollie\.local\//);
+            return result;
+        }
+        expect(response.status()).toBe(202);
+        expect(result.paymentPending).toBe(true);
+        expect(Boolean(result.checkoutUrl)).toBe(false);
+        await expect(page.locator('#globalAlertContainer')).toContainText(/vorbereitet/);
+        await waitForPreparedPayment(page, orderId);
+    }
+    throw new Error('Online-Checkout blieb nach drei geprüften Pending-/Retry-Schritten unvollständig.');
+}
+async function checkout(page, method, product) {
     const start = today();
     await page.goto('/');
     await page.locator('#productSearchInput').fill('Kein passendes Testprodukt');
     await expect(page.locator('#productGrid .product-card')).toHaveCount(0);
-    await page.locator('#productSearchInput').fill(TEST_PRODUCT.title);
+    await page.locator('#productSearchInput').fill(product.title);
     await page.locator('#categoryFilterList button').filter({ hasText: 'Baumaschinen' }).click();
-    const card = page.locator('#productGrid .product-card').filter({ hasText: TEST_PRODUCT.title });
+    const card = page.locator('#productGrid .product-card').filter({ hasText: product.title });
     await expect(card).toHaveCount(1);
     const detailsButton = card.getByRole('button', { name: 'Details' });
     await detailsButton.focus();
@@ -66,7 +93,7 @@ async function checkout(page, method) {
     await page.locator('#selectProductFromModal').click();
     await expect(page.locator('#cartItemCount')).toHaveText('1');
     await page.locator('[data-bs-target="#cartModal"]').click();
-    await page.getByRole('button', { name: 'Zeitraum ändern', exact: true }).click();
+    await page.getByRole('button', { name: 'Zeitraum ändern' }).click();
     await page.locator('#editCartRentalRange').click();
     await selectRange(page, '.flatpickr-calendar.open', start, addIsoCalendarDays(start, 2));
     await page.locator('#saveCartItemRentalPeriodButton').click();
@@ -111,9 +138,18 @@ async function checkout(page, method) {
     await page.locator('#submit-btn').focus();
     await page.keyboard.press('Enter');
     const response = await responsePromise;
-    expect(response.status()).toBe(200);
     const order = await response.json();
     expect(order.orderId).toBeGreaterThan(0);
+    if (method === 'online' && response.status() === 202) {
+        expect(order.paymentPending).toBe(true);
+        expect(Boolean(order.checkoutUrl)).toBe(false);
+        await expect(page.locator('#paymentResultTitle')).toHaveText('Online-Zahlung wird vorbereitet');
+        await waitForPreparedPayment(page, order.orderId);
+        await retryCheckoutThroughUi(page, order.orderId);
+    } else {
+        expect(response.status()).toBe(200);
+        if (method === 'online') expect(typeof order.checkoutUrl).toBe('string');
+    }
     return { ...order, start, end: addIsoCalendarDays(start, 2) };
 }
 async function adminDetails(page, orderNo, id) {
@@ -129,11 +165,16 @@ async function readOrder(page, id, admin = false) {
 }
 
 for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 }]) {
-    test(`Hauptablauf mit echten APIs: Barzahlung, Rückgabe, private Belege, Online-Retry (${viewport.width}px)`, async ({ browser, baseURL }) => {
+    test(`Hauptablauf mit echten APIs: Barzahlung, Rückgabe, private Belege, Online-Retry (${viewport.width}px)`, async ({ browser, baseURL }, testInfo) => {
         test.setTimeout(180000);
+        const scenario = await createPrimaryScenarioFixtures(`${viewport.width}-retry-${testInfo.retry}`);
         const customerContext = await browser.newContext({ baseURL, viewport });
         const adminContext = await browser.newContext({ baseURL, viewport });
         const foreignContext = await browser.newContext({ baseURL, viewport });
+        for (const context of [customerContext, adminContext, foreignContext]) {
+            context.setDefaultTimeout(15000);
+            context.setDefaultNavigationTimeout(30000);
+        }
         const customer = await customerContext.newPage();
         const admin = await adminContext.newPage();
         const foreign = await foreignContext.newPage();
@@ -148,8 +189,8 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
         try {
             // Identities were explicitly prepared and verified only in the
             // isolated fixture DB by test/support/test-database.js.
-            await login(customer, TEST_USER);
-            const cash = await checkout(customer, 'cash');
+            await login(customer, scenario.identity);
+            const cash = await checkout(customer, 'cash', scenario.product);
             await expect(customer.locator('#paymentResultTitle')).toContainText('Barzahlungs-Miete bestätigt');
             let customerOrder = await readOrder(customer, cash.orderId);
             expect(customerOrder.customer_address).toBe('Jean-Paul-Str. 12/3');
@@ -210,16 +251,11 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
                 const fixture = JSON.parse(await fs.readFile(path.join(process.env.MOLLIE_TEST_FIXTURES_DIR, `${id}.json`), 'utf8'));
                 await route.fulfill({ contentType: 'text/html', body: `<html lang="de"><title>Isolierter Zahlungsanbieter</title><a href="${baseURL}/index.html?payment=return&amp;orderId=${Number(fixture.metadata.orderId)}">Zurück zum Mietauftrag</a></html>` });
             });
-            const online = await checkout(customer, 'online');
+            const online = await checkout(customer, 'online', scenario.product);
             await expect(customer).toHaveURL(/^https:\/\/checkout\.test\.mollie\.local\//);
             await customer.getByRole('link', { name: 'Zurück zum Mietauftrag' }).click();
             await expect(customer.locator('#paymentResultTitle')).toHaveText('Zahlung nicht abgeschlossen');
-            const retryResponsePromise = customer.waitForResponse(response => response.url().endsWith(`/orders/${online.orderId}/mollie-checkout`) && response.request().method() === 'POST');
-            await customer.locator('[data-frontend-action="retry-payment"]').click();
-            const retryResponse = await retryResponsePromise;
-            expect(retryResponse.status()).toBe(200);
-            const retry = await retryResponse.json();
-            await expect(customer).toHaveURL(/^https:\/\/checkout\.test\.mollie\.local\//);
+            const retry = await retryCheckoutThroughUi(customer, online.orderId);
             const paymentId = new URL(retry.checkoutUrl).pathname.slice(1);
             const fixtureFile = path.join(process.env.MOLLIE_TEST_FIXTURES_DIR, `${paymentId}.json`);
             const paid = JSON.parse(await fs.readFile(fixtureFile, 'utf8'));
@@ -240,7 +276,7 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
             await expect.poll(async () => (await readOrder(admin, online.orderId, true)).financialSummary.refundDueCents, { timeout: 30000 }).toBe(0);
             expect(errors).toEqual([]);
         } finally {
-            await customerContext.close(); await adminContext.close(); await foreignContext.close();
+            await Promise.allSettled([customerContext.close(), adminContext.close(), foreignContext.close()]);
         }
     });
 }

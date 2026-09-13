@@ -2,12 +2,12 @@
 'use strict';
 // This verifier never starts the app, claims outbox jobs or contacts a provider.
 require('dotenv').config();
-const fs = require('node:fs/promises');
 const path = require('node:path');
 const mysql = require('mysql2/promise');
 const { verifyCanonicalSchema } = require('../../database/schemaContract');
 const { assertExactAppliedMigrationState } = require('../../database/migrationState');
 const { buildMigrationManifest } = require('../../database/bootstrap');
+const { failure, verifyImageFile, verifySignature, IMAGE_LIMITS, SIGNATURE_LIMITS } = require('./restore-images');
 
 function safeReference(reference, prefix, root) {
     const normalized = String(reference || '').replace(/^\//, '');
@@ -17,34 +17,55 @@ function safeReference(reference, prefix, root) {
     return path.join(root, relative);
 }
 
-async function verifyRestoredData(connection, { products, returns }) {
+// Keyset pages avoid loading the entire signature LONGTEXT column or image
+// catalog into memory. At most two bounded image decoders execute at once.
+async function verifyBatches(connection, table, field, verify, { batchSize = 25, maxRecords = 100_000, deadlineMs = 15 * 60_000 } = {}) {
+    if (!Number.isSafeInteger(batchSize) || batchSize < 1 || batchSize > 100 ||
+        !Number.isSafeInteger(maxRecords) || maxRecords < 1 || maxRecords > 1_000_000 ||
+        !Number.isSafeInteger(deadlineMs) || deadlineMs < 1 || deadlineMs > 60 * 60_000) throw failure('RESTORE_VERIFY_LIMIT');
+    if (!['rental_products', 'rental_product_images', 'rental_order_return_images', 'rental_orders'].includes(table) ||
+        !['image_path', 'signature_data_url'].includes(field)) throw failure('RESTORE_VERIFY_QUERY');
+    const deadline = Date.now() + deadlineMs;
+    let lastId = 0;
+    let count = 0;
+    while (true) {
+        if (Date.now() >= deadline) throw failure('RESTORE_VERIFY_DEADLINE');
+        const valueSql = field === 'signature_data_url'
+            ? `IF(OCTET_LENGTH(${field}) <= ${32 + 4 * Math.ceil(SIGNATURE_LIMITS.maxBytes / 3)}, ${field}, NULL)`
+            : field;
+        const [rows] = await connection.execute(`SELECT id, ${valueSql} AS value FROM ${table}
+            WHERE id > ? AND ${field} IS NOT NULL AND ${field} <> '' ORDER BY id LIMIT ${batchSize}`, [lastId]);
+        if (!rows.length) return count;
+        if (count + rows.length > maxRecords) throw failure('RESTORE_VERIFY_LIMIT');
+        for (let index = 0; index < rows.length; index += 2) {
+            if (Date.now() >= deadline) throw failure('RESTORE_VERIFY_DEADLINE');
+            await Promise.all(rows.slice(index, index + 2).map(row => verify(row.value)));
+        }
+        count += rows.length;
+        lastId = rows.at(-1).id;
+    }
+}
+
+async function verifyRestoredData(connection, { products, returns, limits }) {
     const schema = await verifyCanonicalSchema(connection);
     const [migrations] = await connection.execute('SELECT version, checksum FROM app_schema_migrations ORDER BY version');
     assertExactAppliedMigrationState(migrations, buildMigrationManifest());
     let checked = 0;
     const queries = [
-        ['SELECT image_path FROM rental_products WHERE image_path IS NOT NULL AND image_path <> ?', 'img/products/', products],
-        ['SELECT image_path FROM rental_product_images WHERE image_path <> ?', 'img/products/', products],
-        ['SELECT image_path FROM rental_order_return_images WHERE image_path <> ?', 'img/returns/', returns]
+        ['rental_products', 'img/products/', products],
+        ['rental_product_images', 'img/products/', products],
+        ['rental_order_return_images', 'img/returns/', returns]
     ];
-    for (const [sql, prefix, root] of queries) {
-        const [rows] = await connection.execute(sql, ['']);
-        for (const row of rows) {
-            const file = safeReference(row.image_path, prefix, root);
-            const stat = await fs.lstat(file);
-            if (!stat.isFile() || stat.isSymbolicLink() || stat.size === 0) throw new Error('Missing, empty or unsafe referenced image');
-            checked += 1;
-        }
+    for (const [table, prefix, root] of queries) {
+        checked += await verifyBatches(connection, table, 'image_path', value => verifyImageFile(safeReference(value, prefix, root)), limits);
     }
-    const [signatures] = await connection.execute(`SELECT COUNT(*) AS count,
-        SUM(signature_data_url NOT REGEXP '^data:image/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$') AS invalid
-        FROM rental_orders WHERE signature_data_url IS NOT NULL AND signature_data_url <> ''`);
-    if (Number(signatures[0].invalid || 0)) throw new Error('Invalid stored signature format; inspect only in the private restore probe');
+    const signatureCount = await verifyBatches(connection, 'rental_orders', 'signature_data_url', value => verifySignature(value), limits);
     const [ledger] = await connection.execute(`SELECT payment_type, payment_status, COUNT(*) AS count, SUM(amount) AS total
         FROM rental_order_payments GROUP BY payment_type, payment_status ORDER BY payment_type, payment_status`);
     const [outbox] = await connection.execute('SELECT status, COUNT(*) AS count FROM external_effects_outbox GROUP BY status');
     return { schema, migrationCount: migrations.length, referencedImagesChecked: checked,
-        signatureCount: Number(signatures[0].count), ledger, outbox, providersContacted: false,
+        signatureCount, imageContentDecoded: true, signatureContentDecoded: true,
+        decodeLimits: { images: IMAGE_LIMITS, signatures: SIGNATURE_LIMITS }, ledger, outbox, providersContacted: false,
         applicationSmokeVerified: false };
 }
 
@@ -59,4 +80,4 @@ async function main() {
     } finally { await connection.end(); }
 }
 if (require.main === module) main().catch(error => { console.error(JSON.stringify({ event: 'restore.verify.failed', code: error.code || error.name })); process.exitCode = 1; });
-module.exports = { safeReference, verifyRestoredData };
+module.exports = { safeReference, verifyBatches, verifyRestoredData };

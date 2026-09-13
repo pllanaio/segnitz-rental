@@ -1,7 +1,8 @@
 (function (root) {
     'use strict';
+    function normalizeQuery(value) { return String(value || '').trim().normalize('NFC').toLocaleLowerCase('de'); }
     function filter(products, category, query) {
-        const term = String(query || '').trim().normalize('NFC').toLocaleLowerCase('de');
+        const term = normalizeQuery(query);
         return products.filter(product => {
             const categories = (product.categories || []).map(value => typeof value === 'string' ? value : value.name).filter(Boolean);
             const categoryMatches = category === 'all' || categories.some(value => value.toLocaleLowerCase('de') === String(category).toLocaleLowerCase('de'));
@@ -27,7 +28,25 @@
             return entry.promise;
         };
     }
-    const api = Object.freeze({ filter, requestCache });
+    function latestRequest() {
+        let generation = 0;
+        let controller = null;
+        function cancel() { generation++; controller?.abort(); controller = null; }
+        async function run(fetcher) {
+            cancel();
+            const active = generation;
+            controller = new AbortController();
+            try {
+                const result = await fetcher(controller.signal);
+                return active === generation ? result : null;
+            } catch (error) {
+                if (active !== generation) return null;
+                throw error;
+            } finally { if (active === generation) controller = null; }
+        }
+        return { run, cancel };
+    }
+    const api = Object.freeze({ filter, requestCache, normalizeQuery, latestRequest });
     if (typeof module === 'object' && module.exports) module.exports = api;
     else root.CatalogState = api;
 })(typeof window === 'object' ? window : globalThis);

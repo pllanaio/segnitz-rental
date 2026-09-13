@@ -1493,3 +1493,42 @@ test('behält fünf echte Kontoanfragen je Testclient und sperrt den sechsten Ve
     assert.ok(Number(limited.headers.get('retry-after')) > 0);
     assert.equal((await request(new SessionClient())).status, 200);
 });
+
+test('paginiert den echten Katalog stabil und kombiniert Unicode-Suche mit Kategorie ohne Datenlecks', async () => {
+    const connection = await mysql.createConnection(dbConfig);
+    const title = "Katalogprobe Säge / O'Connor 100%_";
+    try {
+        await connection.execute("INSERT INTO rental_categories (id, name, slug) VALUES (701, 'Werkzeugprobe', 'werkzeugprobe'), (702, 'Andere Probe', 'andere-probe')");
+        for (let index = 0; index < 5; index++) {
+            await connection.execute('INSERT INTO rental_products (id, product_key, title, description, price_per_day, deposit, is_active) VALUES (?, ?, ?, ?, 1, 0, ?)',
+                [7100 + index, `CATALOG-PROBE-${index}`, title, 'Synthetische Katalogpagination', index === 4 ? 0 : 1]);
+            await connection.execute('INSERT INTO rental_product_categories (product_id, category_id) VALUES (?, ?)', [7100 + index, index === 3 ? 702 : 701]);
+            await connection.execute('INSERT INTO rental_product_images (product_id, image_path, sort_order) VALUES (?, ?, 0)', [7100 + index, `img/products/catalog-probe-${index}.webp`]);
+        }
+    } finally { await connection.end(); }
+    const client = new SessionClient();
+    const parameters = new URLSearchParams({ q: title.normalize('NFD'), category: 'WERKZEUGPROBE', pageSize: '2' });
+    const firstResponse = await client.request(`/catalog?${parameters}`);
+    const first = await firstResponse.json();
+    assert.equal(firstResponse.status, 200, JSON.stringify(first));
+    assert.match(firstResponse.headers.get('cache-control'), /private, no-store/);
+    assert.deepEqual(first.pagination, { page: 1, pageSize: 2, total: 3, totalPages: 2 });
+    assert.deepEqual(first.products.map(product => product.id), [7100, 7101]);
+    assert.deepEqual(first.products.flatMap(product => product.images.map(image => image.path)), ['img/products/catalog-probe-0.webp', 'img/products/catalog-probe-1.webp']);
+    assert.equal(first.searchTotal, 4);
+    assert.deepEqual(first.categories.map(category => [category.name, category.count]), [['Andere Probe', 1], ['Werkzeugprobe', 3]]);
+    parameters.set('page', '2');
+    const secondResponse = await client.request(`/catalog?${parameters}`);
+    assert.equal(secondResponse.status, 200);
+    const second = await secondResponse.json();
+    assert.deepEqual(second.products.map(product => product.id), [7102]);
+    assert.deepEqual(second.products[0].categories, [{ id: 701, name: 'Werkzeugprobe', slug: 'werkzeugprobe' }]);
+    const malicious = await client.request(`/catalog?${new URLSearchParams({ q: "%' OR 1=1 --" })}`);
+    assert.equal(malicious.status, 200);
+    assert.equal((await malicious.json()).products.length, 0);
+    for (const invalid of ['pageSize=101', 'page=0', 'q[]=one&q[]=two', 'category[x]=one']) {
+        const response = await client.request(`/catalog?${invalid}`);
+        assert.equal(response.status, 400, await response.text());
+        assert.match(response.headers.get('content-type'), /application\/json/);
+    }
+});

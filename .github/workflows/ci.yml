@@ -190,7 +190,7 @@ jobs:
   docker-build:
     name: Build and scan release image
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c
@@ -226,6 +226,29 @@ jobs:
         env:
           RELEASE_SHA: ${{ github.sha }}
         run: node scripts/release-artifact.js verify release-image
+      - name: Install isolated recovery prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y age mysql-client openssl skopeo
+      - name: Rehearse encrypted recovery using the scanned candidate
+        env:
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          skopeo copy --override-os linux --override-arch amd64 \
+            oci-archive:release-image/image.tar "docker-daemon:segnitz-rehearsal:$RELEASE_SHA"
+          SCANNED_CONFIG=$(node -p "require('./release-image/trivy.json').Metadata.ImageID")
+          IMPORTED_CONFIG=$(docker image inspect --format '{{.Id}}' "segnitz-rehearsal:$RELEASE_SHA")
+          test "$IMPORTED_CONFIG" = "$SCANNED_CONFIG"
+          python3 scripts/ops/rehearse_restore.py --image "$SCANNED_CONFIG" \
+            --expected-revision "$RELEASE_SHA" --evidence restore-rehearsal.json
+      - name: Preserve isolated recovery evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: restore-rehearsal-${{ github.sha }}
+          path: restore-rehearsal.json
+          retention-days: 14
+          if-no-files-found: warn
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: release-image-${{ github.sha }}

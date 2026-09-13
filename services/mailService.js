@@ -185,6 +185,31 @@ async function sendOrderEmail(
         return false;
     }
 
+    // Confirmation is the immutable receipt created at booking/payment time.
+    // While delivery is paused, later financial observations must retain that
+    // payload instead of rendering a changed snapshot under the same key.
+    // Keep the general outbox hash check strict, especially for payment jobs.
+    const confirmationId = Number(orderSummary.id);
+    if (deliveryOptions.operationKey === `mail-order-confirmation-${confirmationId}`) {
+        const connection = deliveryOptions.connection;
+        if (!Number.isSafeInteger(confirmationId) || confirmationId < 1 ||
+            !connection?.[Symbol.for('segnitz.mysql.transaction-active')]) {
+            throw Object.assign(new Error('Bestellbestätigung erfordert eine aktive Auftragstransaktion.'), { code: 'ORDER_CONFIRMATION_CONTEXT_REQUIRED' });
+        }
+        const [orders] = await connection.execute('SELECT id FROM rental_orders WHERE id = ? FOR UPDATE', [confirmationId]);
+        if (orders.length !== 1) throw Object.assign(new Error('Auftrag für Bestätigung fehlt.'), { code: 'ORDER_CONFIRMATION_CONTEXT_REQUIRED' });
+        const [existing] = await connection.execute(
+            'SELECT id, effect_type FROM external_effects_outbox WHERE operation_key = ? LIMIT 1 FOR UPDATE',
+            [deliveryOptions.operationKey]
+        );
+        if (existing.length) {
+            if (existing[0].effect_type !== EFFECT_TYPES.MAIL_SEND) {
+                throw Object.assign(new Error('Bestellbestätigung ist einer anderen Operation zugeordnet.'), { code: 'ORDER_CONFIRMATION_IDEMPOTENCY_CONFLICT' });
+            }
+            return true;
+        }
+    }
+
     const financialSummary = deliveryOptions.connection && orderSummary.id
         ? await loadOrderFinance(deliveryOptions.connection, orderSummary.id)
         : orderSummary.financialSummary;

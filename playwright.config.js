@@ -22,6 +22,8 @@ module.exports = defineConfig({
         : 'list',
     use: {
         baseURL,
+        actionTimeout: 15000,
+        navigationTimeout: 30000,
         trace: 'off',
         screenshot: 'off',
         video: 'off',

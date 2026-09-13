@@ -58,16 +58,32 @@ kein `rejectUnauthorized=false`. TLS-Handshake, Hostnamenfehler und Zertifikatsw
 in der Zieltopologie prüfen. Keine TLS-Ausnahme aus einer lokalen Testkonfiguration
 übernehmen.
 
+Die optionale Vorlage `compose.db-tls.yml` mountet ausschließlich das öffentliche
+CA-Zertifikat schreibgeschützt und aktiviert die Identitätsprüfung. Für `DB_HOST`
+den DNS-Namen aus dem Serverzertifikat verwenden. `DB_TLS_CA_HOST_FILE` bezeichnet
+eine vorhandene absolute Hostdatei, die UID 1000 lesen kann; niemals den privaten
+CA-Schlüssel mounten. Vor jedem freigegebenen Update mit diesem Overlay zusätzlich
+`docker compose -f compose.yml -f compose.db-tls.yml config --quiet` ausführen;
+für das spätere freigegebene Update dieselbe Dateikombination verwenden. Die
+isolierte CI-Probe prüft gültige CA, falsche CA und falschen Hostnamen; die echte
+Betreiber-CA und Zieltopologie bleiben gesondert nachzuweisen.
+
 Der derzeitige automatische Bootstrap braucht auf dem Anwendungsschema
 `SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX, REFERENCES` sowie
 `TRIGGER` für den neuen Auditvertrag; für
 Metadaten-/Verifikationsabfragen entsprechende Leserechte. Schemaweite
 `CREATE`-Rechte sind für eine bereits bereitgestellte Datenbank ausreichend;
 serverweite Datenbankanlage ist optional und sollte der Betreiber separat erledigen.
-Runtime- und Migrationsaccounts sollten getrennt werden. Solange derselbe Startpfad
-Migrationen ausführt, ist ein ausschließlich mit DML berechtigter Runtime-Account
-allein nicht ausreichend: keinen erfolgreichen getrennten Migrationsbetrieb behaupten,
-bevor der Betreiber den Ablauf mit den tatsächlichen Grants getestet hat.
+`DB_MIGRATION_USER` und `DB_MIGRATION_PW` können als gemeinsam gesetztes Paar einen
+eigenen Bootstrapaccount auswählen, einschließlich einer gegebenenfalls erforderlichen
+Datenbankanlage. HTTP, Sessionstore, Worker und Probes verwenden weiterhin `DB_USER`
+und `DB_PW`; Host, verifiziertes TLS und Verbindungsbudget bleiben gemeinsam. Ohne
+das Paar wird der bisherige gemeinsame Account verwendet. Der Runtimeaccount
+braucht DML-/Metadatenrechte; die Triggerprüfung benötigt unter MySQL zusätzlich
+`TRIGGER` auf der Audittabelle. Dieses Recht erlaubt auch Trigger-DDL und ist ein
+ausdrücklicher Privilegienkompromiss. Tatsächliche eingeschränkte Grants, Bootstrap,
+Neustart und Readiness müssen mit den Zielaccounts geprüft werden; die implementierte
+Accountauswahl allein belegt diesen Betriebsnachweis noch nicht.
 Backups brauchen `SELECT`, `SHOW VIEW`, `TRIGGER`; mit
 `--single-transaction --no-tablespaces --set-gtid-purged=OFF` werden zusätzliche
 LOCK-/PROCESS-/GTID-Anforderungen vermieden. Nicht genutzte Events und Routinen
@@ -219,9 +235,12 @@ DROP-/TRUNCATE-Rechte erhalten. Ein privilegierter DBA kann Schema/Trigger verä
 diese Betriebsrechte bleiben geschützt und auditpflichtig. Eine spätere Löschung
 von Auditereignissen benötigt eine eigens genehmigte Aufbewahrungsregel.
 
-Die genaue Routenzuordnung, lokale Rot-/Grünnachweise, fünf vorbereitete echte
-MySQL-Transaktionstests und verbleibende Integrationsprüfungen stehen in
+Die genaue Routenzuordnung und lokale Rot-/Grünnachweise stehen in
 [evidence-admin-audit.md](evidence-admin-audit.md).
+Alle fünf Audit-Transaktionstests bestanden tatsächlich auf MySQL in
+[CI 34755684618](https://github.com/pllanaio/segnitz-rental/actions/runs/34755684618)
+für Snapshot `b7c59008e231f666fac137c47bb195447afc4b2e`. Die vollständige
+Freigabe bleibt an sämtliche Gates desselben endgültigen Commits gebunden.
 
 `GET /admin/operations-metrics` ist nur für `global_admin`, mit `no-store`, gedacht:
 HTTP-Anzahl/Fehler/Abbrüche/Latenzbuckets/In-flight, DB-Budget/Timeouts, Worker-
@@ -258,6 +277,14 @@ ansprechbar, keine Doppelbelegung/-zahlung und kein Leak nach Recovery.
 Das Profil ist hier dokumentiert; eine bestandene Ausführung ist nicht behauptet.
 
 ## Outbox-Triage, Reconciliation und Replay
+
+Die Bestellbestätigung bewahrt den Finanzstand ihrer ersten Vormerkung als
+unveränderlichen Beleg. Solange Mailversand pausiert, dürfen nachfolgende
+Zahlungs-/Refundabgleiche ihren Payload und Hash nicht neu erzeugen. Der Versandstatus
+bleibt dabei unverändert: ein vorhandener `pending`- oder `dead`-Job wird nicht
+als versandt erklärt oder durch einen neuen Job ersetzt. Aktuelle Forderungen
+stehen in den aktuellen Auftragsansichten; ein fehlgeschlagener ursprünglicher
+Bestätigungsjob benötigt den unten beschriebenen autorisierten Triageweg.
 
 `node scripts/ops/triage.js [afterId]` liest höchstens 50 offene Jobs pro Seite und
 Statusaggregate. Es gibt ausschließlich numerische Job-IDs, Typ, Zustand,
@@ -361,11 +388,18 @@ node scripts/ops/verify-restore.js /sicher/probes/20260913/products /sicher/prob
 ```
 
 Der lesende Prüfer kontrolliert den kanonischen Schema-/Migrationsvertrag,
-Bildreferenzen und vorhandene Dateien, Signaturformat, Ledgeraggregate und
+Bildreferenzen und vorhandene Dateien, decodierte Bild-/Signaturinhalte, Ledgeraggregate und
 Outboxzustände. Er nimmt keine Migration vor. Ein älterer Snapshot muss zunächst
 im isolierten Probeablauf mit dem dazu passenden geprüften Image geöffnet bzw.
 nach freigegebenem Migrationsplan aktualisiert werden; Drift wird nicht repariert.
-Signaturformatkontrolle ersetzt keine visuelle Stichprobe und keinen Bilddecoder.
+Sharp decodiert alle Pixel und prüft Format, Einbildigkeit, Byte-/Pixelgrenzen
+und eine Frist von fünf Sekunden je Bild. Bilder sind auf 5 MiB/16 Millionen
+Pixel begrenzt, Signaturen auf 750.000 Byte/2 Millionen Pixel. Keyset-Batches
+von 25 Datensätzen und höchstens zwei parallele Decoder begrenzen den Speicher;
+mehr als 100.000 Referenzen je Tabelle oder 15 Minuten je Tabellendurchlauf
+brechen ausdrücklich ab. Größere historische Bestände brauchen einen separat
+reviewten Prüfplan; eine abgebrochene Teilprüfung gilt nicht als erfolgreich.
+Eine visuelle Prüfung der fachlichen Beweiskraft ersetzt der Decoder nicht.
 
 Anschließend App unter nachgewiesener Anbieter-Netzisolation starten und den
 fachlichen Smoke-/Playwright-Ablauf mit ausschließlich synthetischen Mutationen
@@ -374,6 +408,42 @@ Finanzbeträge, private Bilder, Signaturdarstellung, Belegung, Retouren. Bei ech
 Kopien keine Kundenbilder/Signaturen in Browserberichte oder Screenshots exportieren.
 Restore-, Prüf- und Startdauer sowie Ergebnisse messen und gegen RPO/RTO bewerten.
 Der Helfer setzt `applicationSmokeVerified:false`, bis dieser Nachweis vorliegt.
+
+Die ausführbare synthetische CI-Probe bindet den Nachweis an das bereits gebaute
+Release-Image. Voraussetzungen: Docker, Python 3.12+, MySQL-8-Clients, `age` und
+`age-keygen`; der Checkout und das OCI-Label `org.opencontainers.image.revision`
+müssen exakt denselben vollständigen Commit bezeichnen:
+
+```sh
+python3 scripts/ops/rehearse_restore.py \
+  --image "$CANDIDATE_IMAGE" --expected-revision "$GITHUB_SHA" \
+  --evidence restore-rehearsal.json
+```
+
+Der Aufruf akzeptiert keine bestehende Datenbank oder Volumes. Er erstellt einen
+MySQL-Container mit gepinntem Digest, zwei neue Quellbildverzeichnisse, neue
+`segnitz_restore_test_*`-Datenbanken und ein internes Docker-Netz ohne Providerzugang.
+Nur synthetische Nutzer, ein abgewickelter Auftrag, drei Ledgerbuchungen, zwei
+Bilder, eine Signatur und eine pausierte Mail werden angelegt. Das gewöhnliche
+`server.js` startet das Quellsystem und wird vor dem Backup regulär beendet;
+der bestehende Backuphelfer prüft seine tatsächlichen gestoppten Writercontainer
+vor und nach dem Dump. Die Probe umgeht diese Wartungsprüfung nicht.
+
+Das mit einer temporären age-Identität verschlüsselte Archiv wird anhand seines
+frisch ermittelten vertrauenswürdigen Hashes in neue Zielressourcen eingespielt.
+Der identische Kandidat prüft Schema, Migrationen und decodierte Bilddaten,
+startet die restaurierte App und verifiziert `/ready` mit/ohne Session, Login,
+Eigentumsgrenzen, privates Rückgabebild sowie identische Kunden-/Adminfinanzsalden.
+Die pausierte Mail muss unversandt und ohne verbrauchten Versuch erhalten bleiben.
+Erst dann setzt der JSON-Nachweis `restoreVerified` und `applicationSmokeVerified`
+auf `true`, mit Image-ID, Repo-Digests, Commit, Archivhash und gemessener Laufzeit.
+Ops-Helfer bleiben aus dem Produktionsimage ausgeschlossen und werden für die
+Probe ausschließlich lesend aus demselben Checkout eingebunden. Die Aufräumphase
+entfernt nur Container-IDs und Verzeichnisse, die dieser Lauf selbst angelegt hat.
+Standard ist `/dev/shm`; diese flüchtigen Daten sind ausschließlich synthetisch.
+Kein Nachweis für die Größe, Entschlüsselbarkeit oder RTO eines Betreiberbackups
+wird aus dieser kleinen Probe abgeleitet. Produktive Trigger-DEFINER und deren
+Rechte sind beim echten Restore gesondert zu prüfen; der Dump wird nicht umgeschrieben.
 
 Eine echte Wiederherstellung braucht zusätzlich den Abgleich seit dem
 Snapshot beim Provider ausgeführter Zahlungen, Refunds, Chargebacks und Mails.

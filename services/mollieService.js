@@ -96,34 +96,92 @@ function buildPaymentMetadata(order, overrides = {}) {
     };
 }
 
+function invalidTestFixture() {
+    return Object.assign(new Error('Isolierte Mollie-Testfixture ist ungültig.'), { code: 'MOLLIE_TEST_FIXTURE_INVALID' });
+}
+
+function testFixturePath(filename) {
+    const configuredDirectory = process.env.MOLLIE_TEST_FIXTURES_DIR;
+    if (!configuredDirectory || process.env.NODE_ENV !== 'test') return null;
+    if (typeof filename !== 'string' || filename.length > 255 || /[^A-Za-z0-9_.-]/u.test(filename) ||
+        !/^(?:tr_[A-Za-z0-9_-]+|operation-[a-f0-9]{64})\.json$/u.test(filename)) throw invalidTestFixture();
+    const directory = fs.realpathSync(configuredDirectory);
+    // Normalize first, then require containment with a separator boundary. The
+    // basename defense also prevents any caller from introducing subdirectories.
+    const candidate = path.resolve(directory, path.basename(filename));
+    if (!candidate.startsWith(directory + path.sep)) throw invalidTestFixture();
+    return candidate;
+}
+
+function readTestFixture(filename) {
+    let descriptor;
+    try {
+        const file = testFixturePath(filename);
+        if (!file) return null;
+        descriptor = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
+        const stat = fs.fstatSync(descriptor);
+        if (!stat.isFile() || stat.size < 1 || stat.size > 1024 * 1024) throw invalidTestFixture();
+        const buffer = Buffer.alloc(stat.size + 1);
+        let count = 0;
+        while (count < buffer.length) {
+            const bytes = fs.readSync(descriptor, buffer, count, buffer.length - count, count);
+            if (!bytes) break;
+            count += bytes;
+        }
+        if (count !== stat.size) throw invalidTestFixture();
+        return JSON.parse(buffer.subarray(0, count).toString('utf8'));
+    } catch (error) {
+        if (error.code === 'ENOENT') return null;
+        throw invalidTestFixture();
+    } finally { if (descriptor !== undefined) fs.closeSync(descriptor); }
+}
+
+function writeTestFixture(filename, result) {
+    const file = testFixturePath(filename);
+    if (!file) return;
+    // Never write through a pre-existing fixture or predictable temporary symlink.
+    const temporary = path.join(path.dirname(file), `fixture-${crypto.randomBytes(16).toString('hex')}.tmp`);
+    let descriptor;
+    let created = false;
+    try {
+        descriptor = fs.openSync(temporary, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600);
+        created = true;
+        fs.writeFileSync(descriptor, JSON.stringify(result));
+        fs.closeSync(descriptor);
+        descriptor = undefined;
+        fs.renameSync(temporary, file);
+    } catch { throw invalidTestFixture(); }
+    finally {
+        if (descriptor !== undefined) fs.closeSync(descriptor);
+        if (created) {
+            try { fs.unlinkSync(temporary); } catch (error) { if (error.code !== 'ENOENT') throw invalidTestFixture(); }
+        }
+    }
+}
+
 function readTestPaymentFixture(paymentId) {
-    const directory = process.env.MOLLIE_TEST_FIXTURES_DIR;
-    if (!directory || process.env.NODE_ENV !== 'test' || !/^tr_[A-Za-z0-9_-]+$/.test(paymentId)) return null;
-    const filename = path.join(directory, `${paymentId}.json`);
-    try { return JSON.parse(fs.readFileSync(filename, 'utf8')); }
-    catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+    if (typeof paymentId !== 'string' || !/^tr_[A-Za-z0-9_-]+$/u.test(paymentId)) return null;
+    const payment = readTestFixture(`${paymentId}.json`);
+    if (payment && (payment.resource !== 'payment' || payment.id !== paymentId)) throw invalidTestFixture();
+    return payment;
 }
 
 function testOperationFile(operationKey) {
     if (!operationKey || !process.env.MOLLIE_TEST_FIXTURES_DIR || process.env.NODE_ENV !== 'test') return null;
-    return path.join(process.env.MOLLIE_TEST_FIXTURES_DIR, `operation-${crypto.createHash('sha256').update(operationKey).digest('hex')}.json`);
+    return `operation-${crypto.createHash('sha256').update(operationKey).digest('hex')}.json`;
 }
 function readTestOperation(operationKey) {
     if (!operationKey) return null;
     const filename = testOperationFile(operationKey);
-    if (filename && fs.existsSync(filename)) return JSON.parse(fs.readFileSync(filename, 'utf8'));
-    return testOperations.get(operationKey) || null;
+    return (filename && readTestFixture(filename)) || testOperations.get(operationKey) || null;
 }
 function writeTestResult(operationKey, result) {
     if (operationKey) testOperations.set(operationKey, result);
     const filename = testOperationFile(operationKey);
     if (filename) {
-        fs.writeFileSync(`${filename}.tmp`, JSON.stringify(result));
-        fs.renameSync(`${filename}.tmp`, filename);
+        writeTestFixture(filename, result);
         if (result.resource === 'payment') {
-            const paymentFile = path.join(process.env.MOLLIE_TEST_FIXTURES_DIR, `${result.id}.json`);
-            fs.writeFileSync(`${paymentFile}.tmp`, JSON.stringify(result));
-            fs.renameSync(`${paymentFile}.tmp`, paymentFile);
+            writeTestFixture(`${result.id}.json`, result);
         }
     }
 }
@@ -386,8 +444,8 @@ async function listMollieRefundsForPayment(paymentId) {
         const refunds = new Map([...testRefunds.values()].filter(refund => refund.paymentId === paymentId).map(refund => [refund.id, refund]));
         const directory = process.env.NODE_ENV === 'test' && process.env.MOLLIE_TEST_FIXTURES_DIR;
         if (directory) for (const name of fs.readdirSync(directory).filter(name => /^operation-[a-f0-9]{64}\.json$/.test(name))) {
-            const resource = JSON.parse(fs.readFileSync(path.join(directory, name), 'utf8'));
-            if (resource.resource === 'refund' && resource.paymentId === paymentId) refunds.set(resource.id, resource);
+            const resource = readTestFixture(name);
+            if (resource?.resource === 'refund' && resource.paymentId === paymentId) refunds.set(resource.id, resource);
         }
         return fixture?._embedded?.refunds || [...refunds.values()];
     }

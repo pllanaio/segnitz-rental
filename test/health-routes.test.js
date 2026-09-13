@@ -8,7 +8,7 @@ const { registerHealthRoutes } = require('../services/healthRoutes');
 test('live and ready bypass a broken session store with and without a session cookie', async () => {
     const app = express();
     let sessionReads = 0;
-    registerHealthRoutes(app, { installationState: () => 'ready', readiness: async () => { throw new Error('database down'); } });
+    const closeHealth = registerHealthRoutes(app, { installationState: () => 'ready', readiness: async () => { throw new Error('database down'); } });
     app.use((req, res) => { sessionReads += 1; res.status(500).json({ error: 'session unavailable' }); });
     const server = app.listen(0, '127.0.0.1');
     await new Promise(resolve => server.once('listening', resolve));
@@ -25,5 +25,6 @@ test('live and ready bypass a broken session store with and without a session co
         assert.equal(sessionReads, 0);
     } finally {
         await new Promise(resolve => server.close(resolve));
+        closeHealth();
     }
 });

@@ -10,6 +10,41 @@ const { applyRefundObservation, applyChargebackObservations } = require('../../s
 
 before(resetOrderLifecycleDatabase);
 
+test('two MySQL sessions retain one immutable confirmation while delivery is paused', async () => {
+    const { sendOrderEmail } = require('../../services/mailService');
+    const first = await mysql.createConnection(dbConfig);
+    const second = await mysql.createConnection(dbConfig);
+    try {
+        const [created] = await first.execute("INSERT INTO rental_orders (order_no, status, payment_status, total_amount) VALUES ('MAIL-IMMUTABLE', 'confirmed', 'paid', 250)");
+        const orderId = created.insertId;
+        await first.execute("INSERT INTO rental_order_items (order_id, product_id, rental_start, rental_end, price_per_day, deposit) VALUES (?, ?, '2026-12-10', '2026-12-10', 100, 150)", [orderId, TEST_PRODUCT.id]);
+        await first.execute("INSERT INTO rental_order_payments (order_id, payment_type, payment_method, payment_status, amount, mollie_payment_id) VALUES (?, 'initial_payment', 'online', 'paid', 250, 'tr_mail_snapshot')", [orderId]);
+        const operationKey = `mail-order-confirmation-${orderId}`;
+        const send = connection => sendOrderEmail(['synthetic@example.com'], {
+            id: orderId, orderNo: 'MAIL-IMMUTABLE', items: [], totals: { rentalTotal: 100, depositTotal: 150, grandTotalBeforeDepositReturn: 250 }
+        }, { email: 'synthetic@example.com' }, null, 'Online bezahlt', {
+            connection, operationKey, application: { kind: 'order_confirmation_mail', orderId }
+        });
+        await first.beginTransaction();
+        await send(first);
+        const [[original]] = await first.execute('SELECT id, payload_hash, status FROM external_effects_outbox WHERE operation_key = ?', [operationKey]);
+        await first.execute("INSERT INTO rental_order_payments (order_id, payment_type, payment_method, payment_status, amount, mollie_payment_id, mollie_refund_id) VALUES (?, 'duplicate_payment_refund', 'online', 'failed', -25, 'tr_mail_snapshot', 're_mail_failed')", [orderId]);
+        await second.beginTransaction();
+        const repeated = send(second);
+        await first.commit();
+        await repeated;
+        await second.commit();
+        const [receipts] = await first.execute('SELECT id, payload_hash, status FROM external_effects_outbox WHERE operation_key = ?', [operationKey]);
+        assert.deepEqual(receipts, [original]);
+        assert.equal(original.status, 'pending');
+        const [[order]] = await first.execute('SELECT order_confirmation_sent_at FROM rental_orders WHERE id = ?', [orderId]);
+        assert.equal(order.order_confirmation_sent_at, null);
+    } finally {
+        await first.rollback(); await second.rollback();
+        await first.end(); await second.end();
+    }
+});
+
 test('two real MySQL sessions: expired A cannot regain B occupancy without cleanup, clock is controlled', async () => {
     const a = await mysql.createConnection(dbConfig);
     const b = await mysql.createConnection(dbConfig);

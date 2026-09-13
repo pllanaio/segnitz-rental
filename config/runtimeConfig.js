@@ -7,6 +7,10 @@ const { parseTrustProxy } = require('./proxy');
 // Keep technical timeout values bounded instead of silently clamping typos.
 const NUMBER_SETTINGS = Object.freeze({
     PORT: [3000, 1, 65535], DB_PORT: [3306, 1, 65535],
+    HTTP_RATE_LIMIT_WINDOW_MS: [60000, 1000, 3600000],
+    HTTP_RATE_LIMIT_MAX: [600, 1, 100000],
+    HTTP_RATE_LIMIT_GLOBAL_MAX: [6000, 1, 1000000],
+    READINESS_RATE_LIMIT_MAX: [120, 1, 10000],
     GRAPH_REQUEST_TIMEOUT_MS: [10000, 1000, 30000],
     MOLLIE_REQUEST_TIMEOUT_MS: [15000, 1000, 30000],
     CLEANUP_INTERVAL_MS: [60000, 1000, 3600000],
@@ -38,6 +42,16 @@ function requireValue(environment, name) {
     return environment[name];
 }
 
+function numberSetting(environment, name) {
+    const [fallback, min, max] = NUMBER_SETTINGS[name];
+    const raw = environment[name];
+    const value = raw === undefined ? fallback : Number(raw);
+    if ((raw !== undefined && !/^\d+$/u.test(raw)) || !Number.isSafeInteger(value) || value < min || value > max) {
+        throw new Error(`${name} muss eine Ganzzahl zwischen ${min} und ${max} sein.`);
+    }
+    return value;
+}
+
 function booleanSetting(environment, name) {
     const value = environment[name];
     if (value !== undefined && value !== '' && value !== '0' && value !== '1') {
@@ -67,14 +81,7 @@ function validateRuntimeConfig(environment = process.env) {
     }
 
     const numbers = {};
-    for (const [name, [fallback, min, max]] of Object.entries(NUMBER_SETTINGS)) {
-        const raw = environment[name];
-        const value = raw === undefined ? fallback : Number(raw);
-        if ((raw !== undefined && !/^\d+$/u.test(raw)) || !Number.isSafeInteger(value) || value < min || value > max) {
-            throw new Error(`${name} muss eine Ganzzahl zwischen ${min} und ${max} sein.`);
-        }
-        numbers[name] = value;
-    }
+    for (const name of Object.keys(NUMBER_SETTINGS)) numbers[name] = numberSetting(environment, name);
     for (const name of ['DISABLE_PERIODIC_CLEANUP', 'MOLLIE_TEST_MODE', 'DISABLE_EMAILS', 'MAIL_DELIVERY_PAUSED', 'DB_TLS', 'DB_LEGACY_WRITERS_STOPPED', 'SIGNATURE_IMAGE_UPLOAD_ENABLED', 'DISABLE_PAYMENT_RECONCILIATION']) {
         booleanSetting(environment, name);
     }
@@ -148,4 +155,4 @@ function validateRuntimeConfig(environment = process.env) {
         simulatedPayments, mailPaused, numbers: Object.freeze(numbers) });
 }
 
-module.exports = { NUMBER_SETTINGS, validateRuntimeConfig };
+module.exports = { NUMBER_SETTINGS, numberSetting, validateRuntimeConfig };

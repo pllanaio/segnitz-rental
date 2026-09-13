@@ -38,16 +38,11 @@ function createHelmetOptions(environment = process.env) {
         objectSrc: ["'none'"],
         frameAncestors: ["'none'"],
         formAction: ["'self'"],
-        scriptSrc: ["'self'", 'https://cdn.jsdelivr.net'],
+        scriptSrc: ["'self'"],
         scriptSrcAttr: ["'none'"],
-        styleSrc: [
-            "'self'",
-            "'unsafe-inline'",
-            'https://cdn.jsdelivr.net',
-            'https://fonts.googleapis.com'
-        ],
+        styleSrc: ["'self'", "'unsafe-inline'"],
         imgSrc: ["'self'", 'data:', 'blob:'],
-        fontSrc: ["'self'", 'data:', 'https://fonts.gstatic.com'],
+        fontSrc: ["'self'", 'data:'],
         connectSrc: ["'self'"]
     };
 

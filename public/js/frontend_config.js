@@ -16,6 +16,12 @@ let rentalProducts = [];
 let currentProductPage = 1;
 const productsPerPage = 12;
 let filteredRentalProducts = [];
+let catalogPagination = { page: 1, pageSize: productsPerPage, total: 0, totalPages: 1 };
+let catalogCategories = [];
+let catalogSearchTotal = 0;
+let catalogCategoriesTruncated = false;
+let catalogFilterTimer;
+const catalogRequests = window.CatalogState.latestRequest();
 let currentCart = {
     cartId: null,
     items: []
@@ -66,7 +72,7 @@ function handleFrontendActionClick(event) {
         'show-all-reviews': () => renderModalProductReviews(true)
     };
 
-    actions[action]?.();
+    if (actions[action]) return window.PendingActions.run(button, actions[action]);
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -1123,32 +1129,54 @@ function validateSignatureStep() {
     return isValid;
 }
 
-document.addEventListener('DOMContentLoaded', loadRentalProducts);
+document.addEventListener('DOMContentLoaded', () => loadRentalProducts());
 
-async function loadRentalProducts() {
+function showCatalogLoading() {
+    const grid = document.getElementById('productGrid');
+    if (!grid) return;
+    grid.setAttribute('aria-busy', 'true');
+    grid.innerHTML = '<div class="alert alert-info" role="status">Produkte werden geladen…</div>';
+    document.getElementById('productPagination')?.replaceChildren();
+}
+
+async function loadRentalProducts(page = 1, { focusResults = false } = {}) {
     const productGrid = document.getElementById('productGrid');
 
     if (!productGrid) return;
-
+    showCatalogLoading();
     try {
-        const response = await fetch('/products');
-        if (!response.ok) throw new Error('Produkte nicht verfügbar.');
-        const products = await response.json();
-
-        rentalProducts = products.filter(product => product.is_active === 1);
+        const query = new URLSearchParams({ page: String(page), pageSize: String(productsPerPage),
+            q: window.CatalogState.normalizeQuery(document.getElementById('productSearchInput')?.value),
+            category: window.CatalogState.normalizeQuery(selectedCategory) });
+        const catalog = await catalogRequests.run(async signal => {
+            const response = await fetch(`/catalog?${query}`, { signal });
+            if (!response.ok) throw new Error('Produkte sind vorübergehend nicht verfügbar.');
+            const result = await response.json();
+            if (!Array.isArray(result.products) || result.products.length > productsPerPage ||
+                !Array.isArray(result.categories) || !Number.isSafeInteger(result.pagination?.page) ||
+                !Number.isSafeInteger(result.pagination?.totalPages)) throw new Error('Ungültige Katalogantwort.');
+            return result;
+        });
+        if (!catalog) return;
+        rentalProducts = catalog.products;
+        filteredRentalProducts = catalog.products;
+        catalogPagination = catalog.pagination;
+        catalogCategories = catalog.categories;
+        catalogSearchTotal = catalog.searchTotal;
+        catalogCategoriesTruncated = catalog.categoriesTruncated;
+        currentProductPage = catalog.pagination.page;
         renderCategoryFilters();
-        filteredRentalProducts = [...rentalProducts];
-        currentProductPage = 1;
-
         renderProductPage();
-
+        productGrid.setAttribute('aria-busy', 'false');
+        if (focusResults) { productGrid.setAttribute('tabindex', '-1'); productGrid.focus(); }
     } catch (error) {
-        console.error('Fehler beim Laden der Produkte:', error);
-        productGrid.innerHTML = `
-            <div class="alert alert-danger">
-                Produkte konnten nicht geladen werden.
-            </div>
-        `;
+        productGrid.setAttribute('aria-busy', 'false');
+        productGrid.innerHTML = '<div class="alert alert-danger" role="alert">Produkte konnten nicht geladen werden. Bitte erneut versuchen.</div>';
+        const retry = document.createElement('button');
+        retry.type = 'button'; retry.className = 'btn btn-outline-primary';
+        retry.textContent = 'Produkte erneut laden';
+        retry.addEventListener('click', () => loadRentalProducts(page, { focusResults }));
+        productGrid.appendChild(retry);
     }
     updateProductSectionTitle();
 }
@@ -1272,18 +1300,14 @@ function renderProductPage() {
     if (filteredRentalProducts.length === 0) {
         productGrid.innerHTML = `
             <div class="alert alert-warning">
-                Aktuell sind keine Produkte verfügbar.
+                Für diese Suche wurden keine Produkte gefunden.
             </div>
         `;
         pagination.innerHTML = '';
         return;
     }
 
-    const startIndex = (currentProductPage - 1) * productsPerPage;
-    const endIndex = startIndex + productsPerPage;
-    const productsForPage = filteredRentalProducts.slice(startIndex, endIndex);
-
-    productsForPage.forEach(product => {
+    filteredRentalProducts.forEach(product => {
         productGrid.appendChild(createRentalProductCard(product));
     });
 
@@ -1292,9 +1316,11 @@ function renderProductPage() {
 
 function renderProductPagination() {
     const pagination = document.getElementById('productPagination');
-    const totalPages = Math.ceil(filteredRentalProducts.length / productsPerPage);
+    const totalPages = catalogPagination.totalPages;
 
     pagination.innerHTML = '';
+    pagination.setAttribute('role', 'navigation');
+    pagination.setAttribute('aria-label', 'Produktseiten');
 
     if (totalPages <= 1) {
         return;
@@ -1307,13 +1333,14 @@ function renderProductPagination() {
     prevBtn.disabled = currentProductPage === 1;
     prevBtn.addEventListener('click', () => {
     if (transitionPending || checkoutPending) return;
-        currentProductPage--;
-        renderProductPage();
+        loadRentalProducts(currentProductPage - 1, { focusResults: true });
     });
 
     pagination.appendChild(prevBtn);
 
-    for (let page = 1; page <= totalPages; page++) {
+    const visiblePages = new Set([1, totalPages]);
+    for (let page = Math.max(1, currentProductPage - 2); page <= Math.min(totalPages, currentProductPage + 2); page++) visiblePages.add(page);
+    for (const page of [...visiblePages].sort((a, b) => a - b)) {
         const pageBtn = document.createElement('button');
         pageBtn.type = 'button';
         pageBtn.className =
@@ -1322,10 +1349,11 @@ function renderProductPagination() {
                 : 'btn btn-outline-primary btn-sm';
 
         pageBtn.textContent = page;
+        pageBtn.setAttribute('aria-label', `Seite ${page}`);
+        if (page === currentProductPage) pageBtn.setAttribute('aria-current', 'page');
 
         pageBtn.addEventListener('click', () => {
-            currentProductPage = page;
-            renderProductPage();
+            loadRentalProducts(page, { focusResults: true });
         });
 
         pagination.appendChild(pageBtn);
@@ -1337,8 +1365,7 @@ function renderProductPagination() {
     nextBtn.textContent = 'Weiter';
     nextBtn.disabled = currentProductPage === totalPages;
     nextBtn.addEventListener('click', () => {
-        currentProductPage++;
-        renderProductPage();
+        loadRentalProducts(currentProductPage + 1, { focusResults: true });
     });
 
     pagination.appendChild(nextBtn);
@@ -1718,10 +1745,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (!searchInput) return;
 
-    let filterTimer;
     searchInput.addEventListener('input', () => {
-        clearTimeout(filterTimer);
-        filterTimer = setTimeout(applyProductFilters, 150);
+        clearTimeout(catalogFilterTimer);
+        catalogRequests.cancel();
+        showCatalogLoading();
+        catalogFilterTimer = setTimeout(applyProductFilters, 150);
     });
 
     searchInput.addEventListener('keydown', event => {
@@ -1955,31 +1983,17 @@ function renderCategoryFilters() {
 
     if (!container) return;
 
-    const categoryMap = new Map();
-
-    rentalProducts.forEach(product => {
-        getProductCategoryNames(product).forEach(categoryName => {
-            categoryMap.set(
-                categoryName,
-                (categoryMap.get(categoryName) || 0) + 1
-            );
-        });
-    });
-
-    const categories = [...categoryMap.entries()]
-        .sort((a, b) => a[0].localeCompare(b[0], 'de'));
-
     container.innerHTML = '';
 
     const allButton = createCategoryFilterButton(
         'all',
         'Alle Produkte',
-        rentalProducts.length
+        catalogSearchTotal
     );
 
     container.appendChild(allButton);
 
-    categories.forEach(([categoryName, count]) => {
+    catalogCategories.forEach(({ name: categoryName, count }) => {
         container.appendChild(
             createCategoryFilterButton(
                 categoryName,
@@ -1988,6 +2002,11 @@ function renderCategoryFilters() {
             )
         );
     });
+    if (catalogCategoriesTruncated) {
+        const hint = document.createElement('p');
+        hint.className = 'small'; hint.textContent = 'Weitere Kategorien über die Produktsuche eingrenzen.';
+        container.appendChild(hint);
+    }
 }
 
 function createCategoryFilterButton(categoryValue, label, count) {
@@ -2027,10 +2046,9 @@ function selectCategoryFilter(category) {
 }
 
 function applyProductFilters() {
-    filteredRentalProducts = window.CatalogState.filter(rentalProducts, selectedCategory, document.getElementById('productSearchInput')?.value || '');
+    clearTimeout(catalogFilterTimer);
     currentProductPage = 1;
-    renderCategoryFilters();
-    renderProductPage();
+    loadRentalProducts(1);
     updateProductSectionTitle();
     renderBestsellers();
 }

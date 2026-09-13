@@ -58,8 +58,8 @@ async function connectOrCreateDatabase() {
     } catch (error) {
         if (error.code !== 'ER_BAD_DB_ERROR') throw error;
 
-        const { database, ...serverConfig } = dbConfig;
-        const serverConnection = await mysql.createConnection({ ...serverConfig, [Symbol.for('segnitz.mysql.connection-options')]: { migration: true } });
+        const { database, ...serverConfig } = dbConfig.connectionConfig({ migration: true });
+        const serverConnection = await mysql.createConnection(serverConfig);
 
         try {
             await serverConnection.query(
@@ -442,6 +442,7 @@ async function initializeDatabase() {
 module.exports = {
     assertDatabaseHasNoUnknownMigrations,
     buildMigrationManifest,
+    connectOrCreateDatabase,
     ensureCanonicalTables,
     hasExistingApplicationTables,
     initializeFreshSchema,

@@ -33,7 +33,9 @@ function createPaymentReconciler({ createConnection, reconcilePayment, batchSize
                                          WHERE refund.mollie_payment_id = source.mollie_payment_id
                                          AND refund.amount < 0 AND refund.payment_status IN ('pending', 'failed', 'charged_back')))
                          GROUP BY source.mollie_payment_id HAVING MIN(source.id) > ? ORDER BY MIN(source.id) LIMIT ?`,
-                        [unresolvedCursor, urgentLimit]
+                        // mysql2 encodes JS numbers as DOUBLE. MySQL rejects that
+                        // wire type for prepared LIMIT; bind the capped integer as text.
+                        [unresolvedCursor, String(urgentLimit)]
                     );
                     unresolvedCursor = urgent.length ? Number(urgent[urgent.length - 1].id) : 0;
                 }
@@ -42,7 +44,7 @@ function createPaymentReconciler({ createConnection, reconcilePayment, batchSize
                      WHERE mollie_payment_id IS NOT NULL AND mollie_refund_id IS NULL
                      AND payment_method = 'online'
                      AND payment_type IN ('initial_payment', 'rental', 'deposit', 'rental_adjustment', 'return_additional_charge')
-                     GROUP BY mollie_payment_id HAVING MIN(id) > ? ORDER BY MIN(id) LIMIT ?`, [cursor, limit - urgent.length]
+                     GROUP BY mollie_payment_id HAVING MIN(id) > ? ORDER BY MIN(id) LIMIT ?`, [cursor, String(limit - urgent.length)]
                 );
                 cursor = historical.length ? Number(historical[historical.length - 1].id) : 0;
                 rows = [...new Map([...urgent, ...historical].map(row => [row.mollie_payment_id, row])).values()];

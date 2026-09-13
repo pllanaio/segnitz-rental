@@ -39,6 +39,10 @@ function redact(value, key = '', seen = new Set(), depth = 0) {
     return Object.fromEntries(Object.entries(value).slice(0, 40).map(([name, item]) => [name, redact(item, name, seen, depth + 1)]));
 }
 
+function actorReference(identifier) {
+    return crypto.createHash('sha256').update(String(identifier || '')).digest('base64url').slice(0, 22);
+}
+
 function log(level, event, fields = {}) {
     sink({ timestamp: new Date().toISOString(), level, event: redactString(event), ...redact(context.getStore() || {}), ...redact(fields) });
 }
@@ -84,7 +88,7 @@ function requestObservability(req, res, next) {
         log(status >= 500 ? 'error' : 'info', 'http.request', fields);
         if (!aborted && status >= 200 && status < 300 && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method) &&
             ['global_admin', 'bearbeiter'].includes(req.session?.role)) {
-            const actorRef = crypto.createHash('sha256').update(String(req.session.user || '')).digest('base64url').slice(0, 22);
+            const actorRef = actorReference(req.session.user);
             const references = Object.fromEntries(Object.entries(req.params || {}).filter(([name, value]) => /^(id|itemId|orderId)$/.test(name) && /^[1-9][0-9]{0,14}$/.test(value)));
             log('info', 'admin.mutation.receipt', { ...fields, actorRef, actorRole: req.session.role, references });
         }
@@ -138,5 +142,5 @@ function operationsMetricsHandler(options) {
     };
 }
 
-module.exports = { currentRequestId: () => context.getStore()?.requestId || null, log, redact, redactString, installConsoleRedaction, requestObservability, recordWorkerProgress,
+module.exports = { actorReference, currentRequestId: () => context.getStore()?.requestId || null, log, redact, redactString, installConsoleRedaction, requestObservability, recordWorkerProgress,
     recordDbTimeout, operationsSnapshot, operationsMetricsHandler, setLogSink: value => { sink = value; } };

@@ -115,7 +115,12 @@ function installSessionTimeZone() {
 }
 
 function connectionConfig(options = {}) {
-    return { ...module.exports, [CONNECTION_OPTIONS]: options };
+    const config = { ...module.exports, [CONNECTION_OPTIONS]: options };
+    if (options.migration && process.env.DB_MIGRATION_USER !== undefined) {
+        config.user = process.env.DB_MIGRATION_USER;
+        config.password = process.env.DB_MIGRATION_PW;
+    }
+    return config;
 }
 
 function createSessionConnection() {

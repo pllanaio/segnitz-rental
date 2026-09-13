@@ -1,6 +1,7 @@
 'use strict';
 
 const bcrypt = require('bcrypt');
+const { randomUUID } = require('node:crypto');
 const mysql = require('mysql2/promise');
 const dbConfig = require('../../config/db');
 const { assertTestDatabaseName, rebuildDatabaseSchema } = require('./database-schema');
@@ -37,6 +38,42 @@ async function expireTestUserSessions() {
             [TEST_USER.email]
         );
         return Number(result.affectedRows);
+    } finally {
+        await connection.end();
+    }
+}
+
+async function createPrimaryScenarioFixtures(label) {
+    assertTestDatabaseName(dbConfig.database);
+    if (!/^\d{3,4}-retry-\d{1,2}$/u.test(label)) throw new Error('Ungültige Browserfixture-Bezeichnung.');
+    const marker = randomUUID();
+    const identity = { email: `primary.${marker}@example.com`, password: TEST_USER.password, role: 'customer' };
+    const product = { productKey: `PRIMARY-${marker}`, title: `Hauptablauf-Rüttelplatte ${label}` };
+    const passwordHash = await bcrypt.hash(identity.password, 4);
+    const connection = await mysql.createConnection(dbConfig);
+    try {
+        await connection.beginTransaction();
+        await connection.execute(
+            `INSERT INTO users (username, password, role, first_name, last_name, phone, address, zip, city, customer_no, email_verified)
+             VALUES (?, ?, 'customer', 'Browser', 'Testkunde', '0123456789', 'Teststrasse 1', '97070', 'Wuerzburg', ?, 1)`,
+            [identity.email, passwordHash, `P-${marker.replace(/-/g, '').slice(0, 24)}`]
+        );
+        const [insert] = await connection.execute(
+            `INSERT INTO rental_products (product_key, title, description, price_per_day, deposit, image_path, category, is_active, times_ordered)
+             VALUES (?, ?, 'Isoliertes Produkt für einen Browserhauptablauf.', 49.90, 150.00, '', 'Baumaschinen', 1, 0)`,
+            [product.productKey, product.title]
+        );
+        product.id = Number(insert.insertId);
+        const [category] = await connection.execute(
+            `INSERT INTO rental_product_categories (product_id, category_id)
+             SELECT ?, id FROM rental_categories WHERE name = 'Baumaschinen' LIMIT 1`, [product.id]
+        );
+        if (Number(category.affectedRows) !== 1) throw new Error('Browserfixture-Kategorie fehlt.');
+        await connection.commit();
+        return { identity, product };
+    } catch (error) {
+        await connection.rollback();
+        throw error;
     } finally {
         await connection.end();
     }
@@ -115,6 +152,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+    createPrimaryScenarioFixtures,
     expireTestUserSessions,
     resetTestDatabase,
     TEST_ADMIN,

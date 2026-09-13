@@ -270,7 +270,7 @@ test('rendert öffentliche und eigene Bewertungen als Text statt als HTML', asyn
     await page.route('**/my-orders/9101', route => route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({
+        body: JSON.stringify(attachOrderFinance({
             id: 9101,
             order_no: 'R-REVIEW-XSS',
             status: 'returned',
@@ -291,7 +291,7 @@ test('rendert öffentliche und eigene Bewertungen als Text statt als HTML', asyn
                 returnImages: []
             }],
             payments: []
-        })
+        }))
     }));
 
     await page.goto('/profile.html');

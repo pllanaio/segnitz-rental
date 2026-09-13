@@ -117,3 +117,16 @@ test('optional migration credentials require a complete nonempty pair without di
         return true;
     });
 });
+
+test('request admission limits are bounded configuration and cannot be silently disabled', () => {
+    const defaults = validateRuntimeConfig(validConfig()).numbers;
+    assert.equal(defaults.HTTP_RATE_LIMIT_WINDOW_MS, 60000);
+    assert.equal(defaults.HTTP_RATE_LIMIT_GLOBAL_MAX, 6000);
+    assert.equal(defaults.HTTP_RATE_LIMIT_MAX, 600);
+    assert.equal(defaults.READINESS_RATE_LIMIT_MAX, 120);
+    for (const setting of ['HTTP_RATE_LIMIT_WINDOW_MS', 'HTTP_RATE_LIMIT_GLOBAL_MAX', 'HTTP_RATE_LIMIT_MAX', 'READINESS_RATE_LIMIT_MAX']) {
+        for (const value of ['0', '-1', '', 'Infinity', '1oops', '10000000000']) {
+            assert.throws(() => validateRuntimeConfig(validConfig({ [setting]: value })), new RegExp(setting));
+        }
+    }
+});

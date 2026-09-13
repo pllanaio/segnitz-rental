@@ -69,6 +69,9 @@ async function resolveInitialPaymentBooking(connection, order, observedStatus, o
 async function lockExternalEffectPaymentContext(connection, effect) {
     const application = effect.payload?.application;
     if (!application) return;
+    // Mail completion updates the order's sent timestamp. Acquire the same
+    // product/order locks before its outbox row as payment reconciliation does.
+    if (application.kind === 'order_confirmation_mail') return lockBookingOrder(connection, application.orderId);
     if (application.kind === 'cancel_payment') return lockBookingForProviderPayment(connection, application.paymentId);
     if (!['payment_records', 'refund_record'].includes(application.kind)) return;
     if (application.orderId) return lockBookingOrder(connection, application.orderId);
