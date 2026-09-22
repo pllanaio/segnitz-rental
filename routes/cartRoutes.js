@@ -1,3 +1,5 @@
+const { errorStatus } = require('../utils/httpErrors');
+const { formatDateInTimeZone } = require('../utils/businessDate');
 const express = require('express');
 const router = express.Router();
 const mysql = require('mysql2/promise');
@@ -104,7 +106,7 @@ router.get('/cart', async (req, res) => {
         });
     } catch (error) {
         console.error('Fehler beim Laden des Warenkorbs:', error);
-        res.status(500).json({
+        res.status(errorStatus(error)).json({
             error: 'Warenkorb konnte nicht geladen werden.'
         });
     } finally {
@@ -129,7 +131,7 @@ router.post('/cart/items', async (req, res) => {
         });
     }
 
-    const today = new Date().toLocaleDateString('sv-SE');
+    const today = formatDateInTimeZone();
 
     if (rentalStart < today) {
         return res.status(400).json({
@@ -228,7 +230,7 @@ router.put('/cart/items/:id', async (req, res) => {
         });
     }
 
-    const today = new Date().toLocaleDateString('sv-SE');
+    const today = formatDateInTimeZone();
 
     if (rentalStart < today) {
         return res.status(400).json({

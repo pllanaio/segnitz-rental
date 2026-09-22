@@ -2,13 +2,14 @@ name: segnitz-rental
 
 services:
   app:
-    image: ${SEGNITZ_IMAGE:-pllanaio/segnitz-rental:latest}
+    image: ${SEGNITZ_IMAGE:?Set SEGNITZ_IMAGE to the reviewed pllanaio/segnitz-rental@sha256 digest}
     pull_policy: always
     env_file:
       - .env
     environment:
       NODE_ENV: production
       PORT: 3000
+      TRUST_PROXY: ${TRUST_PROXY:?Set the verified proxy topology explicitly}
       BUSINESS_TIME_ZONE: ${BUSINESS_TIME_ZONE:-Europe/Berlin}
       TZ: ${BUSINESS_TIME_ZONE:-Europe/Berlin}
       MOLLIE_TEST_MODE: ${MOLLIE_TEST_MODE:-0}
@@ -31,6 +32,8 @@ services:
     security_opt:
       - no-new-privileges:true
     pids_limit: 256
+    mem_limit: ${APP_MEMORY_LIMIT:-768m}
+    cpus: ${APP_CPU_LIMIT:-1.0}
     restart: unless-stopped
     stop_grace_period: 30s
     logging:

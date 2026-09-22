@@ -10,7 +10,7 @@ document.addEventListener('DOMContentLoaded', () => {
         : null;
 
     if (loginForm) {
-        loginForm.addEventListener('submit', async (e) => {
+        window.PendingActions.bindForm(loginForm, async (e) => {
             e.preventDefault();
 
             const username = document.getElementById('username').value.trim();
@@ -64,7 +64,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     if (passwordResetRequestForm) {
-        passwordResetRequestForm.addEventListener('submit', async (event) => {
+        window.PendingActions.bindForm(passwordResetRequestForm, async (event) => {
             event.preventDefault();
 
             const email = document.getElementById('resetEmail').value.trim();
@@ -93,7 +93,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     if (passwordResetForm) {
-        passwordResetForm.addEventListener('submit', async (event) => {
+        window.PendingActions.bindForm(passwordResetForm, async (event) => {
             event.preventDefault();
 
             const token = document.getElementById('resetToken').value;

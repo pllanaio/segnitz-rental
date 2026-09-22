@@ -13,3 +13,11 @@ uploads/
 public/json/
 public/pdf/
 public/templates/
+
+# Operator data and private release/restore artifacts
+*.age
+*.sql.gz
+*.dump
+release-image/
+release-evidence/
+__pycache__/

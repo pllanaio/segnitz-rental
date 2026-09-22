@@ -1,6 +1,7 @@
 'use strict';
 
 const bcrypt = require('bcrypt');
+const { publishPaymentFixtures } = require('./mollie-fixtures');
 const mysql = require('mysql2/promise');
 const dbConfig = require('../../config/db');
 const { rebuildDatabaseSchema } = require('./database-schema');
@@ -134,6 +135,7 @@ async function queryRows(sql, params = []) {
 async function execute(sql, params = []) {
     return withConnection(async connection => {
         const [result] = await connection.execute(sql, params);
+        await publishPaymentFixtures(connection);
         return result;
     });
 }

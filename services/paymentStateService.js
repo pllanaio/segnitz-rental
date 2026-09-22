@@ -25,8 +25,6 @@ function mapMolliePaymentStatus(status) {
             return 'cancelled';
         case 'expired':
             return 'expired';
-        case 'charged_back':
-            return 'charged_back';
         case 'authorized':
             return 'authorized';
         default:
@@ -44,11 +42,53 @@ function mapMollieRefundStatus(status) {
     return 'pending';
 }
 
+// Provider observations are not an ordered event stream. Success is authoritative;
+// an older open/failure snapshot may never undo money already received/returned.
+const PAYMENT_TRANSITIONS = Object.freeze({
+    pending: ['authorized', 'failed', 'cancelled', 'expired', 'paid', 'offset', 'replaced'],
+    open: ['pending', 'authorized', 'failed', 'cancelled', 'expired', 'paid', 'offset', 'replaced'],
+    authorized: ['failed', 'cancelled', 'expired', 'paid', 'offset', 'replaced'],
+    failed: ['paid', 'offset', 'replaced'],
+    cancelled: ['paid', 'offset', 'replaced'],
+    expired: ['paid', 'offset', 'replaced'],
+    offset: ['paid'],
+    replaced: ['paid'],
+    paid: [], refunded: [], charged_back: []
+});
+function transitionPaymentStatus(currentStatus, observedStatus) {
+    const current = String(currentStatus || 'pending').toLowerCase();
+    const observed = String(observedStatus || 'pending').toLowerCase();
+    return (PAYMENT_TRANSITIONS[current] || []).includes(observed) ? observed : current;
+}
+function transitionRefundStatus(currentStatus, observedStatus) {
+    return transitionPaymentStatus(currentStatus, observedStatus);
+}
+function providerContractError() {
+    const error = new Error('Providerdaten stimmen nicht mit der lokalen Zahlungsabsicht überein.');
+    error.code = 'PROVIDER_CONTRACT_MISMATCH';
+    return error;
+}
+function validateProviderAmount(amount, expectedAmount = null) {
+    if (amount?.currency !== 'EUR' || !/^(0|[1-9]\d*)\.\d{2}$/.test(String(amount?.value || ''))) {
+        throw providerContractError();
+    }
+    const cents = Number(String(amount.value).replace('.', ''));
+    if (!Number.isSafeInteger(cents) || cents < 0 ||
+        (expectedAmount !== null && cents !== Math.round(Math.abs(Number(expectedAmount)) * 100))) {
+        throw providerContractError();
+    }
+    return cents;
+}
+
+function validateProviderPayment(payment, { paymentId, orderId, amount }) {
+    if (payment?.id !== paymentId || !['open', 'pending', 'authorized', 'paid', 'failed', 'canceled', 'expired'].includes(payment.status) ||
+        (payment.metadata?.orderId && String(payment.metadata.orderId) !== String(orderId))) throw providerContractError();
+    return validateProviderAmount(payment.amount, amount);
+}
+
 function deriveOrderStatusFromInitialPayment(currentOrderStatus, mollieStatus) {
     const current = String(currentOrderStatus || 'reserved').toLowerCase();
     const payment = mapMolliePaymentStatus(mollieStatus);
-
-    if (payment === 'charged_back') return 'payment_dispute';
 
     // Only an order which is still waiting for its initial payment may be moved
     // by that payment. A delayed redirect/webhook must never resurrect a picked
@@ -171,6 +211,7 @@ function deriveReturnCaseStatus({
 }
 
 module.exports = {
+    transitionPaymentStatus, transitionRefundStatus, validateProviderAmount, validateProviderPayment, providerContractError,
     calculateReturnSettlement,
     deriveAggregateReturnStatus,
     deriveOrderStatusFromInitialPayment,

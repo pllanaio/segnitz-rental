@@ -85,6 +85,13 @@ function normalizeReferentialRule(rule) {
     return normalized === 'NO ACTION' ? 'RESTRICT' : normalized;
 }
 
+function lowercaseOutsideSqlLiterals(value) {
+    // JSON paths and binary/case-sensitive literals are part of enforcement.
+    // Case-fold SQL keywords/identifiers only, preserving quoted content.
+    return String(value).replace(/'(?:''|\\.|[^'\\])*'|[^']+/gsu,
+        token => token.startsWith("'") ? token : token.toLowerCase());
+}
+
 function normalizeCheckClause(clause) {
     let normalized = String(clause || '')
         .replace(/`/gu, '')
@@ -107,12 +114,11 @@ function normalizeCheckClause(clause) {
             /(^|[\s,(=])_(?:utf8mb4|utf8mb3|utf8|latin1|binary)(?=')/giu,
             '$1'
         )
-        .toLowerCase()
         .replace(/\s+/gu, ' ')
         .replace(/\s*([(),=<>])\s*/gu, '$1')
         .trim();
 
-    normalized = removeRedundantExpressionParentheses(normalized);
+    normalized = removeRedundantExpressionParentheses(lowercaseOutsideSqlLiterals(normalized));
 
     return normalized;
 }
@@ -129,8 +135,21 @@ const atomicBetweenPredicate = new RegExp(
     'iu'
 );
 
+function isJsonFunctionComparison(expression) {
+    const match = /^(?:json_type|json_contains_path|json_extract)\(/iu.exec(expression);
+    if (!match) return false;
+    const opening = expression.indexOf('(');
+    const closing = findParenthesisPairs(expression).find(pair => pair.start === opening)?.end;
+    if (closing === undefined) return false;
+    // Only unwrap one complete scalar comparison. In particular, do not treat
+    // an AND/OR expression containing multiple function calls as one predicate.
+    return new RegExp(`^\\s*(?:=|<>|!=|<=|>=|<|>)\\s*${scalarPredicateValue}$`, 'iu')
+        .test(expression.slice(closing + 1));
+}
+
 function isAtomicPredicate(expression) {
-    return atomicInPredicate.test(expression) || atomicBetweenPredicate.test(expression);
+    return atomicInPredicate.test(expression) || atomicBetweenPredicate.test(expression) ||
+        isJsonFunctionComparison(expression);
 }
 
 function hasBooleanBoundaryBefore(expression, index) {
@@ -269,7 +288,7 @@ function parseConstraint(definition) {
     if (!match) return null;
     const [, name, body] = match;
     const checkMatch = /^CHECK\s*\(([\s\S]*)\)$/iu.exec(body);
-    if (checkMatch) return [name, { type: 'CHECK', clause: normalizeCheckClause(checkMatch[1]) }];
+    if (checkMatch) return [name, { type: 'CHECK', enforced: true, clause: normalizeCheckClause(checkMatch[1]) }];
 
     const foreignKeyMatch = /^FOREIGN\s+KEY\s*\(([^)]+)\)\s+REFERENCES\s+`?([A-Za-z0-9_]+)`?\s*\(([^)]+)\)([\s\S]*)$/iu.exec(body);
     if (!foreignKeyMatch) return [name, { type: 'UNKNOWN' }];
@@ -297,7 +316,13 @@ function parseCanonicalSchema(statements = readSqlStatements(schemaPath)) {
         const match = /^CREATE\s+TABLE(?:\s+IF\s+NOT\s+EXISTS)?\s+`?([A-Za-z0-9_]+)`?\s*\(([\s\S]*)\)\s*ENGINE\s*=/iu.exec(statement.trim());
         if (!match) continue;
         const [, tableName, body] = match;
-        const table = { columns: new Map(), constraints: new Map(), indexes: new Map() };
+        const options = statement.slice(match[0].length);
+        const table = {
+            columns: new Map(), constraints: new Map(), indexes: new Map(),
+            engine: /^\s*([A-Za-z0-9_]+)/u.exec(options)?.[1].toLowerCase(),
+            charset: /\b(?:CHARSET|CHARACTER\s+SET)\s*=\s*([A-Za-z0-9_]+)/iu.exec(options)?.[1].toLowerCase(),
+            collation: /\bCOLLATE\s*=\s*([A-Za-z0-9_]+)/iu.exec(options)?.[1].toLowerCase()
+        };
 
         for (const definition of splitDefinitions(body)) {
             const constraint = parseConstraint(definition);
@@ -326,6 +351,12 @@ function parseCanonicalSchema(statements = readSqlStatements(schemaPath)) {
             const generationMatch = /\bGENERATED\s+ALWAYS\s+AS\s*\(([\s\S]*)\)\s+(STORED|VIRTUAL)\b/iu.exec(columnMatch[2]);
             const columnAttributes = columnDefinitionWithoutGenerationExpression(columnMatch[2]);
             table.columns.set(columnMatch[1], {
+                autoIncrement: /\bAUTO_INCREMENT\b/iu.test(columnAttributes),
+                onUpdate: normalizeDefault(/\bON\s+UPDATE\s+(CURRENT_TIMESTAMP(?:\(\))?)/iu.exec(columnAttributes)?.[1]),
+                charset: /^(?:char|varchar|tinytext|text|mediumtext|longtext|enum|set)\b/iu.test(typeMatch[1]) ?
+                    (/\bCHARACTER\s+SET\s+([A-Za-z0-9_]+)/iu.exec(columnAttributes)?.[1].toLowerCase() || table.charset) : null,
+                collation: /^(?:char|varchar|tinytext|text|mediumtext|longtext|enum|set)\b/iu.test(typeMatch[1]) ?
+                    (/\bCOLLATE\s+([A-Za-z0-9_]+)/iu.exec(columnAttributes)?.[1].toLowerCase() || table.collation) : null,
                 columnType: normalizeColumnType(typeMatch[1]),
                 defaultValue: normalizeDefault(defaultMatch?.[1]),
                 generationExpression: normalizeGenerationExpression(generationMatch?.[1]),
@@ -357,6 +388,10 @@ function buildActualForeignKeys(rows) {
 
 function normalizeActualColumn(row) {
     return {
+        autoIncrement: /\bauto_increment\b/iu.test(row.extra || ''),
+        onUpdate: normalizeDefault(/\bon\s+update\s+(CURRENT_TIMESTAMP(?:\(\))?)/iu.exec(row.extra || '')?.[1]),
+        charset: row.charset?.toLowerCase() || null,
+        collation: row.collation?.toLowerCase() || null,
         columnType: normalizeColumnType(row.columnType),
         defaultValue: normalizeDefault(row.defaultValue),
         generationExpression: normalizeGenerationExpression(row.generationExpression),
@@ -372,13 +407,15 @@ function schemaPartsEqual(actual, expected) {
 
 async function verifyCanonicalSchema(connection, contract = parseCanonicalSchema()) {
     const [tableRows] = await connection.execute(
-        `SELECT TABLE_NAME AS tableName FROM information_schema.TABLES
+        `SELECT TABLE_NAME AS tableName, ENGINE AS engine, TABLE_COLLATION AS collation
+         FROM information_schema.TABLES
          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = 'BASE TABLE'`
     );
     const [columnRows] = await connection.execute(
         `SELECT TABLE_NAME AS tableName, COLUMN_NAME AS columnName,
                 COLUMN_TYPE AS columnType, IS_NULLABLE AS isNullable, COLUMN_DEFAULT AS defaultValue,
-                EXTRA AS extra, GENERATION_EXPRESSION AS generationExpression
+                EXTRA AS extra, GENERATION_EXPRESSION AS generationExpression,
+                CHARACTER_SET_NAME AS charset, COLLATION_NAME AS collation
          FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE()`
     );
     const [indexRows] = await connection.execute(
@@ -401,7 +438,7 @@ async function verifyCanonicalSchema(connection, contract = parseCanonicalSchema
     );
     const [checkRows] = await connection.execute(
         `SELECT tc.TABLE_NAME AS tableName, tc.CONSTRAINT_NAME AS constraintName,
-                cc.CHECK_CLAUSE AS checkClause
+                cc.CHECK_CLAUSE AS checkClause, tc.ENFORCED AS enforced
          FROM information_schema.TABLE_CONSTRAINTS tc
          JOIN information_schema.CHECK_CONSTRAINTS cc
            ON cc.CONSTRAINT_SCHEMA = tc.CONSTRAINT_SCHEMA AND cc.CONSTRAINT_NAME = tc.CONSTRAINT_NAME
@@ -409,7 +446,7 @@ async function verifyCanonicalSchema(connection, contract = parseCanonicalSchema
     );
     const [openingHourRows] = await connection.execute('SELECT weekday FROM opening_hours ORDER BY weekday');
 
-    const actualTables = new Set(tableRows.map(row => row.tableName));
+    const actualTables = new Map(tableRows.map(row => [row.tableName, { engine: row.engine?.toLowerCase(), collation: row.collation?.toLowerCase(), charset: row.collation?.split('_')[0].toLowerCase() }]));
     const actualColumns = new Map(columnRows.map(row => [
         `${row.tableName}.${row.columnName}`,
         normalizeActualColumn(row)
@@ -423,7 +460,7 @@ async function verifyCanonicalSchema(connection, contract = parseCanonicalSchema
     const actualConstraints = buildActualForeignKeys(foreignKeyRows);
     for (const row of checkRows) {
         actualConstraints.set(`${row.tableName}.${row.constraintName}`, {
-            clause: normalizeCheckClause(row.checkClause), type: 'CHECK'
+            clause: normalizeCheckClause(row.checkClause), type: 'CHECK', enforced: row.enforced === 'YES'
         });
     }
 
@@ -439,6 +476,14 @@ async function verifyCanonicalSchema(connection, contract = parseCanonicalSchema
                 message: `Tabelle ${tableName} fehlt`
             });
             continue;
+        }
+        const actualTable = actualTables.get(tableName);
+        const expectedTable = { engine: table.engine, collation: table.collation, charset: table.charset };
+        if (!schemaPartsEqual(actualTable, expectedTable)) {
+            recordSchemaMismatch(issues, mismatches, {
+                actual: actualTable, expected: expectedTable, identifier: tableName,
+                kind: 'table-options', message: `Engine/Zeichensatz/Kollation von ${tableName} weicht ab`
+            });
         }
         for (const [columnName, expected] of table.columns) {
             const key = `${tableName}.${columnName}`;
@@ -487,6 +532,16 @@ async function verifyCanonicalSchema(connection, contract = parseCanonicalSchema
                     message: `Constraint ${key} fehlt oder weicht ab`
                 });
             }
+        }
+    }
+
+    if (contract.has('admin_mutation_events')) {
+        const { readTriggers, assertAuditTriggers } = require('./migrations/20260913_admin_audit');
+        try { assertAuditTriggers(await readTriggers(connection)); }
+        catch (error) {
+            if (error.code !== 'ADMIN_AUDIT_TRIGGER_DRIFT') throw error;
+            recordSchemaMismatch(issues, mismatches, { actual: null, expected: { updateAndDeleteBlocked: true },
+                identifier: 'admin_mutation_events', kind: 'trigger', message: 'Append-only Audit-Trigger fehlen oder weichen ab' });
         }
     }
 

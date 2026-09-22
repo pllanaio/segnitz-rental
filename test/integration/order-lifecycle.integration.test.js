@@ -1,10 +1,14 @@
 'use strict';
+const TEST_LEGAL_ENV = require('../support/legal-fixture');
 
 const assert = require('node:assert/strict');
 const { spawn } = require('node:child_process');
 const { after, before, test } = require('node:test');
 const { setTimeout: delay } = require('node:timers/promises');
 const path = require('node:path');
+const mysql = require('mysql2/promise');
+const dbConfig = require('../../config/db');
+const { readAuthMailToken } = require('../support/auth-mail');
 const {
     execute,
     queryRows,
@@ -93,7 +97,9 @@ function orderForm(email) {
                 { name: 'CustomerAddress', value: 'Testweg 1' },
                 { name: 'CustomerZip', value: '97070' },
                 { name: 'CustomerCity', value: 'Wuerzburg' },
-                { name: 'Signature', value: 'data:image/png;base64,dGVzdA==' },
+                { name: 'Signature', value: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=' },
+                { name: 'termsVersion', value: 'fixture-terms-v1' },
+                { name: 'privacyVersion', value: 'fixture-privacy-v1' },
                 { name: 'agbs', value: 'on', checked: true },
                 { name: 'dsgvo', value: 'on', checked: true }
             ]
@@ -170,10 +176,8 @@ async function completeEmailVerification(client, token) {
         { redirect: 'manual' }
     );
     assert.equal(inspectResponse.status, 302, await inspectResponse.text());
-    assert.equal(
-        inspectResponse.headers.get('location'),
-        `/verify-email.html#token=${token}`
-    );
+    assert.ok(inspectResponse.headers.get('location') === `/verify-email.html#token=${token}`,
+        'Verifikations-Redirect muss denselben Code enthalten, ohne ihn in Testdiagnostik auszugeben.');
 
     const completeResponse = await client.request('/verify-email/complete', {
         method: 'POST',
@@ -209,10 +213,37 @@ async function createOrder(client, paymentMethod, rentalStart, rentalEnd) {
         })
     });
 
-    const body = await response.json();
-    assert.equal(response.status, 200, JSON.stringify(body));
+    return readCreatedOrder(response, paymentMethod);
+}
 
-    return body;
+async function readCreatedOrder(response, paymentMethod) {
+    const body = await response.json();
+    if (paymentMethod !== 'online' || response.status !== 202) {
+        assert.equal(response.status, 200, JSON.stringify(body));
+        return body;
+    }
+
+    // The HTTP request and persistent worker may contend for this intent. A 202
+    // is accepted only when the same real intent subsequently finishes; do not
+    // replace its provider ID while the worker could still commit its result.
+    assert.equal(body.paymentPending, true);
+    assert.ok(Number.isSafeInteger(body.orderId) && body.orderId > 0);
+    const prepared = await waitForDatabaseRow(
+        `SELECT ro.mollie_payment_id, ro.mollie_checkout_url AS checkoutUrl,
+                ro.status, ro.payment_status
+         FROM rental_orders ro
+         JOIN rental_order_payments payment ON payment.order_id = ro.id
+          AND payment.payment_type = 'initial_payment'
+          AND payment.mollie_payment_id = ro.mollie_payment_id
+         JOIN external_effects_outbox effect ON effect.operation_key = payment.external_operation_key
+         WHERE ro.id = ? AND effect.status = 'succeeded'`,
+        [body.orderId],
+        row => Boolean(row.mollie_payment_id && row.checkoutUrl),
+        'Persistierter Online-Checkout nach HTTP 202'
+    );
+    assert.equal(prepared.status, 'reserved');
+    assert.equal(prepared.payment_status, 'pending');
+    return { ...body, checkoutUrl: prepared.checkoutUrl };
 }
 
 before(async () => {
@@ -225,6 +256,7 @@ before(async () => {
             PORT: String(PORT),
             BASE_URL,
             NODE_ENV: 'test',
+            ...TEST_LEGAL_ENV,
             DISABLE_PERIODIC_CLEANUP: '1',
             DISABLE_EMAILS: '1',
             MOLLIE_TEST_MODE: '1',
@@ -533,19 +565,12 @@ test('bindet Gastbestellungen dauerhaft an die erzeugende Session, auch nachdem 
     assert.equal(unverifiedResponse.status, 403, JSON.stringify(unverifiedBody));
     assert.equal(unverifiedBody.verificationRequired, true);
 
-    const [challenge] = await queryRows(
-        `SELECT verification_token
-         FROM guest_verifications
-         WHERE email = ?
-         ORDER BY id DESC
-         LIMIT 1`,
-        ['bound.guest@example.com']
-    );
-    await completeEmailVerification(guest, challenge.verification_token);
+    const mailbox = await mysql.createConnection(dbConfig);
+    try { await completeEmailVerification(guest, await readAuthMailToken(mailbox, 'bound.guest@example.com')); }
+    finally { await mailbox.end(); }
 
     const createResponse = await submitOrder();
-    const order = await createResponse.json();
-    assert.equal(createResponse.status, 200, JSON.stringify(order));
+    const order = await readCreatedOrder(createResponse, 'online');
 
     const paidPaymentId = `tr_test_paid_guest_binding_${order.orderId}`;
     await execute(
@@ -603,17 +628,9 @@ test('bestätigt Gast-Barbestellungen einmalig und sessiongebunden mit kurzer TT
     assert.equal(firstResult.verificationRequired, true);
     assert.equal(firstResult.verificationEmailSent, true);
 
-    const [firstChallenge] = await queryRows(
-        `SELECT verification_token
-         FROM guest_verifications
-         WHERE email = ?
-         ORDER BY id DESC
-         LIMIT 1`,
-        [guestEmail]
-    );
-    assert.match(firstChallenge.verification_token, /^[a-f0-9]{64}$/);
-
-    await completeEmailVerification(guest, firstChallenge.verification_token);
+    const mailbox = await mysql.createConnection(dbConfig);
+    try { await completeEmailVerification(guest, await readAuthMailToken(mailbox, guestEmail)); }
+    finally { await mailbox.end(); }
 
     await execute(
         `UPDATE user_sessions
@@ -627,15 +644,9 @@ test('bestätigt Gast-Barbestellungen einmalig und sessiongebunden mit kurzer TT
     assert.equal(expiredAttempt.status, 403, JSON.stringify(expiredResult));
     assert.equal(expiredResult.verificationRequired, true);
 
-    const [secondChallenge] = await queryRows(
-        `SELECT verification_token
-         FROM guest_verifications
-         WHERE email = ?
-         ORDER BY id DESC
-         LIMIT 1`,
-        [guestEmail]
-    );
-    await completeEmailVerification(guest, secondChallenge.verification_token);
+    const secondMailbox = await mysql.createConnection(dbConfig);
+    try { await completeEmailVerification(guest, await readAuthMailToken(secondMailbox, guestEmail)); }
+    finally { await secondMailbox.end(); }
 
     const confirmedAttempt = await submitCashOrder();
     const confirmedOrder = await confirmedAttempt.json();
@@ -888,7 +899,7 @@ test('kassiert Barzahlung, blockiert vorzeitige Abholung und verarbeitet Rückga
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-            actualReturnDate: rentalEnd,
+            actualReturnDate: futureDate(0),
             additionalChargePaymentMethod: 'cash',
             adjustedRentalStart: rentalStart,
             adjustedRentalEnd: rentalEnd,
@@ -1001,7 +1012,7 @@ test('validiert Schäden und nutzt für Rückgabe-Nachzahlungen den gewählten M
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-            actualReturnDate: rentalEnd,
+            actualReturnDate: futureDate(0),
             adjustedRentalStart: rentalStart,
             adjustedRentalEnd: rentalEnd,
             adjustedPricePerDay: TEST_PRODUCT.pricePerDay,
@@ -1018,7 +1029,7 @@ test('validiert Schäden und nutzt für Rückgabe-Nachzahlungen den gewählten M
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-            actualReturnDate: rentalEnd,
+            actualReturnDate: futureDate(0),
             adjustedRentalStart: rentalStart,
             adjustedRentalEnd: rentalEnd,
             adjustedPricePerDay: TEST_PRODUCT.pricePerDay,
@@ -1035,7 +1046,7 @@ test('validiert Schäden und nutzt für Rückgabe-Nachzahlungen den gewählten M
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-            actualReturnDate: rentalEnd,
+            actualReturnDate: futureDate(0),
             adjustedRentalStart: rentalStart,
             adjustedRentalEnd: rentalEnd,
             adjustedPricePerDay: TEST_PRODUCT.pricePerDay,
@@ -1062,7 +1073,7 @@ test('validiert Schäden und nutzt für Rückgabe-Nachzahlungen den gewählten M
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-            actualReturnDate: rentalEnd,
+            actualReturnDate: futureDate(0),
             adjustedRentalStart: rentalStart,
             adjustedRentalEnd: rentalEnd,
             adjustedPricePerDay: TEST_PRODUCT.pricePerDay,
@@ -1174,7 +1185,7 @@ test('erfasst eine ausdrücklich bar gewählte Rückgabe-Nachzahlung auch bei On
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-            actualReturnDate: rentalEnd,
+            actualReturnDate: futureDate(0),
             adjustedRentalStart: rentalStart,
             adjustedRentalEnd: rentalEnd,
             adjustedPricePerDay: TEST_PRODUCT.pricePerDay,
@@ -1273,7 +1284,7 @@ test('schließt einen gemischten Auftrag nach letzter Stornierung und wartet auf
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-            actualReturnDate: firstEnd,
+            actualReturnDate: futureDate(0),
             adjustedRentalStart: firstStart,
             adjustedRentalEnd: firstEnd,
             adjustedPricePerDay: TEST_PRODUCT.pricePerDay,
@@ -1486,7 +1497,7 @@ test('verlängert eine bezahlte Bar-Miete atomar und verrechnet offene Verlänge
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-            actualReturnDate: extendedEnd,
+            actualReturnDate: futureDate(0),
             adjustedRentalStart: rentalStart,
             adjustedRentalEnd: extendedEnd,
             adjustedPricePerDay: TEST_PRODUCT.pricePerDay,
@@ -1598,7 +1609,7 @@ test('erstattet eine Online-Kaution auch mit historischer Zahlung nur am Auftrag
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-            actualReturnDate: extendedEnd,
+            actualReturnDate: futureDate(0),
             adjustedRentalStart: rentalStart,
             adjustedRentalEnd: extendedEnd,
             adjustedPricePerDay: TEST_PRODUCT.pricePerDay,
@@ -1680,7 +1691,7 @@ test('erstattet eine verspätete Online-Verlängerungszahlung, wenn sie bei Rüc
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-            actualReturnDate: extendedEnd,
+            actualReturnDate: futureDate(0),
             adjustedRentalStart: rentalStart,
             adjustedRentalEnd: extendedEnd,
             adjustedPricePerDay: TEST_PRODUCT.pricePerDay,
@@ -1867,7 +1878,7 @@ test('erstattet eine zweite Initialzahlung nach Checkout-Retry, ohne den aktiven
     assert.equal(Number(duplicateRefund.amount), -460);
 });
 
-test('startet eine fehlgeschlagene Online-Erstattung kontrolliert und betragsbegrenzt erneut', async () => {
+test('startet eine fehlgeschlagene Online-Erstattung kontrolliert und betragsbegrenzt erneut', async t => {
     const customer = new SessionClient();
     await login(customer, TEST_CUSTOMER);
     const order = await createOrder(customer, 'online', futureDate(90), futureDate(91));
@@ -1880,6 +1891,12 @@ test('startet eine fehlgeschlagene Online-Erstattung kontrolliert und betragsbeg
         body: JSON.stringify({ id: paidPaymentId })
     });
     assert.equal(paymentWebhook.status, 200, await paymentWebhook.text());
+
+    const [confirmationBeforeRetry] = await queryRows(
+        'SELECT id, payload_hash, status FROM external_effects_outbox WHERE operation_key = ?',
+        [`mail-order-confirmation-${order.orderId}`]
+    );
+    assert.equal(confirmationBeforeRetry.status, 'pending');
 
     const failedRefundResult = await execute(
         `INSERT INTO rental_order_payments
@@ -1897,19 +1914,39 @@ test('startet eine fehlgeschlagene Online-Erstattung kontrolliert und betragsbeg
         { method: 'POST' }
     );
     const retryBody = await retryResponse.json();
+    if (retryResponse.status !== 200) {
+        for (const line of serverOutput.split('\n')) {
+            let event;
+            try { event = JSON.parse(line); } catch { continue; }
+            if (!event.values?.includes('refund_retry_reconciliation_failed')) continue;
+            const detail = event.values.find(value => value && typeof value === 'object');
+            if (detail?.paymentRecordId === failedRefundResult.insertId) {
+                // Emit only the allowlisted category, never application output,
+                // provider responses, operations keys or mailbox payloads.
+                t.diagnostic(`refund retry reconciliation category: ${/^[A-Z][A-Z0-9_]{0,80}$/.test(detail.code) ? detail.code : 'PROVIDER_ERROR'}`);
+            }
+        }
+    }
     assert.equal(retryResponse.status, 200, JSON.stringify(retryBody));
-    assert.equal(retryBody.paymentStatus, 'paid');
+    assert.ok(['pending', 'paid'].includes(retryBody.paymentStatus), JSON.stringify(retryBody));
 
-    const retryRows = await queryRows(
+    const settledRetry = await waitForDatabaseRow(
         `SELECT payment_status, amount, mollie_refund_id
          FROM rental_order_payments
          WHERE order_id = ? AND payment_type = 'duplicate_payment_refund'
          ORDER BY id DESC`,
-        [order.orderId]
+        [order.orderId],
+        row => row.payment_status === 'paid',
+        'Persistierte Wiederholung der Online-Erstattung'
     );
-    assert.equal(retryRows[0].payment_status, 'paid');
-    assert.equal(Number(retryRows[0].amount), -25);
-    assert.match(retryRows[0].mollie_refund_id, /^re_test_paid_/);
+    assert.equal(settledRetry.payment_status, 'paid');
+    assert.equal(Number(settledRetry.amount), -25);
+    assert.match(settledRetry.mollie_refund_id, /^re_test_paid_/);
+    const [confirmationAfterRetry] = await queryRows(
+        'SELECT id, payload_hash, status FROM external_effects_outbox WHERE operation_key = ?',
+        [`mail-order-confirmation-${order.orderId}`]
+    );
+    assert.deepEqual(confirmationAfterRetry, confirmationBeforeRetry);
 });
 
 test('dedupliziert einen bereits pending Refund-Retry vor der Kapazitätsberechnung', async () => {
@@ -1986,8 +2023,7 @@ test('erstattet Teilstorno und anschließenden Reststorno einer bezahlten Online
             form: orderForm(TEST_CUSTOMER.email)
         })
     });
-    const order = await createResponse.json();
-    assert.equal(createResponse.status, 200, JSON.stringify(order));
+    const order = await readCreatedOrder(createResponse, 'online');
 
     const paidPaymentId = `tr_test_paid_partial_cancel_${order.orderId}`;
     await execute('UPDATE rental_orders SET mollie_payment_id = ? WHERE id = ?', [paidPaymentId, order.orderId]);
@@ -2454,4 +2490,166 @@ test('verweigert unverifizierte Logins und gibt Verbindungen auf allen Fehlpfade
         afterConnections <= beforeConnections + 1,
         `Fehlgeschlagene Logins erhöhten Threads_connected von ${beforeConnections} auf ${afterConnections}`
     );
+});
+
+for (const entry of ['webhook', 'status-sync']) {
+    test(`lost hold without cleanup: ${entry} refunds A and preserves B's only physical occupancy`, async () => {
+        const customer = new SessionClient();
+        const other = new SessionClient();
+        await login(customer, TEST_CUSTOMER);
+        await login(other, TEST_OTHER_CUSTOMER);
+        const day = entry === 'webhook' ? 800 : 810;
+        const orderA = await createOrder(customer, 'online', futureDate(day), futureDate(day + 1));
+        await execute('UPDATE rental_orders SET reserved_until = DATE_SUB(NOW(), INTERVAL 1 SECOND) WHERE id = ?', [orderA.orderId]);
+        await addCartItem(other, futureDate(day), futureDate(day + 1));
+        const createB = await other.request('/data', {
+            method: 'POST', headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ paymentMethod: 'cash', form: orderForm(TEST_OTHER_CUSTOMER.email) })
+        });
+        const orderB = await createB.json();
+        assert.equal(createB.status, 200, JSON.stringify(orderB));
+        const paymentId = `tr_test_paid_lost_hold_${orderA.orderId}`;
+        await execute('UPDATE rental_orders SET mollie_payment_id = ? WHERE id = ?', [paymentId, orderA.orderId]);
+        await execute('UPDATE rental_order_payments SET mollie_payment_id = ? WHERE order_id = ?', [paymentId, orderA.orderId]);
+        const notify = () => entry === 'webhook'
+            ? customer.request('/webhooks/mollie', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: paymentId }) })
+            : customer.request(`/orders/${orderA.orderId}/payment-status/sync`, { method: 'POST' });
+        const responses = await Promise.all([notify(), notify()]);
+        for (const response of responses) assert.equal(response.status, 200, await response.text());
+        const rows = await queryRows('SELECT id, status FROM rental_orders WHERE id IN (?, ?) ORDER BY id', [orderA.orderId, orderB.orderId]);
+        assert.equal(rows.find(row => Number(row.id) === Number(orderA.orderId)).status, 'expired');
+        assert.equal(rows.find(row => Number(row.id) === Number(orderB.orderId)).status, 'confirmed');
+        const refunds = await queryRows("SELECT id FROM rental_order_payments WHERE order_id = ? AND payment_type = 'order_cancellation_refund'", [orderA.orderId]);
+        assert.equal(refunds.length, 1);
+    });
+}
+
+test('stale Open after Paid through status-sync never regresses settled source rows', async () => {
+    const customer = new SessionClient();
+    await login(customer, TEST_CUSTOMER);
+    const order = await createOrder(customer, 'online', futureDate(820), futureDate(821));
+    const id = `tr_test_paid_reordered_${order.orderId}`;
+    await execute('UPDATE rental_orders SET mollie_payment_id = ? WHERE id = ?', [id, order.orderId]);
+    await execute('UPDATE rental_order_payments SET mollie_payment_id = ? WHERE order_id = ?', [id, order.orderId]);
+    const paid = await customer.request('/webhooks/mollie', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id }) });
+    assert.equal(paid.status, 200, await paid.text());
+    const fs = require('node:fs/promises');
+    const fixture = path.join(require('../support/mollie-fixtures').directory, `${id}.json`);
+    const snapshot = JSON.parse(await fs.readFile(fixture, 'utf8'));
+    await fs.writeFile(fixture, JSON.stringify({ ...snapshot, status: 'open' }));
+    const stale = await customer.request(`/orders/${order.orderId}/payment-status/sync`, { method: 'POST' });
+    const body = await stale.json();
+    assert.equal(stale.status, 200, JSON.stringify(body));
+    assert.equal(body.payment_status, 'paid');
+    assert.equal(body.status, 'confirmed');
+    const ledger = await queryRows("SELECT payment_status FROM rental_order_payments WHERE mollie_payment_id = ? AND payment_type IN ('initial_payment', 'rental', 'deposit')", [id]);
+    assert.ok(ledger.length > 0);
+    assert.ok(ledger.every(row => row.payment_status === 'paid'));
+});
+
+for (const [index, method] of ['cash', 'online'].entries()) {
+    test(`zero total ${method} checkout and legacy retry settle locally with consistent confirmation`, async () => {
+        const productId = 9001 + index;
+        await execute("INSERT INTO rental_products (id, product_key, title, price_per_day, deposit, is_active) VALUES (?, ?, 'Kostenfreie Testmiete', 0, 0, 1)", [productId, `ZERO-RENTAL-${index}`]);
+        const customer = new SessionClient();
+        await login(customer, TEST_CUSTOMER);
+        const cart = await customer.request('/cart/items', {
+            method: 'POST', headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ productId, rentalStart: futureDate(830), rentalEnd: futureDate(831) })
+        });
+        assert.equal(cart.status, 201, await cart.text());
+        const checkout = await customer.request('/data', { method: 'POST', headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ paymentMethod: method, form: orderForm(TEST_CUSTOMER.email) }) });
+        const created = await checkout.json();
+        assert.equal(checkout.status, 200, JSON.stringify(created));
+        assert.equal(created.noPaymentRequired, true);
+        const [stored] = await queryRows("SELECT status, payment_status, JSON_UNQUOTE(JSON_EXTRACT(confirmation_json, '$.status')) AS summaryStatus FROM rental_orders WHERE id = ?", [created.orderId]);
+        assert.deepEqual(stored, { status: 'confirmed', payment_status: 'paid', summaryStatus: 'confirmed' });
+        if (method === 'online') {
+            await execute("UPDATE rental_orders SET status = 'expired', payment_status = 'pending' WHERE id = ?", [created.orderId]);
+            await execute("UPDATE rental_order_items SET item_status = 'expired' WHERE order_id = ?", [created.orderId]);
+        }
+        const retry = await customer.request(`/orders/${created.orderId}/mollie-checkout`, { method: 'POST' });
+        const result = await retry.json();
+        assert.equal(retry.status, method === 'online' ? 200 : 409, JSON.stringify(result));
+        if (method === 'online') assert.equal(result.noPaymentRequired, true);
+        const intents = await queryRows("SELECT id FROM external_effects_outbox WHERE effect_type = 'mollie.payment.create' AND JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.payment.id')) = ?", [String(created.orderId)]);
+        assert.equal(intents.length, 0);
+    });
+}
+async function boundaryStateSnapshot(orderId) {
+    // Financial state only: do not include confirmation/signature, auth grants,
+    // mail payloads or operation keys in assertion diagnostics.
+    return {
+        orders: await queryRows('SELECT status, payment_status, return_status, return_case_status FROM rental_orders WHERE id = ?', [orderId]),
+        items: await queryRows('SELECT id, item_status, return_status, actual_return_date, deposit_refund_amount FROM rental_order_items WHERE order_id = ? ORDER BY id', [orderId]),
+        payments: await queryRows('SELECT id, payment_type, payment_status, payment_method, amount FROM rental_order_payments WHERE order_id = ? ORDER BY id', [orderId]),
+        effects: await queryRows(`SELECT COUNT(*) AS count FROM external_effects_outbox WHERE JSON_EXTRACT(payload_json, '$.application.orderId') = ?`, [orderId])
+    };
+}
+
+test('zukünftige tatsächliche Rückgabe verändert weder Belegung noch Finanzbuchungen', async () => {
+    const customer = new SessionClient();
+    await login(customer, TEST_CUSTOMER);
+    const start = futureDate(3600);
+    const end = futureDate(3601);
+    const order = await createOrder(customer, 'cash', start, end);
+    const [item] = await queryRows('SELECT id FROM rental_order_items WHERE order_id = ?', [order.orderId]);
+    const admin = new SessionClient();
+    await login(admin, TEST_ADMIN);
+    const collected = await admin.request('/admin/order-payments/manual', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ orderId: order.orderId, paymentType: 'initial_payment', amount: 2 * TEST_PRODUCT.pricePerDay + TEST_PRODUCT.deposit, note: 'Isolierter Datumsgrenztest' })
+    });
+    assert.equal(collected.status, 200, await collected.text());
+    const pickup = await admin.request(`/admin/order-items/${item.id}/pickup`, { method: 'PUT' });
+    assert.equal(pickup.status, 200, await pickup.text());
+    const beforeState = await boundaryStateSnapshot(order.orderId);
+    const rejected = await admin.request(`/admin/order-items/${item.id}/return`, {
+        method: 'PUT', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ actualReturnDate: futureDate(2), adjustedRentalStart: start, adjustedRentalEnd: end,
+            adjustedPricePerDay: TEST_PRODUCT.pricePerDay, isDamaged: true, damageDescription: 'Darf nicht gespeichert werden',
+            additionalChargeReason: 'Darf nicht gebucht werden', additionalChargeAmount: 25, additionalChargePaymentMethod: 'cash' })
+    });
+    assert.equal(rejected.status, 400);
+    assert.match((await rejected.json()).error, /bis einschließlich heute/);
+    assert.deepEqual(await boundaryStateSnapshot(order.orderId), beforeState);
+    assert.equal(beforeState.items[0].item_status, 'picked_up');
+});
+
+test('Checkout-Retry eines inzwischen vergangenen Auftrags legt keine neue Zahlungsabsicht an', async () => {
+    const customer = new SessionClient();
+    await login(customer, TEST_CUSTOMER);
+    const order = await createOrder(customer, 'online', futureDate(3610), futureDate(3611));
+    // Explicitly isolated fixture state models an old expired hold; no cleanup
+    // process is necessary to reject a past rental period.
+    await execute('UPDATE rental_order_items SET rental_start = ?, rental_end = ?, item_status = \'expired\' WHERE order_id = ?', [futureDate(-4), futureDate(-3), order.orderId]);
+    await execute("UPDATE rental_orders SET status = 'expired', reserved_until = DATE_SUB(NOW(), INTERVAL 1 DAY) WHERE id = ?", [order.orderId]);
+    const beforeState = await boundaryStateSnapshot(order.orderId);
+    const response = await customer.request(`/orders/${order.orderId}/mollie-checkout`, { method: 'POST' });
+    assert.equal(response.status, 409);
+    assert.match((await response.json()).error, /Mietzeitraum ist nicht mehr gültig/);
+    assert.deepEqual(await boundaryStateSnapshot(order.orderId), beforeState);
+});
+
+test('Nullmiete mit positiver Kaution bleibt ein echter positiver Online-Zahlungsintent', async () => {
+    const customer = new SessionClient();
+    await login(customer, TEST_CUSTOMER);
+    await execute('UPDATE rental_products SET price_per_day = 0 WHERE id = ?', [TEST_PRODUCT.id]);
+    try {
+        const order = await createOrder(customer, 'online', futureDate(3620), futureDate(3621));
+        assert.equal(Boolean(order.noPaymentRequired), false);
+        assert.equal(typeof order.checkoutUrl, 'string');
+        const [intent] = await queryRows("SELECT amount, payment_status FROM rental_order_payments WHERE order_id = ? AND payment_type = 'initial_payment'", [order.orderId]);
+        assert.equal(Number(intent.amount), TEST_PRODUCT.deposit);
+        assert.equal(intent.payment_status, 'pending');
+        const response = await customer.request(`/my-orders/${order.orderId}`);
+        assert.equal(response.status, 200);
+        const result = await response.json();
+        assert.equal(result.financialSummary.rentalDueCents, 0);
+        assert.equal(result.financialSummary.depositDueCents, TEST_PRODUCT.deposit * 100);
+        assert.equal(result.financialSummary.customerDueCents, TEST_PRODUCT.deposit * 100);
+    } finally {
+        await execute('UPDATE rental_products SET price_per_day = ? WHERE id = ?', [TEST_PRODUCT.pricePerDay, TEST_PRODUCT.id]);
+    }
 });

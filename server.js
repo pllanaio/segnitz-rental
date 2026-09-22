@@ -1,10 +1,12 @@
 'use strict';
 
 require('dotenv').config();
+require('./services/observability').installConsoleRedaction();
 
 const dbConfig = require('./config/db');
 const mysql = require('mysql2/promise');
 const { assertSecurityEnvironment } = require('./config/security');
+const { validateRuntimeConfig } = require('./config/runtimeConfig');
 const { initializeDatabase } = require('./database/bootstrap');
 const { runCoordinatedDatabaseCleanup } = require('./utils/cleanup');
 const { primeSchemaReadiness } = require('./database/readiness');
@@ -23,6 +25,7 @@ async function stopRuntime(signal = 'shutdown') {
         console.log(`${new Date().toISOString()} - ${signal}: Hintergrunddienste werden beendet`);
         if (applicationRuntime) await applicationRuntime.stopApplication();
         await stopExternalEffectsWorker();
+        await dbConfig.closeConnections();
     })();
 
     return shutdownPromise;
@@ -73,8 +76,7 @@ function logBootstrapResult(bootstrapResult) {
     console.warn(`Setup-Seite: ${setupUrl}`);
 
     if (bootstrapResult.setupTokenSource === 'generated') {
-        console.warn(`Einmaliger Setup-Code: ${bootstrapResult.setupToken}`);
-        console.warn('Der Code wird nach erfolgreicher Einrichtung ungültig.');
+        console.warn('ADMIN_SETUP_TOKEN setzen und neu starten, um die Einrichtung durchzuführen.');
     } else if (bootstrapResult.setupTokenSource === 'environment') {
         console.warn('Als Setup-Code den Wert aus ADMIN_SETUP_TOKEN verwenden.');
     } else {
@@ -88,6 +90,7 @@ function logBootstrapResult(bootstrapResult) {
 }
 
 async function startServer() {
+    validateRuntimeConfig();
     assertSecurityEnvironment();
     const bootstrapResult = await initializeDatabase();
     primeSchemaReadiness(bootstrapResult.schema, bootstrapResult.migrationManifest);

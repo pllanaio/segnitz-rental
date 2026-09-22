@@ -62,8 +62,10 @@ test('enables a restrictive baseline CSP', () => {
   );
   assert.deepEqual(
     developmentOptions.contentSecurityPolicy.directives.scriptSrc,
-    ["'self'", 'https://cdn.jsdelivr.net']
+    ["'self'"]
   );
+  assert.deepEqual(developmentOptions.contentSecurityPolicy.directives.styleSrc, ["'self'", "'unsafe-inline'"]);
+  assert.deepEqual(developmentOptions.contentSecurityPolicy.directives.fontSrc, ["'self'", 'data:']);
   assert.equal(
     developmentOptions.contentSecurityPolicy.directives.scriptSrc.includes("'unsafe-inline'"),
     false

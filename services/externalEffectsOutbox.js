@@ -1,7 +1,10 @@
 'use strict';
 
 const crypto = require('node:crypto');
+const { redactSecrets } = require('../utils/redaction');
 const mysql = require('mysql2/promise');
+const { isMailDeliveryPaused } = require('./mailDeliveryPolicy');
+const { lockExternalEffectPaymentContext } = require('./bookingPaymentService');
 
 // Keep this module importable by isolated unit tests. The server still enforces
 // bootstrap ordering when it loads the application; the worker only resolves
@@ -225,12 +228,24 @@ async function getExternalEffect(operationKey, options = {}) {
     }
 }
 
+async function redactDeadAuthPayload(connection, effect) {
+    if (effect.effect_type !== EFFECT_TYPES.MAIL_SEND ||
+        !/^(?:mail-password-reset|mail-verify)(?:[:-]|$)/u.test(effect.operation_key)) return;
+    // Retain the immutable payload hash and operation key for deduplication.
+    // Only pending/retry auth mail needs its plaintext link for delivery.
+    await connection.execute(
+        "UPDATE external_effects_outbox SET payload_json = JSON_OBJECT('redacted', TRUE) WHERE id = ?",
+        [effect.id]
+    );
+}
+
 async function claimExternalEffect({
     operationKey = null,
     workerId,
     leaseSeconds = 60,
     applyDead = null,
-    connectionFactory = createDbConnection
+    connectionFactory = createDbConnection,
+    mailPaused = isMailDeliveryPaused()
 } = {}) {
     if (!workerId) throw new Error('workerId ist zum Claimen erforderlich.');
 
@@ -243,6 +258,7 @@ async function claimExternalEffect({
             `SELECT *
              FROM external_effects_outbox
              WHERE status = 'processing'
+             ${mailPaused ? "AND effect_type <> 'mail.send'" : ''}
              AND attempt_count >= max_attempts
              AND locked_at < DATE_SUB(NOW(), INTERVAL ? SECOND)
              ORDER BY id ASC
@@ -256,6 +272,7 @@ async function claimExternalEffect({
             if (applyDead) {
                 await applyDead(connection, expiredEffect, new Error(expiredLeaseMessage));
             }
+            await redactDeadAuthPayload(connection, expiredEffect);
             await connection.execute(
                 `UPDATE external_effects_outbox
                  SET status = 'dead',
@@ -283,6 +300,7 @@ async function claimExternalEffect({
                 OR (status = 'processing' AND locked_at < DATE_SUB(NOW(), INTERVAL ? SECOND))
              )
              AND attempt_count < max_attempts
+             ${mailPaused ? "AND effect_type <> 'mail.send'" : ''}
              ${operationFilter}
              ORDER BY id ASC
              LIMIT 1
@@ -327,10 +345,31 @@ function calculateBackoffSeconds(attemptCount) {
     return Math.min(15 * (2 ** exponent), 60 * 60);
 }
 
+// A maintenance pause is not an attempted provider delivery. Undo only our
+// own claim, retaining its immutable payload and the financial operation keys.
+async function deferExternalEffect(effect, options = {}) {
+    const connection = await (options.connectionFactory || createDbConnection)();
+    try {
+        await connection.execute(
+            `UPDATE external_effects_outbox
+             SET status = 'pending', attempt_count = GREATEST(attempt_count - 1, 0),
+                 available_at = DATE_ADD(NOW(), INTERVAL 30 SECOND),
+                 locked_at = NULL, locked_by = NULL
+             WHERE id = ? AND status = 'processing' AND locked_by = ?
+             AND effect_type = 'mail.send'`,
+            [effect.id, effect.locked_by]
+        );
+    } finally {
+        await connection.end();
+    }
+}
+
 async function completeExternalEffect(effect, result, applyResult = null) {
     const connection = await createDbConnection();
     try {
+        await connection.query('SET TRANSACTION ISOLATION LEVEL READ COMMITTED');
         await connection.beginTransaction();
+        await lockExternalEffectPaymentContext(connection, effect);
 
         const [lockedRows] = await connection.execute(
             `SELECT status, locked_by
@@ -371,10 +410,12 @@ async function completeExternalEffect(effect, result, applyResult = null) {
 
 async function failExternalEffect(effect, error, applyFailure = null) {
     const connection = await createDbConnection();
-    const errorMessage = String(error?.message || error || 'Unbekannter externer Fehler').slice(0, 8000);
+    const errorMessage = redactSecrets(String(error?.message || error || 'Unbekannter externer Fehler')).slice(0, 8000);
 
     try {
+        await connection.query('SET TRANSACTION ISOLATION LEVEL READ COMMITTED');
         await connection.beginTransaction();
+        await lockExternalEffectPaymentContext(connection, effect);
         const [rows] = await connection.execute(
             `SELECT *
              FROM external_effects_outbox
@@ -395,6 +436,7 @@ async function failExternalEffect(effect, error, applyFailure = null) {
 
         const exhausted = Number(lockedEffect.attempt_count) >= Number(lockedEffect.max_attempts);
         const nextStatus = exhausted ? OUTBOX_STATUSES.DEAD : OUTBOX_STATUSES.RETRY;
+        if (exhausted) await redactDeadAuthPayload(connection, lockedEffect);
         const backoffSeconds = calculateBackoffSeconds(lockedEffect.attempt_count);
         if (exhausted && applyFailure) {
             await applyFailure(connection, lockedEffect, error);
@@ -462,6 +504,7 @@ module.exports = {
     claimExternalEffect,
     completeExternalEffect,
     createOperationKey,
+    deferExternalEffect,
     enqueueExternalEffect,
     enqueueMolliePaymentCancellation,
     enqueueMolliePaymentCreation,

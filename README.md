@@ -19,9 +19,11 @@ initialisiert:
   starten. Für Deployments mit mehreren Replikas wird ein MySQL-Advisory-Lock
   verwendet.
 
-Die Anwendung verwendet für Geschäftszeiten standardmäßig `Europe/Berlin` und
-setzt jede neue MySQL-Session auf den jeweils gültigen UTC-Offset (inklusive
-Sommer-/Winterzeit). `BUSINESS_TIME_ZONE` kann nur auf eine von Node/Intl
+Die Anwendung verwendet für Geschäftstag und Anzeige standardmäßig `Europe/Berlin`;
+technische Zeitpunkte und neue MySQL-Sessions verwenden UTC. Reine Miettage
+bleiben `DATE`. Bestehende lokale `DATETIME`-Werte benötigen die ausdrücklich
+freigegebene Legacyinterpretation der neuen Migration; keine pauschale Verschiebung
+bestehender `TIMESTAMP`-Daten. `BUSINESS_TIME_ZONE` kann nur auf eine von Node/Intl
 unterstützte IANA-Zeitzone gesetzt werden. `/live` prüft nur den Prozess;
 `/ready` und der kompatible Pfad `/health` prüfen Datenbank und Schema und liefern
 bei Nichtverfügbarkeit HTTP 503.
@@ -38,10 +40,10 @@ Existiert nach dem Datenbankaufbau noch kein Benutzer mit der Rolle
 `global_admin`, sperrt die Anwendung alle regulären Seiten und APIs und leitet
 auf `/setup.html` um. Dort wird das erste globale Adminkonto erstellt.
 
-In Produktion sollte vor dem ersten Start ein zufälliger Wert mit mindestens 32
-Zeichen als `ADMIN_SETUP_TOKEN` gesetzt werden. Ohne diese Variable erzeugt die
-Anwendung einen einmaligen Setup-Code und schreibt ihn ausschließlich ins
-Deployment-Log. Nach erfolgreicher Einrichtung wird nur der Hash verworfen; der
+In Produktion vor dem ersten Start einen zufälligen Wert mit mindestens 32
+Zeichen als `ADMIN_SETUP_TOKEN` über den Secretstore setzen. Setup-Codes gehören
+nicht in Logs oder Tickets. Für lokale Einrichtung ist ein generierter Code kein
+Ersatz für den bewusst konfigurierten Produktionswert. Nach erfolgreicher Einrichtung wird nur der Hash verworfen; der
 Code kann nicht erneut benutzt werden.
 
 Automatisierte Tests dürfen das Schema destruktiv zurücksetzen. Dafür muss der
@@ -65,18 +67,22 @@ liegen außerhalb des öffentlichen Web-Verzeichnisses und werden ausschließlic
 ausgeliefert. Das bestehende Volume `return-images` bleibt auch nach dieser
 Pfadänderung erhalten; nur sein Einhängepunkt im Container ist privat.
 
-1. `.env.example` nach `.env` kopieren und alle leeren Secrets setzen.
-2. `SESSION_SECRET` und `ADMIN_SETUP_TOKEN` mit mindestens 32 zufälligen Zeichen
-   erzeugen. `.env` niemals committen.
-3. Mit `docker compose pull` und
-   `docker compose up -d --force-recreate` deployen.
-4. Für reproduzierbare Rollouts bevorzugt
-   `SEGNITZ_IMAGE=pllanaio/segnitz-rental:sha-<vollstaendiger-commit-sha>` setzen.
+1. `.env.example` nach `.env` kopieren und die validierte Konfiguration sowie
+   `TRUST_PROXY` anhand der tatsächlichen Topologie setzen; Secrets niemals committen.
+2. Sämtliche Gates desselben endgültigen Commits und den einmal gebauten/scannierten
+   OCI-Digest nachweisen. Review und manuelle Veröffentlichung sind eigene Schritte.
+3. `SEGNITZ_IMAGE=pllanaio/segnitz-rental@sha256:<geprüfter-digest>` setzen.
+   Compose akzeptiert keinen fehlenden Bildverweis. SHA-Tags sind keine Digestbindung.
+4. Den lesenden Preflight und die dokumentierten Backup-/Restorebedingungen prüfen.
+   Erst nach Betriebsfreigabe kontrolliert aktualisieren und den Smoke-Test ausführen.
 
-`docker compose down` behält die benannten Volumes. `docker compose down -v`
-löscht sie dagegen zusammen mit allen hochgeladenen Bildern und darf nur nach
-einem geprüften Backup verwendet werden. Datenbank und beide Upload-Volumes
-müssen regelmäßig gesichert und eine Wiederherstellung muss getestet werden.
+Die ausführbaren sicheren Helfer sowie Schritte für Migration, Wartung,
+Deployment, Monitoring, verschlüsseltes Backup, isolierten Restore und
+providerkonsistentes Recovery stehen in [docs/operations.md](docs/operations.md).
+Der tatsächliche Test-/Freigabestatus steht in
+[docs/production-readiness.md](docs/production-readiness.md).
+Datenbank und beide Bildvolumes bilden eine gemeinsame Sicherungseinheit.
+Keine Volume-/Tabellenlöschungen oder Datenresets zum Beheben von Migrationen.
 
 Beim Upgrade werden auch ältere, eventuell noch `root:root` gehörende
 Upload-Volumes automatisch nutzbar gemacht: Der Container-Entrypoint legt nur

@@ -1,6 +1,7 @@
 'use strict';
 
 const { expect, test } = require('@playwright/test');
+const { attachOrderFinance } = require('../../services/orderFinanceService');
 const { TEST_ADMIN, TEST_PRODUCT, TEST_USER } = require('../support/test-database');
 
 function futureDate(offsetDays) {
@@ -8,18 +9,6 @@ function futureDate(offsetDays) {
     date.setUTCDate(date.getUTCDate() + offsetDays);
     return date.toISOString().slice(0, 10);
 }
-
-test.beforeEach(async ({ page }) => {
-    await page.addInitScript(() => {
-        const formatDate = date => date.toISOString().slice(0, 10);
-        const flatpickrStub = () => ({
-            destroy() {},
-            formatDate
-        });
-        flatpickrStub.formatDate = formatDate;
-        window.flatpickr = flatpickrStub;
-    });
-});
 
 test('zeigt den Katalog und legt ein Produkt über die Oberfläche in den Warenkorb', async ({ page }) => {
     const rentalStart = futureDate(30);
@@ -38,10 +27,14 @@ test('zeigt den Katalog und legt ein Produkt über die Oberfläche in den Warenk
     await expect(page.locator('#productDetailsModal')).toBeVisible();
     await expect(page.locator('#modalProductTitle')).toHaveText(TEST_PRODUCT.title);
 
-    await page.evaluate(({ rentalStart, rentalEnd }) => {
-        document.getElementById('modalRentalStart').value = rentalStart;
-        document.getElementById('modalRentalEnd').value = rentalEnd;
-    }, { rentalStart, rentalEnd });
+    // Real vendored Flatpickr: move months through its visible navigation and
+    // choose rendered day controls; neither calendar nor own API is stubbed.
+    for (let month = 0; month < 3; month++) {
+        if (await page.locator(`#modalCalendarContainer .flatpickr-day[aria-label="${rentalStart}"]:not(.hidden)`).count()) break;
+        await page.locator('#modalCalendarContainer .flatpickr-next-month').click();
+    }
+    await page.locator(`#modalCalendarContainer .flatpickr-day[aria-label="${rentalStart}"]:not(.hidden)`).click();
+    await page.locator(`#modalCalendarContainer .flatpickr-day[aria-label="${rentalEnd}"]:not(.hidden)`).click();
 
     await page.locator('#selectProductFromModal').click();
 
@@ -133,7 +126,7 @@ test('führt Admin-Navigation und dynamische Produktaktionen ohne Inline-Handler
     const csp = response.headers()['content-security-policy'];
 
     expect(csp).toContain("script-src-attr 'none'");
-    expect(csp).toContain("script-src 'self' https://cdn.jsdelivr.net");
+    expect(csp).toContain("script-src 'self'");
     expect(csp).not.toContain("script-src 'self' 'unsafe-inline'");
 
     await page.locator('#username').fill(TEST_ADMIN.email);
@@ -144,7 +137,7 @@ test('führt Admin-Navigation und dynamische Produktaktionen ohne Inline-Handler
     ]);
     await expect(page.locator('#productList')).toContainText(TEST_PRODUCT.title);
 
-    await page.getByRole('button', { name: 'Bearbeiten' }).click();
+    await page.locator(`[data-backend-action="edit-product"][data-product-id="${TEST_PRODUCT.id}"]`).click();
     await expect(page.locator('#title')).toHaveValue(TEST_PRODUCT.title);
 
     await page.getByRole('button', { name: 'Öffnungszeiten' }).click();
@@ -277,7 +270,7 @@ test('rendert öffentliche und eigene Bewertungen als Text statt als HTML', asyn
     await page.route('**/my-orders/9101', route => route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({
+        body: JSON.stringify(attachOrderFinance({
             id: 9101,
             order_no: 'R-REVIEW-XSS',
             status: 'returned',
@@ -298,7 +291,7 @@ test('rendert öffentliche und eigene Bewertungen als Text statt als HTML', asyn
                 returnImages: []
             }],
             payments: []
-        })
+        }))
     }));
 
     await page.goto('/profile.html');
@@ -403,7 +396,7 @@ test('führt die Rückgabemaske mit Schadensdokumentation und wählbarem Zahlung
     await page.route('**/admin/orders/77', route => route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify(orderDetails)
+        body: JSON.stringify(attachOrderFinance(orderDetails))
     }));
     await page.route('**/img/returns/return-test.png', route => route.fulfill({
         status: 200,
@@ -484,7 +477,7 @@ test('führt die Rückgabemaske mit Schadensdokumentation und wählbarem Zahlung
     const returnRequest = await returnRequestPromise;
     const payload = returnRequest.postDataJSON();
 
-    expect(returnRequest.headers()['x-csrf-token']).toMatch(/^[a-f0-9]{64}$/);
+    expect(/^[a-f0-9]{64}$/.test(String(returnRequest.headers()['x-csrf-token'] || ''))).toBe(true);
     expect(payload.isDamaged).toBe(true);
     expect(payload.damageDescription).toBe('Hydraulikleitung gerissen');
     expect(payload.additionalChargeReason).toBe('Reparatur der Hydraulikleitung');
@@ -534,7 +527,7 @@ test('verarbeitet den paginierten Kundenauftrags-Vertrag und zeigt vor Rückgabe
     await page.route('**/my-orders/1', route => route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({
+        body: JSON.stringify(attachOrderFinance({
             id: 1,
             order_no: 'R202600001',
             status: 'confirmed',
@@ -560,7 +553,7 @@ test('verarbeitet den paginierten Kundenauftrags-Vertrag und zeigt vor Rückgabe
                 { paymentType: 'deposit', paymentMethod: 'cash', paymentStatus: 'pending', amount: 150 }
             ],
             returnImages: []
-        })
+        }))
     }));
 
     await page.goto('/profile.html');
@@ -571,8 +564,8 @@ test('verarbeitet den paginierten Kundenauftrags-Vertrag und zeigt vor Rückgabe
     await expect(page.locator('#myOrdersList')).toContainText('1 Bestellung gefunden');
     await page.getByRole('button', { name: 'Details anzeigen' }).click();
     await expect(page.locator('#myOrderDetailsModal')).toBeVisible();
-    await expect(page.locator('#myOrderDetailsBody')).toContainText('Kaution zurück');
-    await expect(page.locator('#myOrderDetailsBody')).toContainText('0.00 €');
+    await expect(page.locator('#myOrderDetailsBody')).toContainText('Kaution noch einzuzahlen');
+    await expect(page.locator('#myOrderDetailsBody')).toContainText('249,80 €');
     expect(apiErrors).toEqual([]);
 });
 

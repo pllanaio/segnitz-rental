@@ -31,11 +31,18 @@
     "express-rate-limit": "^8.6.2",
     "express-session": "^1.19.0",
     "helmet": "^8.3.0",
-    "multer": "^2.2.0",
-    "mysql2": "^3.23.3",
-    "node-fetch": "^2.7.0"
+    "multer": "2.3.0",
+    "mysql2": "3.23.3",
+    "node-fetch": "^2.7.0",
+    "sharp": "0.35.4"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1"
+  },
+  "overrides": {
+    "express-mysql-session": {
+      "mysql2": "$mysql2"
+    },
+    "qs": "6.16.0"
   }
 }

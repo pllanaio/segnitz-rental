@@ -65,6 +65,14 @@ document.addEventListener('DOMContentLoaded', () => {
             setFieldInvalid(fields.passwordRepeat, 'Die Passwörter stimmen nicht überein.');
         }
 
+        for (const [name, check] of [['phone', 'isValidPhone'], ['zip', 'isValidPostalCode'], ['address', 'isSafeAddress']]) {
+            if (!window.ContactContract[check](fields[name].value)) {
+                isValid = false;
+                firstInvalidField = firstInvalidField || fields[name];
+                setFieldInvalid(fields[name], 'Bitte gültige Kontaktdaten eingeben.');
+            }
+        }
+
         if (firstInvalidField) firstInvalidField.focus();
 
         return isValid;

@@ -1,0 +1,136 @@
+{
+  "schema": 1,
+  "syntheticDataOnly": true,
+  "imageId": "sha256:712a920ec49e8b0897e824401357d2f74f265d8200bb916dc06baaf9788471d6",
+  "imageRepoDigests": [],
+  "sourceRevision": "536a8cc383f565ad5e538954005b67fb34f0635a",
+  "mysqlImage": "mysql:8.4.11@sha256:b3b90af2a6552ae30c266fdb7d5dd55f3afb72404bb78d37fe8a23eb857fd3fb",
+  "applicationSmokeVerified": true,
+  "containerNetworkAcceptance": [
+    {
+      "running": true,
+      "restarting": false,
+      "exitCode": 0,
+      "oomKilled": false,
+      "hasRuntimeError": false,
+      "attachedNetworks": 1,
+      "ownedNetworkMatches": 1,
+      "publishedBindings": 0,
+      "transport": "fixed-loopback-relay"
+    },
+    {
+      "running": true,
+      "restarting": false,
+      "exitCode": 0,
+      "oomKilled": false,
+      "hasRuntimeError": false,
+      "attachedNetworks": 1,
+      "ownedNetworkMatches": 1,
+      "publishedBindings": 0,
+      "transport": "fixed-loopback-relay"
+    },
+    {
+      "running": true,
+      "restarting": false,
+      "exitCode": 0,
+      "oomKilled": false,
+      "hasRuntimeError": false,
+      "attachedNetworks": 1,
+      "ownedNetworkMatches": 1,
+      "publishedBindings": 0,
+      "transport": "fixed-loopback-relay"
+    }
+  ],
+  "providerNetworkInternal": true,
+  "databaseTlsAcceptance": [
+    {
+      "mode": "trusted",
+      "encryptedSqlVerified": true,
+      "utcSessionVerified": true,
+      "protocol": "TLSv1.3"
+    },
+    {
+      "mode": "untrusted-ca",
+      "tlsHandshakeRejected": true
+    },
+    {
+      "mode": "wrong-hostname",
+      "tlsHandshakeRejected": true
+    },
+    {
+      "mode": "trusted",
+      "encryptedSqlVerified": true,
+      "utcSessionVerified": true,
+      "protocol": "TLSv1.3"
+    }
+  ],
+  "sourceImageOwnershipReturnedToHost": true,
+  "sourceWriterDrained": true,
+  "encryptedSha256": "b5bebf581ec3df86d819dc3d7ff80d7d7d64d52d6b624107a16af759664116be",
+  "offlineVerification": {
+    "schema": {
+      "columns": 231,
+      "constraints": 46,
+      "indexes": 74,
+      "tables": 22
+    },
+    "migrationCount": 9,
+    "referencedImagesChecked": 2,
+    "signatureCount": 1,
+    "imageContentDecoded": true,
+    "signatureContentDecoded": true,
+    "decodeLimits": {
+      "images": {
+        "maxBytes": 5242880,
+        "maxPixels": 16000000,
+        "timeoutSeconds": 5
+      },
+      "signatures": {
+        "maxBytes": 750000,
+        "maxPixels": 2000000,
+        "timeoutSeconds": 5
+      }
+    },
+    "ledger": [
+      {
+        "payment_type": "deposit",
+        "payment_status": "paid",
+        "count": 1,
+        "total": "150.00"
+      },
+      {
+        "payment_type": "deposit_refund",
+        "payment_status": "paid",
+        "count": 1,
+        "total": "-150.00"
+      },
+      {
+        "payment_type": "rental",
+        "payment_status": "paid",
+        "count": 1,
+        "total": "100.00"
+      }
+    ],
+    "outbox": [
+      {
+        "status": "pending",
+        "count": 1
+      }
+    ],
+    "providersContacted": false,
+    "applicationSmokeVerified": false
+  },
+  "applicationSmoke": {
+    "ownerOrder": true,
+    "privateReturnImage": true,
+    "foreignAndAnonymousDenied": true,
+    "customerAdminFinanceEqual": true,
+    "readinessWithAndWithoutSession": true,
+    "returnImageSha256": "2e27cc19937afff48e58f12393ae028116ed0dc8d09fd5cf8f1279c56a08be7e"
+  },
+  "pausedOutboxPreserved": true,
+  "providersContacted": false,
+  "restoreVerified": true,
+  "elapsedSeconds": 16.61,
+  "syntheticWritersAndFilesCleaned": true
+}
