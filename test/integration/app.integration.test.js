@@ -667,8 +667,29 @@ test('Checkout-Lock verhindert Positionsverlust bei parallelem Cart-Add', async 
             lockReleased = true;
 
             const [orderResponse, addResponse] = await Promise.all([orderPromise, addPromise]);
-            assert.equal(orderResponse.status, 200);
             const orderResult = await orderResponse.json();
+            assert.ok([200, 202].includes(orderResponse.status), 'Onlinecheckout muss erstellt oder zur Provider-Vorbereitung vorgemerkt sein.');
+            if (orderResponse.status === 202) {
+                assert.equal(orderResult.paymentPending, true);
+                assert.equal(Boolean(orderResult.checkoutUrl), false);
+                const deadline = Date.now() + 10000;
+                let prepared = false;
+                while (Date.now() < deadline) {
+                    const [rows] = await lockConnection.execute(
+                        `SELECT ro.mollie_payment_id FROM rental_orders ro
+                         JOIN rental_order_payments payment ON payment.order_id = ro.id
+                          AND payment.payment_type = 'initial_payment'
+                          AND payment.mollie_payment_id = ro.mollie_payment_id
+                         JOIN external_effects_outbox effect ON effect.operation_key = payment.external_operation_key
+                         WHERE ro.id = ? AND effect.status = 'succeeded'
+                           AND ro.mollie_checkout_url IS NOT NULL`, [orderResult.orderId]);
+                    if (rows.length === 1) { prepared = true; break; }
+                    await delay(50);
+                }
+                assert.equal(prepared, true, 'Die vorgemerkte identische Zahlungsabsicht muss vom echten Worker vorbereitet werden.');
+            } else {
+                assert.equal(typeof orderResult.checkoutUrl, 'string');
+            }
             assert.ok(Number.isInteger(Number(orderResult.orderId)));
             const setCookies = typeof orderResponse.headers.getSetCookie === 'function'
                 ? orderResponse.headers.getSetCookie()

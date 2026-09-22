@@ -1246,3 +1246,9 @@ input[name="paymentMethod"] {
 /* Flatpickr's default 39px maximum must grow with the existing full-width
    calendar container, otherwise wide views place more than seven days in a row. */
 #modalCalendarContainer .flatpickr-day { width: 14.285714%; max-width: none; flex-basis: 14.285714%; }
+
+/* Keep native radio keyboard behavior and show focus on its visible card. */
+.payment-option-card > input[type="radio"]:focus-visible + .payment-card {
+  outline: 3px solid #0d6efd;
+  outline-offset: 3px;
+}

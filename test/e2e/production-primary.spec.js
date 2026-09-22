@@ -135,9 +135,13 @@ async function checkout(page, method, product) {
     await page.locator('#agbs').check();
     await page.locator('#dsgvo').check();
     const paymentRadio = page.locator(method === 'cash' ? '#paymentMethodCash' : '#paymentMethodOnline');
-    // The native radio is visually hidden; users activate its visible label.
-    await page.locator('label.payment-option-card').filter({ has: paymentRadio }).click();
+    // Native radio-group keyboard behavior with a visible focus indicator.
+    await page.locator('#paymentMethodOnline').focus();
+    await page.keyboard.press('ArrowLeft');
+    if (method === 'online') await page.keyboard.press('ArrowRight');
     await expect(paymentRadio).toBeChecked();
+    await expect(paymentRadio).toBeFocused();
+    await expect.poll(() => paymentRadio.evaluate(input => getComputedStyle(input.nextElementSibling).outlineStyle)).toBe('solid');
     const termsVersion = await page.locator('#termsVersion').inputValue();
     await page.locator('#termsVersion').evaluate(input => { input.value = 'obsolete-test-version'; });
     const conflictPromise = page.waitForResponse(response => response.url().endsWith('/data') && response.request().method() === 'POST');
@@ -274,7 +278,7 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
                 const id = new URL(route.request().url()).pathname.slice(1);
                 const fixture = JSON.parse(await fs.readFile(path.join(process.env.MOLLIE_TEST_FIXTURES_DIR, `${id}.json`), 'utf8'));
                 providerObservations.set(customer, { orderId: Number(fixture.metadata.orderId) });
-                await route.fulfill({ contentType: 'text/html', body: `<html lang="de"><title>Isolierter Zahlungsanbieter</title><a href="${baseURL}/index.html?payment=return&amp;orderId=${Number(fixture.metadata.orderId)}">Zurück zum Mietauftrag</a></html>` });
+                await route.fulfill({ contentType: 'text/html; charset=utf-8', body: `<html lang="de"><meta charset="utf-8"><title>Isolierter Zahlungsanbieter</title><a href="${baseURL}/index.html?payment=return&amp;orderId=${Number(fixture.metadata.orderId)}">Zurück zum Mietauftrag</a></html>` });
             });
             const online = await checkout(customer, 'online', scenario.product);
             await expect(customer).toHaveURL(/^https:\/\/checkout\.test\.mollie\.local\//);

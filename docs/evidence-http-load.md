@@ -1,4 +1,4 @@
-# Reale HTTP-/MySQL-Stauprobe: vorbereiteter Abnahmetest
+# Reale HTTP-/MySQL-Stauprobe: bestandener isolierter CI-Nachweis
 
 Stand 13.09.2026, Ausgangscommit `e9d292ff`, isolierter Branch
 `codex/rc-load-integration-20260913`. Der neue Test ergänzt die vorhandenen
@@ -58,12 +58,7 @@ Adresswert unterscheidet sich nun tatsächlich vom gespeicherten Wert. Außerdem
 wird das Verschwinden der konkreten gesperrten Serverthread-IDs geprüft, nicht nur
 das Ende einer sichtbaren SQL-Anweisung.
 
-**Noch kein lokaler MySQL-/HTTP-Lastpass:** Es steht lokal kein MySQL-Server zur
-Verfügung. Der Test wird über den vorhandenen seriellen MySQL-CI-Job automatisch
-mit `npm run test:integration` ausgeführt. Der erste tatsächliche Lauf muss die
-hier genannten Status-/Latenz-/Thread-/Queue-Messwerte liefern; Syntax ist dafür
-kein Ersatz. Ein fehlschlagender Start-/DB-Hook wird nicht als ausgeführter
-Lastversuch gewertet.
+**Tatsächlich in CI125 bestanden:** [MySQL-Job](https://github.com/pllanaio/segnitz-rental/actions/runs/34757220852/job/103723568754), Testdauer 4903 ms. 3 blockierte Schreibrequests und 24 Burstrequests; 8 Live200, 8 Ready503, 8 Profil503. Maximale Live35 ms/Ready263 ms, maximal3 Appthreads (7 verschiedene über den gesamten Beobachtungszeitraum), Queue nach Recovery0,13 Rejects,18 Acquiretimeouts,3 Querytimeouts, Shutdown Exit0. Die Assertions prüfen zusätzlich fehlenden verspäteten Schreibeffekt und verschwundene konkrete Threads. Lokal weiterhin kein MySQL; dieser Nachweis stammt ausdrücklich aus dem echten CI-MySQL-Lauf.
 
 Dieses begrenzte deterministische Profil ersetzt nicht das in
 [operations.md](operations.md) beschriebene 60-Sekunden-Lastprofil auf der

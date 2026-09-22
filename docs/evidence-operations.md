@@ -99,3 +99,13 @@ Reviewbarer Code und lokal bestandene Verhaltensprüfungen sind vorhanden.
 /Container-/Digest-/Signaturnachweise, aktivierte GitHubschutzregeln, konkrete
 Betreiberbedingungen und ein echter vollständiger Restore-/Last-/Alarmnachweis.
 Diese externen Lücken entwerten die oben explizit ausgeführten lokalen Tests nicht.
+
+## Tatsächliche Restore-Abnahme am 22.09.2026
+
+[CI128 Build-/Restorejob](https://github.com/pllanaio/segnitz-rental/actions/runs/35765448580/job/106873703967) bestand einschließlich Trivy, SPDX-SBOM und SLSAv1-Provenance. Merge-Checkout `536a8cc383f565ad5e538954005b67fb34f0635a`, PR-Head `dc83e154cc054dbf5d77ea1f9be1350e8375da16`; Image-Index `sha256:26c5df7a981c92e4ff7cc59a582fcc365c5c6787f8a99e231b62143361cb0f7d`, OCI-Archiv SHA256 `76699a19d6612e9dba071efc54d885ca54489360c8ec07edc09eca211ff9ba09`.
+
+[Unverändertes Restore-Ergebnis](evidence/restore-ci128.json), GitHub-Artefakt10712380398, heruntergeladenes ZIP gegen SHA256 `fd1a8d1b1d6454141cb012ede0a0c5e4b43f3a27e5f7e7ca01988b71a3562633` geprüft. Die synthetische Probe benötigte16,61 Sekunden; dies ist keine produktive RTO-Zusage. Tatsächlich geprüft:22 Tabellen/9 Migrationen,2 Bildreferenzen mit vollständigem Decode,1 Signatur, Ledger100 EUR Miete/150 EUR Kaution/150 EUR Refund, Quellwriter-Drain, verschlüsseltes Backup, neue Zieldatenbank/-bildverzeichnisse, Appstart, identischer Kunden-/Adminsaldo, privates Bild und fremder/anonymer Zugriffsschutz, Readiness mit/ohne Session. Die ausstehende Outbox blieb pausiert. Providerkontakt:false; alle eigenen Writer/Dateien bereinigt.
+
+Echter DB-TLS-Nachweis: TLS1.3, SQL und UTC-Sitzung mit vertrauenswürdiger CA; Handshakeablehnung bei falscher CA und falschem Hostnamen, danach erneut erfolgreicher vertrauenswürdiger Verbindungsaufbau. Alle drei eigenen Container blieben ausschließlich im internen Docker-Netz; begrenzte hostseitige Loopback-Relays kompensieren dessen fehlende Port-Publikation. Keine Netzfreigabe zu externen Providern.
+
+Offen bleiben produktive Volumengröße, Schlüsselverwahrung, Retention, RPO/RTO, tatsächliche Produktionsrechte/-topologie und die autorisierte Betreiberprobe. Keine produktive Wiederherstellung oder Imageveröffentlichung ausgeführt.
