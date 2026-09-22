@@ -80,11 +80,13 @@ im dafür freigegebenen GitHub-Testverfahren nachweisen.
 
 ## Offene Dependency-PRs: einzelne Einordnung, kein Sammelmerge
 
+Aktueller vollständiger Head-/Diffabgleich am22.09.2026 samt ausgeführter CommonJS-/dotenv-Proben: [Einzelreview](dependency-pr-review.md). Die Tabelle beschreibt die jeweilige Upgradeentscheidung, keinen Sammelmerge.
+
 | PR | Änderung | Umgang |
 | --- | --- | --- |
 | [#32](https://github.com/pllanaio/segnitz-rental/pull/32) | Multer 2.2.0 → 2.3.0 | Dieselbe gepatchte Version vom Dependencyarbeitspaket übernommen; Multipart-/Unitnachweise dort; PR selbst unverändert |
 | [#33](https://github.com/pllanaio/segnitz-rental/pull/33) | mysql2 3.23.3 → 3.24.3 | Direktes 3.23.3 ist bereits gepatcht; verwundbares verschachteltes 3.10.2 per geprüftem scoped Override beseitigt; 3.24.3 nicht blind übernommen und Kompatibilität nicht behauptet |
-| [#31](https://github.com/pllanaio/segnitz-rental/pull/31) | Node 24 → 26 | Passt nicht zum erklärten Node-22/24-Support; Majorwechsel separat entscheiden/testen |
+| [#36](https://github.com/pllanaio/segnitz-rental/pull/36) | Node 24 → 26.9 (aktueller PR am22.09.) | Passt nicht zum erklärten Node-22/24-Support; Majorwechsel separat entscheiden/testen |
 | [#22](https://github.com/pllanaio/segnitz-rental/pull/22) | dotenv 16 → 17 | Majorupgrade separat prüfen; kein erforderlicher Fix dieser Findings |
 | [#9](https://github.com/pllanaio/segnitz-rental/pull/9) | node-fetch 2 → 3 | CommonJS-/ESM-Vertrag muss vorher angepasst/geprüft werden; nicht gemerged |
 | [#6](https://github.com/pllanaio/segnitz-rental/pull/6) | Express 4 → 5 | Routing-/Error-/Parservertrag separat regressionsprüfen; Stack bleibt bestehen |
@@ -109,3 +111,7 @@ Diese externen Lücken entwerten die oben explizit ausgeführten lokalen Tests n
 Echter DB-TLS-Nachweis: TLS1.3, SQL und UTC-Sitzung mit vertrauenswürdiger CA; Handshakeablehnung bei falscher CA und falschem Hostnamen, danach erneut erfolgreicher vertrauenswürdiger Verbindungsaufbau. Alle drei eigenen Container blieben ausschließlich im internen Docker-Netz; begrenzte hostseitige Loopback-Relays kompensieren dessen fehlende Port-Publikation. Keine Netzfreigabe zu externen Providern.
 
 Offen bleiben produktive Volumengröße, Schlüsselverwahrung, Retention, RPO/RTO, tatsächliche Produktionsrechte/-topologie und die autorisierte Betreiberprobe. Keine produktive Wiederherstellung oder Imageveröffentlichung ausgeführt.
+
+## Vollständiger Codestand CI130
+
+[CI130](https://github.com/pllanaio/segnitz-rental/actions/runs/35766988725) besteht zusätzlich den vollständigen Browserablauf17/17 und MySQL87/87, beide Unit-Gates342/342, Audit und CodeQL. Der neue Build-/Restorejob106879267560 verifiziert Merge-Checkout `554847c1d6d31d58e287ef9679adc26e05b5311e`, OCI-Digest `sha256:d17241c1d26d88e352d04e00ffb99b3106714a52e24d8f1faed7fd5c634ed514`, Archiv-SHA256 `ebab9c892c7be47d99cc8a7f9c676ded5959ea830896e472beb1288bfefb0395`,18 Blobs, SPDX/SLSAv1 und Trivy. Verschlüsselte Restorewiederholung:15,85 Sekunden synthetisch, bestanden. Diese Identität ersetzt nicht die eines nachfolgenden Dokumentationscommits; dessen abschließende Checks und Artefakte sind am PR-Head verlinkt. Produktionssignatur/Promotion und Betreiberbedingungen bleiben ausdrücklich offen.
