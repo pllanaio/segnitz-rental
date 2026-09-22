@@ -6,15 +6,22 @@ const { setTimeout: delay } = require('node:timers/promises');
 const express = require('express');
 const rateLimit = require('express-rate-limit');
 const session = require('express-session');
+const crypto = require('node:crypto');
 const { parseTrustProxy } = require('../config/proxy');
 const { registerHealthRoutes } = require('../services/healthRoutes');
 
 const { createRequestLimitOptions } = require('../middleware/requestLimits');
 
+function csrfTokensEqual(providedToken, expectedToken) {
+    const provided = Buffer.from(String(providedToken || ''), 'utf8');
+    const expected = Buffer.from(String(expectedToken || ''), 'utf8');
+    return expected.length > 0 && provided.length === expected.length && crypto.timingSafeEqual(provided, expected);
+}
+
 async function fixture(environment = {}) {
     const app = express();
     app.set('trust proxy', parseTrustProxy({ TRUST_PROXY: 'loopback', ...environment }));
-    const counters = { sessionReads: 0, writes: 0, readiness: 0 };
+    const counters = { sessionReads: 0, sessionMutations: 0, writes: 0, readiness: 0 };
     const closeHealth = registerHealthRoutes(app, { environment,
         installationState: () => 'ready', readiness: async () => { counters.readiness++; return { sessionTimeZone: '+00:00' }; } });
     const policy = createRequestLimitOptions({ HTTP_RATE_LIMIT_MAX: '3', HTTP_RATE_LIMIT_GLOBAL_MAX: '20', ...environment });
@@ -24,7 +31,20 @@ async function fixture(environment = {}) {
     store.get = (key, callback) => { counters.sessionReads++; get(key, callback); };
     app.use(express.json());
     app.use(session({ secret: 'isolated-rate-limit-session-fixture', store, resave: false, saveUninitialized: false }));
-    app.post('/fixture-session', (req, res) => { req.session.user = 'fixture'; res.json({ ok: true }); });
+    app.get('/csrf-token', (req, res) => {
+        if (!req.session.csrfToken) req.session.csrfToken = crypto.randomBytes(32).toString('hex');
+        res.set('Cache-Control', 'no-store').json({ csrfToken: req.session.csrfToken });
+    });
+    app.use((req, res, next) => {
+        if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
+        if (!csrfTokensEqual(req.get('X-CSRF-Token'), req.session.csrfToken)) {
+            return res.status(403).json({ error: 'Ungültiges oder fehlendes CSRF-Token.' });
+        }
+        return next();
+    });
+    app.post('/fixture-session', (req, res) => {
+        counters.sessionMutations++; req.session.user = 'fixture'; res.json({ ok: true });
+    });
     const stricter = rateLimit({ windowMs: 60000, limit: 1, standardHeaders: true, legacyHeaders: false,
         message: { error: 'Zu viele Login-Versuche.' } });
     app.post('/login', stricter, (req, res) => res.status(401).json({ error: 'Ungültige Anmeldung.' }));
@@ -37,24 +57,60 @@ async function fixture(environment = {}) {
     };
 }
 
+async function csrfHeaders(app, headers = {}) {
+    const response = await app.request('/csrf-token', { headers });
+    assert.equal(response.status, 200);
+    const cookie = response.headers.get('set-cookie').split(';')[0];
+    const { csrfToken } = await response.json();
+    return { ...headers, cookie, 'X-CSRF-Token': csrfToken };
+}
+
+test('the session fixture rejects missing, invalid and foreign-session CSRF tokens before mutation', async () => {
+    const app = await fixture({ HTTP_RATE_LIMIT_MAX: '20' });
+    try {
+        const missing = await app.request('/fixture-session', { method: 'POST' });
+        assert.equal(missing.status, 403); await missing.json();
+        const first = await app.request('/csrf-token');
+        const firstCookie = first.headers.get('set-cookie').split(';')[0];
+        const { csrfToken } = await first.json();
+        const other = await app.request('/csrf-token');
+        const otherCookie = other.headers.get('set-cookie').split(';')[0]; await other.json();
+        for (const headers of [
+            { cookie: firstCookie, 'X-CSRF-Token': 'invalid' },
+            { cookie: otherCookie, 'X-CSRF-Token': csrfToken }
+        ]) {
+            const rejected = await app.request('/fixture-session', { method: 'POST', headers });
+            assert.equal(rejected.status, 403); await rejected.json();
+        }
+        assert.equal(app.counters.sessionMutations, 0);
+        const accepted = await app.request('/fixture-session', {
+            method: 'POST', headers: { cookie: firstCookie, 'X-CSRF-Token': csrfToken }
+        });
+        assert.equal(accepted.status, 200); await accepted.json();
+        assert.equal(app.counters.sessionMutations, 1);
+    } finally { await app.close(); }
+});
+
 test('business requests are rejected before persisted session reads, parsing or expensive route work', async () => {
-    const app = await fixture();
+    const app = await fixture({ HTTP_RATE_LIMIT_MAX: '4' });
     try {
         const identity = { 'x-forwarded-for': '203.0.113.8' };
-        const created = await app.request('/fixture-session', { method: 'POST', headers: identity });
-        const cookie = created.headers.get('set-cookie').split(';')[0]; await created.json();
+        const headers = await csrfHeaders(app, identity);
+        const created = await app.request('/fixture-session', { method: 'POST', headers });
+        assert.equal(created.status, 200); await created.json();
+        const initialSessionReads = app.counters.sessionReads;
         for (const pathname of ['/products', '/cart']) {
-            const response = await app.request(pathname, { headers: { ...identity, cookie } });
+            const response = await app.request(pathname, { headers });
             assert.equal(response.status, 200); await response.json();
         }
-        assert.equal(app.counters.sessionReads, 2);
+        assert.equal(app.counters.sessionReads, initialSessionReads + 2);
         for (const pathname of ['/my-profile', '/admin/products', '/webhooks/mollie', '/img/returns/private']) {
-            const response = await app.request(pathname, { method: 'POST', headers: { ...identity, cookie, 'content-type': 'application/json' }, body: '{malformed' });
+            const response = await app.request(pathname, { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: '{malformed' });
             assert.equal(response.status, 429);
             assert.match(response.headers.get('retry-after'), /^\d+$/);
             assert.equal((await response.json()).code, 'REQUEST_RATE_LIMITED');
         }
-        assert.equal(app.counters.sessionReads, 2);
+        assert.equal(app.counters.sessionReads, initialSessionReads + 2);
         assert.equal(app.counters.writes, 2);
     } finally { await app.close(); }
 });
@@ -103,10 +159,11 @@ test('live bypasses exhaustion; ready and health share a bounded 503 quota witho
 });
 
 test('window expiry restores admission and a downstream stricter auth limit remains effective', async () => {
-    const app = await fixture({ HTTP_RATE_LIMIT_MAX: '2', HTTP_RATE_LIMIT_WINDOW_MS: '1000' });
+    const app = await fixture({ HTTP_RATE_LIMIT_MAX: '3', HTTP_RATE_LIMIT_WINDOW_MS: '1000' });
     try {
-        const first = await app.request('/login', { method: 'POST' }); assert.equal(first.status, 401); await first.json();
-        const second = await app.request('/login', { method: 'POST' }); assert.equal(second.status, 429);
+        const headers = await csrfHeaders(app);
+        const first = await app.request('/login', { method: 'POST', headers }); assert.equal(first.status, 401); await first.json();
+        const second = await app.request('/login', { method: 'POST', headers }); assert.equal(second.status, 429);
         assert.equal((await second.json()).error, 'Zu viele Login-Versuche.');
         const limited = await app.request('/products'); assert.equal(limited.status, 429); await limited.json();
         await delay(1100);

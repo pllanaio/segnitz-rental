@@ -84,3 +84,27 @@ enthält für jedes Subject die geprüften SBOM-/Provenance-Layerdigests und
 Predicate-Typen. Dieses Ergebnis zusammen mit Archivhash, Image-Digest, finalem
 Commit, vollständigen Gates und Signaturprüfung ist aufzubewahren. Ein Erfolg
 des älteren CI-124-Artefakts wäre kein Nachweis für den späteren Release-Commit.
+
+## Ergänzung: tatsächliche BuildKit-Kompatibilität in CI 125 bestätigt
+
+Am 13.09.2026 um 12:29:52 UTC bestätigte der unveränderte CLI-Aufruf `verify`
+in [CI-Job 103723568602](https://github.com/pllanaio/segnitz-rental/actions/runs/34757220852/job/103723568602)
+erfolgreich 18 OCI-Blobs, Scan und beide Attestierungen des dort gebauten Images.
+Der Job-Log wurde über den GitHub-Connector gelesen; ausschließlich seine
+Prüfsummen-/Typzusammenfassung wurde ausgewertet:
+
+| Identität | Im Job verifizierter Wert |
+| --- | --- |
+| Gebauter PR-Merge-Commit | `618bacbd0c09d0c50b23f33b0cc4ed829a326d84` |
+| Image-Index | `sha256:8cc0f248062ce904dc51b9a741b4354b534e2b4748f5c0dfb84049e42cd69799` |
+| OCI-Tararchiv SHA-256 | `83bfac1b4f3b127fad340c55d0d92813be81c4b528c2360260e4a33cbf203eab` |
+| Gemeinsames Anwendungsmanifest-Subject | `sha256:1ccb62af70a82805cf076e5f18b06717e402e038e89ce8539a48fb626179c641` |
+| SPDX-Layer | `sha256:d9c521747d0426395eca3adafca1bcb01ef09cf8a50d1c56075ceab1d8ae4779` |
+| SLSA-Layer | `sha256:c515508f942874dc55b60ce086572b57d8cf9f86f10fbb7fe08bd3d145bcb2a2` |
+
+Die tatsächlichen Predicate-Typen waren `https://spdx.dev/Document` und
+`https://slsa.dev/provenance/v1`. Damit ist die Kompatibilität des neuen
+Validators mit dem realen BuildKit-Ausgabeformat dieses Builds nachgewiesen.
+Der fehlgeschlagene lokale Transfer von CI 124 wird dadurch nicht als bestanden
+umgedeutet. Ebenso ersetzt dieser Teilnachweis weder die anderen Gates des
+CI-125-Laufs noch sämtliche Gates und Signaturen am späteren finalen Commit.

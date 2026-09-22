@@ -137,7 +137,7 @@ test('führt Admin-Navigation und dynamische Produktaktionen ohne Inline-Handler
     ]);
     await expect(page.locator('#productList')).toContainText(TEST_PRODUCT.title);
 
-    await page.getByRole('button', { name: 'Bearbeiten' }).click();
+    await page.locator(`[data-backend-action="edit-product"][data-product-id="${TEST_PRODUCT.id}"]`).click();
     await expect(page.locator('#title')).toHaveValue(TEST_PRODUCT.title);
 
     await page.getByRole('button', { name: 'Öffnungszeiten' }).click();

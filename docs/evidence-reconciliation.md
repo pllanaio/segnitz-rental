@@ -26,4 +26,8 @@ Der Treibervertrag prüft Seitenumfänge 1, 2, 4, 100, 1000 und die Konfiguratio
 
 Beide Tests verwenden ausschließlich synthetische Datensätze und einen ausdrücklich isolierten Provider-Callback. Sie führen keine echten Providerkontakte aus. Die neue, selbst angelegte Testdatenbank wird anschließend entfernt; eine Deployment-Datenbank wird nicht verändert.
 
-**Offener Ausführungsnachweis:** Die zwei neuen Integrationstests wurden lokal mangels MySQL/Docker nicht ausgeführt. Der nächste echte MySQL-CI-Lauf muss ihre Ergebnisse und das Ausbleiben von `ER_WRONG_ARGUMENTS` beim aktiven Abgleich bestätigen. Die lokale Treiberprüfung ersetzt diesen Nachweis nicht.
+## Tatsächliche MySQL-CI-Abnahme
+
+Beide neuen Integrationstests bestehen im [MySQL-Job 103723568754, CI-Lauf 125](https://github.com/pllanaio/segnitz-rental/actions/runs/34757220852/job/103723568754) auf Commit `24a2580df41c0227d46804af5d6107ecc40018dc`: Pagination/Timeout **281 ms**, aktiver periodischer Timer/Drain **1008 ms**. Die echten vorbereiteten Abfragen laufen ohne `ER_WRONG_ARGUMENTS`; der periodische Test prüft zusätzlich ein leeres Fehlerprotokoll. Insgesamt hat dieser MySQL-Job **85/87** Tests bestanden; die zwei Gastbestellungs-Tests scheiterten an einem fehlenden Testpostfach-Import, nicht am Reconciler.
+
+Damit ist der zuvor offene reale SQL-/Timer-Nachweis für diesen Fix erbracht. Die unveränderte lokale Einschränkung (kein MySQL/Docker) wird nicht als Fehlschlag ausgelegt. Der vollständige finale Release-Gatelauf und echte Provider-/Betriebsnachweise bleiben gesondert zu erbringen.

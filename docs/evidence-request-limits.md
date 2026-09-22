@@ -44,3 +44,28 @@ Diese Tests benutzen keine produktive DB, Auth-Identität oder Provider. Die Pla
 Die Schranken gelten pro Node-Prozess und werden bei dessen Neustart zurückgesetzt. Das passt zur vorhandenen einzelnen Anwendungsinstanz; mehrere Instanzen multiplizieren die Gesamtgrenze. Eine spätere Replikation benötigt einen bewusst abgestimmten Ingress-/gemeinsamen Quotenvertrag. Diese Änderung führt keinen neuen Dienst und keine vorgeschalteten DB-Schreibzugriffe ein.
 
 Normale Seitenassets, Adminaktionen und Webhooks zählen mit, weil auch ihre Verarbeitung Ressourcen benötigt. Abgewiesene Zahlungswebhooks werden nicht als verarbeitet quittiert; die vorhandene Reconciliation bleibt als Reparaturpfad nötig. Das Standardprofil erlaubt 600 Anfragen pro Minute je Client und 6000 je Instanz. Vor Produktionsfreigabe sind erwartete Nutzer hinter gemeinsamen NAT-Adressen, Monitoringfrequenz und die tatsächliche Proxy-Topologie mit diesem Profil abzugleichen. Vorhandene HTTP-Status-/Latenzmetriken erfassen auch die neuen 429-/503-Antworten.
+## CI-125-Folgekorrektur der isolierten Testanwendung
+
+CI-Lauf `34757220852`, CodeQL-Job `103723568669`, meldete nach den
+Ratenbegrenzungskorrekturen noch `js/missing-token-validation` an der
+Session-Middleware in `test/request-limits.test.js`. Die synthetische
+POST-Route zum Anlegen einer Testidentität hatte tatsächlich keinen
+CSRF-Check. Die Anwendungsgates und Produktionsmiddleware werden durch
+diese Folgekorrektur nicht geändert.
+
+Die Fixture gibt nun einen zufälligen, an ihre Session gebundenen Token aus
+und prüft vor jeder Mutation den Header `X-CSRF-Token` mit
+`crypto.timingSafeEqual`. Ein zusätzlicher HTTP-Verhaltenstest belegte vor
+dem Fix die ungeschützte Mutation (200 statt 403). Nach dem Fix werden
+fehlende, falsche und zu einer fremden Session gehörende Tokens vor jeder
+Sessionmutation abgewiesen; der passende Token erlaubt genau eine Mutation.
+Die vorhandenen Quoten-/Probe-/Sessionread-Tests bleiben wirksam und zählen
+den zusätzlich nötigen CSRF-Abruf mit.
+
+- `node --test test/request-limits.test.js`: vorher 5 grün/1 rot; nachher
+  6 grün, 0 übersprungen (Node 24.19.0).
+- `/workspace/scratch/3d9a8f0d5ab7/test-runtime/node22/bin/node --test test/request-limits.test.js`:
+  6 grün, 0 übersprungen (Node 22.22.2).
+
+Es gibt keine Query-Ausnahme und keinen unterdrückten Befund. Die erneute
+CodeQL-Ausführung am nachfolgenden endgültigen Commit bleibt als Gate nötig.

@@ -29,7 +29,7 @@ restore(root);
 
 
 class SyntheticWorkspace:
-    def __init__(self, image_id, command, containers, temp_directory):
+    def __init__(self, image_id, command, containers, temp_directory, relays=None):
         if not re.fullmatch(r'sha256:[a-f0-9]{64}', image_id):
             raise ValueError('Immutable rehearsal image ID required')
         self.image_id = image_id
@@ -39,6 +39,7 @@ class SyntheticWorkspace:
         self.mounts = []
         self.uid, self.gid = os.getuid(), os.getgid()
         self.root = None
+        self.relays = relays if relays is not None else []
 
     def __enter__(self):
         # No implicit TemporaryDirectory finalizer: failed writer shutdown must
@@ -71,6 +72,14 @@ class SyntheticWorkspace:
                 '-e', OWNERSHIP_SCRIPT, str(self.uid), str(self.gid), '/owned'], timeout=40)
 
     def __exit__(self, exception_type, exception, traceback):
+        # Relays hold only fixed loopback sockets. Close them before any writer
+        # or filesystem cleanup, including while an HTTP/MySQL call has failed.
+        relay_failed = False
+        for relay in self.relays:
+            try:
+                relay.close()
+            except RuntimeError:
+                relay_failed = True
         stop_failed = False
         # IDs come only from successful create commands in this run. No broad
         # Docker discovery, existing-volume removal or database reset is allowed.
@@ -81,6 +90,8 @@ class SyntheticWorkspace:
                 stop_failed = True
         if stop_failed:
             raise RuntimeError('Synthetic writer cleanup failed; workspace retained') from None
+        if relay_failed:
+            raise RuntimeError('Synthetic relay cleanup failed; workspace retained') from None
         self.restore_ownership(self.mounts)
         shutil.rmtree(self.root)
         return False

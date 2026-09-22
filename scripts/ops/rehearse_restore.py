@@ -22,6 +22,7 @@ import urllib.request
 
 import backup_restore
 from rehearsal_workspace import SyntheticWorkspace
+from rehearsal_network import container_loopback_port
 from rehearse_restore_tls import create_certificates, MYSQL_TLS_ENTRYPOINT
 
 MYSQL_IMAGE = 'mysql:8.4.11@sha256:b3b90af2a6552ae30c266fdb7d5dd55f3afb72404bb78d37fe8a23eb857fd3fb'
@@ -131,10 +132,12 @@ def run_rehearsal(args):
                 'imageRepoDigests': image.get('RepoDigests') or [], 'sourceRevision': script_revision,
                 'mysqlImage': MYSQL_IMAGE, 'applicationSmokeVerified': False}
     containers = []
+    relays = []
+    evidence['containerNetworkAcceptance'] = []
     network = None
     stage = 'start'
     started = time.monotonic()
-    workspace = SyntheticWorkspace(image_id, command, containers, args.temp_directory)
+    workspace = SyntheticWorkspace(image_id, command, containers, args.temp_directory, relays=relays)
     try:
         with workspace as temporary:
             root = Path(temporary)
@@ -159,7 +162,8 @@ def run_rehearsal(args):
                 '--env-file', str(root / 'mysql.env'), '-p', '127.0.0.1::3306', '--memory=1g', '--cpus=2',
                 MYSQL_IMAGE, '-c', MYSQL_TLS_ENTRYPOINT]).strip()
             containers.append(db_container)
-            port = json.loads(command(['docker', 'inspect', '--format', '{{json .NetworkSettings.Ports}}', db_container]))['3306/tcp'][0]['HostPort']
+            stage = 'database-endpoint'
+            port = container_loopback_port(command, db_container, network, 3306, containers, relays, evidence['containerNetworkAcceptance'])
             config = root / 'client.cnf'
             private_text(config, f'[client]\nuser=root\npassword={password}\nhost=127.0.0.1\nport={port}\nprotocol=TCP\n'
                          f'ssl-mode=VERIFY_IDENTITY\nssl-ca={certificates / "ca.pem"}\n')
@@ -200,7 +204,7 @@ def run_rehearsal(args):
                     command_args.extend(['node', 'scripts/ops/restore-rehearsal-fixture.js'])
                 container = command(command_args).strip()
                 containers.append(container)
-                app_port = json.loads(command(['docker', 'inspect', '--format', '{{json .NetworkSettings.Ports}}', container]))['3000/tcp'][0]['HostPort']
+                app_port = container_loopback_port(command, container, network, 3000, containers, relays, evidence['containerNetworkAcceptance'])
                 deadline = time.monotonic() + 120
                 while True:
                     try:
@@ -285,8 +289,10 @@ def run_rehearsal(args):
                 'providersContacted': False, 'restoreVerified': True, 'elapsedSeconds': round(time.monotonic() - started, 2)})
         evidence['syntheticWritersAndFilesCleaned'] = True
         print(json.dumps({'event': 'restore.rehearsal.passed', 'elapsedSeconds': evidence['elapsedSeconds']}))
-    except BaseException:
+    except BaseException as error:
         evidence.update({'failedStage': stage, 'restoreVerified': False, 'elapsedSeconds': round(time.monotonic() - started, 2)})
+        if hasattr(error, 'code') and re.fullmatch(r'RESTORE_[A-Z_]+', str(error.code)):
+            evidence['failureCode'] = error.code
         raise
     finally:
         # Workspace exit stops every created writer and restores host ownership

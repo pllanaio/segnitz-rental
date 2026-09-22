@@ -124,7 +124,10 @@ async function checkout(page, method, product) {
     await page.mouse.up();
     await page.locator('#agbs').check();
     await page.locator('#dsgvo').check();
-    await page.locator(method === 'cash' ? '#paymentMethodCash' : '#paymentMethodOnline').check();
+    const paymentRadio = page.locator(method === 'cash' ? '#paymentMethodCash' : '#paymentMethodOnline');
+    // The native radio is visually hidden; users activate its visible label.
+    await page.locator('label.payment-option-card').filter({ has: paymentRadio }).click();
+    await expect(paymentRadio).toBeChecked();
     const termsVersion = await page.locator('#termsVersion').inputValue();
     await page.locator('#termsVersion').evaluate(input => { input.value = 'obsolete-test-version'; });
     const conflictPromise = page.waitForResponse(response => response.url().endsWith('/data') && response.request().method() === 'POST');

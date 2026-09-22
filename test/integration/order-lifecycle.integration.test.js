@@ -8,6 +8,7 @@ const { setTimeout: delay } = require('node:timers/promises');
 const path = require('node:path');
 const mysql = require('mysql2/promise');
 const dbConfig = require('../../config/db');
+const { readAuthMailToken } = require('../support/auth-mail');
 const {
     execute,
     queryRows,
@@ -175,10 +176,8 @@ async function completeEmailVerification(client, token) {
         { redirect: 'manual' }
     );
     assert.equal(inspectResponse.status, 302, await inspectResponse.text());
-    assert.equal(
-        inspectResponse.headers.get('location'),
-        `/verify-email.html#token=${token}`
-    );
+    assert.ok(inspectResponse.headers.get('location') === `/verify-email.html#token=${token}`,
+        'Verifikations-Redirect muss denselben Code enthalten, ohne ihn in Testdiagnostik auszugeben.');
 
     const completeResponse = await client.request('/verify-email/complete', {
         method: 'POST',
@@ -571,8 +570,7 @@ test('bindet Gastbestellungen dauerhaft an die erzeugende Session, auch nachdem 
     finally { await mailbox.end(); }
 
     const createResponse = await submitOrder();
-    const order = await createResponse.json();
-    assert.equal(createResponse.status, 200, JSON.stringify(order));
+    const order = await readCreatedOrder(createResponse, 'online');
 
     const paidPaymentId = `tr_test_paid_guest_binding_${order.orderId}`;
     await execute(

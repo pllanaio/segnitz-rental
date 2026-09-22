@@ -51,7 +51,13 @@ den regulären isolierten Testserver. Neu ergänzt ist außerdem ein tatsächlic
 API-/MySQL-Test am Ende von `app.integration.test.js`: zwei stabile Seiten mit
 gleichen Titeln, Unicode-Roundtrip, Suche UND Kategorie, wörtliche SQL-Metazeichen,
 nur zugehörige Bilder/Kategorien, unsichtbare inaktive Produkte und JSON-400 für
-ungültige Parameter. **Seine reale MySQL-Ausführung und der erneute ungemockte
-Playwright-Hauptablauf auf dem endgültigen Commit stehen noch aus.** Das bestehende
-DB-Query-/Transaktionsbudget begrenzt auch diese Abfragen; ein Lastnachweis für
-sehr große Kataloge wird nicht aus den Fixturetests abgeleitet.
+ungültige Parameter. Dieser Test besteht jetzt tatsächlich auf MySQL 8.4.11 im
+[CI-Lauf 34757220852](https://github.com/pllanaio/segnitz-rental/actions/runs/34757220852),
+Job `103723568754`, Checkout `618bacbd0c09d0c50b23f33b0cc4ed829a326d84`
+(PR-Kopf `24a2580df41c0227d46804af5d6107ecc40018dc`). Der Gesamtjob steht bei
+**85/87 bestanden, 0 übersprungen**; ausschließlich zwei Gastidentitäts-Tests
+scheiterten am fehlenden Testhelfer `readAuthMailToken`.
+**Der erneute ungemockte Playwright-Hauptablauf und das vollständige Gate auf dem
+endgültigen Commit bleiben gesonderte Nachweise.** Das bestehende DB-Query-/
+Transaktionsbudget begrenzt auch diese Abfragen; ein Lastnachweis für sehr große
+Kataloge wird nicht aus den Fixturetests abgeleitet.
