@@ -47,6 +47,7 @@ module.exports = defineConfig({
             PORT: String(port),
             BASE_URL: baseURL,
             NODE_ENV: 'test',
+            TRUST_PROXY: '127.0.0.1/32,::1/128',
             MOLLIE_TEST_MODE: '1',
             MAIL_DELIVERY_PAUSED: '1',
             DISABLE_EMAILS: '1',

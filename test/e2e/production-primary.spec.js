@@ -9,6 +9,15 @@ const path = require('node:path');
 const { createPrimaryScenarioFixtures, TEST_ADMIN, TEST_FOREIGN_USER } = require('../support/test-database');
 const { addIsoCalendarDays } = require('../../utils/businessDate');
 
+// A 200 online response navigates across origins. Assert its status and inspect
+// the actual provider redirect plus persisted own API state; Chromium may drop
+// the old renderer response body. Pending/cash bodies remain directly asserted.
+const providerObservations = new WeakMap();
+function captureCheckoutResponse(page, endpoint, online = true) {
+    return page.waitForResponse(response => response.url().endsWith(endpoint) && response.request().method() === 'POST')
+        .then(async response => ({ status: response.status(), body: online && response.status() === 200 ? null : await response.json() }));
+}
+
 const today = () => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Berlin' }).format(new Date());
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
 
@@ -40,16 +49,17 @@ async function waitForPreparedPayment(page, orderId) {
 }
 async function retryCheckoutThroughUi(page, orderId) {
     for (let attempt = 0; attempt < 3; attempt++) {
-        const responsePromise = page.waitForResponse(response => response.url().endsWith(`/orders/${orderId}/mollie-checkout`) && response.request().method() === 'POST');
+        const responsePromise = captureCheckoutResponse(page, `/orders/${orderId}/mollie-checkout`);
         await page.locator('[data-frontend-action="retry-payment"]').click();
         const response = await responsePromise;
-        const result = await response.json();
-        if (response.status() === 200) {
-            expect(typeof result.checkoutUrl).toBe('string');
+        const result = response.body;
+        if (response.status === 200) {
             await expect(page).toHaveURL(/^https:\/\/checkout\.test\.mollie\.local\//);
-            return result;
+            const redirect = providerObservations.get(page);
+            expect(redirect.orderId).toBe(orderId);
+            return { checkoutUrl: page.url() };
         }
-        expect(response.status()).toBe(202);
+        expect(response.status).toBe(202);
         expect(result.paymentPending).toBe(true);
         expect(Boolean(result.checkoutUrl)).toBe(false);
         await expect(page.locator('#globalAlertContainer')).toContainText(/vorbereitet/);
@@ -136,21 +146,28 @@ async function checkout(page, method, product) {
     await expect(page.locator('#globalAlertContainer')).toContainText('Vertragsdokumente wurden geändert');
     await expect(page.locator('#globalAlertContainer')).not.toContainText('Bitte loggen Sie sich ein');
     await page.locator('#termsVersion').evaluate((input, value) => { input.value = value; }, termsVersion);
-    const responsePromise = page.waitForResponse(response => response.url().endsWith('/data') && response.request().method() === 'POST');
+    // Begin reading before Enter can finish cross-origin navigation.
+    const responsePromise = captureCheckoutResponse(page, '/data', method === 'online');
     // Real semantic form submission, including the Enter-key path.
     await page.locator('#submit-btn').focus();
     await page.keyboard.press('Enter');
     const response = await responsePromise;
-    const order = await response.json();
+    let order = response.body;
+    if (method === 'online' && response.status === 200) {
+        await expect(page).toHaveURL(/^https:\/\/checkout\.test\.mollie\.local\//);
+        const redirect = providerObservations.get(page);
+        const persisted = await readOrder(page, redirect.orderId);
+        order = { orderId: redirect.orderId, orderNo: persisted.order_no, checkoutUrl: page.url() };
+    }
     expect(order.orderId).toBeGreaterThan(0);
-    if (method === 'online' && response.status() === 202) {
+    if (method === 'online' && response.status === 202) {
         expect(order.paymentPending).toBe(true);
         expect(Boolean(order.checkoutUrl)).toBe(false);
         await expect(page.locator('#paymentResultTitle')).toHaveText('Online-Zahlung wird vorbereitet');
         await waitForPreparedPayment(page, order.orderId);
         await retryCheckoutThroughUi(page, order.orderId);
     } else {
-        expect(response.status()).toBe(200);
+        expect(response.status).toBe(200);
         if (method === 'online') expect(typeof order.checkoutUrl).toBe('string');
     }
     return { ...order, start, end: addIsoCalendarDays(start, 2) };
@@ -171,9 +188,13 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
     test(`Hauptablauf mit echten APIs: Barzahlung, Rückgabe, private Belege, Online-Retry (${viewport.width}px)`, async ({ browser, baseURL }, testInfo) => {
         test.setTimeout(180000);
         const scenario = await createPrimaryScenarioFixtures(`${viewport.width}-retry-${testInfo.retry}`);
-        const customerContext = await browser.newContext({ baseURL, viewport });
-        const adminContext = await browser.newContext({ baseURL, viewport });
-        const foreignContext = await browser.newContext({ baseURL, viewport });
+        // Model distinct clients behind the explicitly trusted loopback test proxy.
+        // Real global/client/auth limits remain enabled and unchanged.
+        const clientBase = (viewport.width === 1280 ? 10 : 40) + testInfo.retry * 10;
+        const contextOptions = offset => ({ baseURL, viewport, extraHTTPHeaders: { 'X-Forwarded-For': `192.0.2.${clientBase + offset}` } });
+        const customerContext = await browser.newContext(contextOptions(1));
+        const adminContext = await browser.newContext(contextOptions(2));
+        const foreignContext = await browser.newContext(contextOptions(3));
         for (const context of [customerContext, adminContext, foreignContext]) {
             context.setDefaultTimeout(15000);
             context.setDefaultNavigationTimeout(30000);
@@ -252,6 +273,7 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
             await customer.route('https://checkout.test.mollie.local/**', async route => {
                 const id = new URL(route.request().url()).pathname.slice(1);
                 const fixture = JSON.parse(await fs.readFile(path.join(process.env.MOLLIE_TEST_FIXTURES_DIR, `${id}.json`), 'utf8'));
+                providerObservations.set(customer, { orderId: Number(fixture.metadata.orderId) });
                 await route.fulfill({ contentType: 'text/html', body: `<html lang="de"><title>Isolierter Zahlungsanbieter</title><a href="${baseURL}/index.html?payment=return&amp;orderId=${Number(fixture.metadata.orderId)}">Zurück zum Mietauftrag</a></html>` });
             });
             const online = await checkout(customer, 'online', scenario.product);
