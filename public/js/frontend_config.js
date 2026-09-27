@@ -957,7 +957,6 @@ async function loadUserProfileIntoForm() {
         document.getElementById('LastName').value = user.lastName || '';
         document.getElementById('CustomerCompany').value = user.company || '';
         document.getElementById('CustomerEmail').value = user.email || '';
-        prefillFinalEmailField(user.email);
         document.getElementById('CustomerPhone').value = user.phone || '';
         document.getElementById('CustomerAddress').value = user.address || '';
         document.getElementById('CustomerZip').value = user.zip || '';
@@ -1096,8 +1095,6 @@ function validateCustomerDataStep() {
         return false;
     }
 
-    const email = document.getElementById('CustomerEmail').value.trim();
-    prefillFinalEmailField(email);
 
     return true;
 }
@@ -1356,14 +1353,6 @@ function calculateRentalDays(startDate, endDate) {
 
 function formatCurrency(value) {
     return `${Number(value || 0).toFixed(2).replace('.', ',')} €`;
-}
-
-function prefillFinalEmailField(email) {
-    const finalEmailInput = document.getElementById('email');
-
-    if (!finalEmailInput || !email) return;
-
-    finalEmailInput.value = email;
 }
 
 async function loadCart() {
