@@ -1,3 +1,5 @@
+const { captureReceipt } = require('./services/receiptService');
+const { sendCompletedOrderEmail, sendSavedReturnEmail, sendBookingReceivedEmail } = require('./services/mailService');
 const express = require("express");
 const app = express();
 const path = require("path");
@@ -1309,6 +1311,7 @@ app.post('/data', guestOrderLimiter, async (req, res) => {
                 }
             });
 
+            await sendBookingReceivedEmail(connection, await captureReceipt(connection, orderId, 'order'), orderId);
             await connection.commit();
             rememberGuestOrder(req, orderId);
             if (orderAccessGrant) setOrderAccessCookie(res, orderId, orderAccessGrant);
@@ -1504,7 +1507,7 @@ app.post('/register-customer', accountMutationLimiter, async (req, res) => {
             () => mysql.createConnection(dbConfig),
             async connection => {
                 const [existingUsers] = await connection.execute(
-                    `SELECT id, role, email_verified, customer_no, verification_token,
+                    `SELECT id, password, role, email_verified, customer_no, verification_token,
                             verification_expires > NOW() AS verification_token_valid
                      FROM users
                      WHERE username = ?
@@ -1519,6 +1522,13 @@ app.post('/register-customer', accountMutationLimiter, async (req, res) => {
                         !['global_admin', 'bearbeiter'].includes(existingUser.role) &&
                         Number(existingUser.email_verified) !== 1
                     ) {
+                        // A registration retry may resend its confirmation, but must
+                        // not confirm a different registration's password/profile.
+                        if (!(await bcrypt.compare(password, existingUser.password))) {
+                            const error = new Error('Für diese E-Mail existiert bereits ein unbestätigtes Konto. Verwenden Sie das ursprüngliche Registrierungspasswort.');
+                            error.statusCode = 409;
+                            throw error;
+                        }
                         const existingTokenIsUsable =
                             Number(existingUser.verification_token_valid) === 1 &&
                             /^[a-f0-9]{64}$/u.test(String(existingUser.verification_token || ''));
@@ -1679,16 +1689,13 @@ app.post('/verify-email/complete', async (req, res) => {
         );
 
         if (users.length > 0) {
-            const resetToken = crypto.randomBytes(32).toString('hex');
-            const resetTokenExpires = new Date(Date.now() + 30 * 60 * 1000);
-            const unusablePassword = await bcrypt.hash(crypto.randomBytes(48).toString('hex'), 10);
             const [updateResult] = await connection.execute(
                 `UPDATE users
-                 SET email_verified = 1, password = ?, verification_token = NULL,
-                     verification_expires = NULL, reset_token = ?, reset_token_expires = ?,
+                 SET email_verified = 1, verification_token = NULL,
+                     verification_expires = NULL, reset_token = NULL, reset_token_expires = NULL,
                      auth_version = auth_version + 1
                  WHERE id = ? AND verification_token = ? AND verification_expires > NOW()`,
-                [unusablePassword, resetToken, resetTokenExpires, users[0].id, token]
+                [users[0].id, token]
             );
             if (Number(updateResult.affectedRows) !== 1) {
                 await connection.rollback();
@@ -1696,7 +1703,7 @@ app.post('/verify-email/complete', async (req, res) => {
             }
             await connection.commit();
             return res.json({
-                redirectTo: `/login.html#resetToken=${encodeURIComponent(resetToken)}&registrationComplete=1`
+                redirectTo: '/email-verified.html'
             });
         }
 
@@ -2349,26 +2356,7 @@ ORDER BY id DESC`,
     }
 });
 
-async function syncMollieRefundsForPayment(connection, paymentId, prefetchedRefunds = null) {
-    const refunds = prefetchedRefunds || await listMollieRefundsForPayment(paymentId);
-    const refundList =
-        refunds?._embedded?.refunds ||
-        refunds?._embedded?.payment_refunds ||
-        (Array.isArray(refunds) ? refunds : []);
-
-    for (const refund of refundList) {
-        if (!refund?.id) continue;
-
-        const status = mapMollieRefundStatus(refund.status);
-        await connection.execute(
-            `UPDATE rental_order_payments
-             SET payment_status = ?,
-                 paid_at = CASE WHEN ? = 'paid' THEN COALESCE(paid_at, NOW()) ELSE NULL END
-             WHERE mollie_refund_id = ?`,
-            [status, status, refund.id]
-        );
-    }
-}
+const { syncMollieRefundsForPayment } = require('./services/mollieRefunds');
 
 async function refreshCancelledOrderPaymentStatus(connection, orderId) {
     const [rows] = await connection.execute(
@@ -2414,7 +2402,7 @@ async function refreshCancelledOrderPaymentStatus(connection, orderId) {
 
 async function refreshReturnCaseStatus(connection, orderId) {
     const [orderRows] = await connection.execute(
-        `SELECT status, payment_status
+        `SELECT status, payment_status, return_case_status
          FROM rental_orders
          WHERE id = ?
          LIMIT 1`,
@@ -2499,6 +2487,9 @@ async function refreshReturnCaseStatus(connection, orderId) {
         [returnCaseStatus, orderId]
     );
 
+    if (returnCaseStatus === 'closed' && orderRows[0].return_case_status !== 'closed' && orderRows[0].status === 'returned') {
+        await sendCompletedOrderEmail(connection, orderId);
+    }
     return returnCaseStatus;
 }
 
@@ -2698,7 +2689,7 @@ async function createOnlineCancellationRefund(connection, {
          AND payment_type IN (
             'deposit_refund',
             'order_cancellation_refund',
-            'duplicate_payment_refund'
+            'duplicate_payment_refund', 'refund_record', 'chargeback'
          )
          AND payment_status NOT IN ('failed', 'cancelled')`,
         [order.id, paymentId]
@@ -2896,10 +2887,31 @@ async function refundDuplicateOnlinePayment(
     return 'pending';
 }
 
+const customerCancellationServices = {
+    cancelOpenMolliePayments, createCancellationRefunds,
+    refreshCancelledOrderPaymentStatus, sendOrderCancelledEmail
+};
+require('./routes/contractDeclarations').registerContractDeclarations(app, {
+    createConnection: () => mysql.createConnection(dbConfig),
+    transact: runInTransactionWithRetry, checkAdmin,
+    limiter: rateLimit({ windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: true, legacyHeaders: false,
+        message: { error: 'Zu viele Anfragen. Bitte versuchen Sie es später erneut oder kontaktieren Sie uns direkt.' } }),
+    cancellationServices: customerCancellationServices
+});
+
 app.post('/my-orders/:id/cancel', async (req, res) => {
-    return res.status(403).json({
-        error: 'Stornierungen können nur durch einen Administrator durchgeführt werden.'
-    });
+    if (!req.session?.user) return res.status(401).json({ error: 'Bitte anmelden.' });
+    try {
+        const result = await runInTransactionWithRetry(() => mysql.createConnection(dbConfig), connection =>
+            require('./services/customerCancellation').cancelCustomerOrder(
+                connection, req.params.id, req.session.user, customerCancellationServices
+            )
+        );
+        return res.json({ ...result, message: 'Die Bestellung wurde kostenfrei storniert. Etwaige Erstattungen werden abgewickelt.' });
+    } catch (error) {
+        if (error.statusCode) return res.status(error.statusCode).json({ error: error.message });
+        return sendTransactionFailure(res, error, 'Bestellung konnte nicht storniert werden.');
+    }
 });
 
 app.post('/my-orders/:orderId/items/:itemId/cancel', async (req, res) => {
@@ -3856,21 +3868,23 @@ app.post('/admin/order-items/:itemId/return-images', checkAdmin, adminReturnMuta
 
         const uploadedByUserId = await getUserIdByEmail(connection, req.session.user);
 
+        const images = [];
         for (const file of uploadedFiles) {
             const imagePath = `img/returns/${file.filename}`;
 
-            await connection.execute(
+            const [insert] = await connection.execute(
                 `INSERT INTO rental_order_return_images
                  (order_id, order_item_id, image_path, uploaded_by_user_id)
                  VALUES (?, ?, ?, ?)`,
                 [item.order_id, item.id, imagePath, uploadedByUserId]
             );
+            images.push({ id: insert.insertId, imagePath });
         }
 
         await connection.commit();
         committed = true;
 
-        res.json({ message: 'Rückgabefotos für den Artikel wurden hochgeladen.' });
+        res.json({ message: 'Rückgabefotos für den Artikel wurden hochgeladen.', images });
 
     } catch (error) {
         if (connection && !committed) {
@@ -3967,6 +3981,7 @@ app.post('/admin/order-items/:itemId/send-return-summary', checkAdmin, async (re
 
         await sendReturnSummaryEmail(
             {
+                id: item.orderId || item.order_id,
                 order_no: item.order_no,
                 customer_email: item.customer_email
             },
@@ -3979,7 +3994,7 @@ app.post('/admin/order-items/:itemId/send-return-summary', checkAdmin, async (re
         );
 
         res.json({
-            message: 'Rückgabe-Abschlussmail wurde versendet.'
+            message: 'Rückgabe-Mail mit PDF-Beleg wurde zum Versand vorgemerkt.'
         });
 
     } catch (error) {
@@ -4263,6 +4278,7 @@ FOR UPDATE`,
                         operationKey: `mail-rental-adjustment-${paymentOperationKey}`,
                         message: {
                             to: item.customer_email,
+                            receipt: await captureReceipt(connection, item.order_id, 'extension', req.params.itemId),
                             subject: `Mietzeitraum zu Auftrag ${item.order_no} wurde angepasst`,
                             htmlTemplate: `
                                 <h2>Ihr Mietzeitraum wurde angepasst</h2>
@@ -4984,6 +5000,7 @@ FOR UPDATE`,
             });
         }
 
+        await sendSavedReturnEmail(connection, item.order_id, req.params.itemId);
         await refreshReturnCaseStatus(connection, item.order_id);
         await connection.commit();
 
@@ -5030,12 +5047,38 @@ app.delete('/admin/return-images/:id', checkAdmin, async (req, res) => {
     try {
         connection = await mysql.createConnection(dbConfig);
 
-        const [rows] = await connection.execute(
-            `SELECT image_path
+        const [imageReferences] = await connection.execute(
+            `SELECT order_item_id
              FROM rental_order_return_images
              WHERE id = ?
              LIMIT 1`,
             [req.params.id]
+        );
+
+        if (imageReferences.length === 0) {
+            return res.status(404).json({ error: 'Foto nicht gefunden.' });
+        }
+
+        await connection.beginTransaction();
+        // Lock the item before its image, just like return finalization/uploads.
+        // A concurrent finalization must finish before deletion is evaluated.
+        const [items] = await connection.execute(
+            `SELECT item_status, returned_at FROM rental_order_items
+             WHERE id = ? FOR UPDATE`,
+            [imageReferences[0].order_item_id]
+        );
+        if (items.length === 0 || items[0].returned_at ||
+            String(items[0].item_status || '').startsWith('returned_')) {
+            await connection.rollback();
+            return res.status(409).json({
+                error: 'Fotos einer festgeschriebenen Rückgabe können nicht gelöscht werden.'
+            });
+        }
+
+        const [rows] = await connection.execute(
+            `SELECT image_path FROM rental_order_return_images
+             WHERE id = ? AND order_item_id = ? FOR UPDATE`,
+            [req.params.id, imageReferences[0].order_item_id]
         );
 
         if (rows.length === 0) {
@@ -5045,6 +5088,7 @@ app.delete('/admin/return-images/:id', checkAdmin, async (req, res) => {
 
         const filename = getStoredReturnImageFilename(rows[0].image_path);
         if (!filename) {
+            await connection.rollback();
             return res.status(409).json({ error: 'Der gespeicherte Fotopfad ist ungültig.' });
         }
         const imagePath = path.join(RETURN_IMAGE_DIRECTORY, filename);
@@ -5058,8 +5102,10 @@ app.delete('/admin/return-images/:id', checkAdmin, async (req, res) => {
             fs.unlinkSync(imagePath);
         }
 
+        await connection.commit();
         res.json({ message: 'Rückgabefoto wurde gelöscht.' });
     } catch (error) {
+        if (connection) await connection.rollback();
         console.error('Fehler beim Löschen des Rückgabefotos:', error);
         res.status(500).json({ error: 'Rückgabefoto konnte nicht gelöscht werden.' });
     } finally {
@@ -5927,6 +5973,7 @@ app.post('/orders/:id/payment-status/sync', async (req, res) => {
 
             const expectedPaymentId = paymentRows[0].mollie_payment_id;
             await connection.commit();
+            await reconcileMolliePayment(expectedPaymentId);
 
             const [molliePayment, prefetchedRefunds] = await Promise.all([
                 getMolliePayment(expectedPaymentId),
@@ -5953,6 +6000,12 @@ app.post('/orders/:id/payment-status/sync', async (req, res) => {
             }
             paymentRows[0] = refreshedPaymentRows[0];
             const mappedPaymentStatus = mapMolliePaymentStatus(molliePayment.status);
+            if (molliePayment.chargebacks?.some(chargeback => !chargeback.reversedAt)) {
+                await connection.commit();
+                return res.json({ id: orderId, payment_status: 'charged_back',
+                    mollie_payment_status: molliePayment.status, mollie_payment_method: molliePayment.method || null });
+            }
+
             const wasOffsetAgainstDeposit =
                 paymentRows[0].payment_status === 'offset' ||
                 String(paymentRows[0].note || '').includes('Kaution verrechnet');
@@ -6145,12 +6198,20 @@ app.post('/orders/:id/payment-status/sync', async (req, res) => {
 
         const expectedPaymentId = order.mollie_payment_id;
         await connection.commit();
+        await reconcileMolliePayment(expectedPaymentId);
         const [payment, prefetchedRefunds] = await Promise.all([
             getMolliePayment(expectedPaymentId),
             listMollieRefundsForPayment(expectedPaymentId)
         ]);
         await connection.beginTransaction();
         const publicPaymentStatus = mapMolliePaymentStatus(payment.status);
+        if (payment.chargebacks?.some(chargeback => !chargeback.reversedAt)) {
+            await connection.commit();
+            return res.json({ id: order.id, orderNo: order.orderNo, status: order.status,
+                payment_status: 'charged_back', mollie_payment_status: payment.status,
+                mollie_payment_method: payment.method || null });
+        }
+
 
         const [lockedOrders] = await connection.execute(
             `SELECT id, cart_id, order_no, status, payment_method, payment_status,
@@ -6739,7 +6800,7 @@ app.post('/admin/order-payments/:id/retry-refund', checkAdmin, adminReturnMutati
              FROM rental_order_payments
              WHERE order_id = ?
              AND mollie_payment_id = ?
-             AND payment_type IN ('deposit_refund', 'order_cancellation_refund', 'duplicate_payment_refund')
+             AND payment_type IN ('deposit_refund', 'order_cancellation_refund', 'duplicate_payment_refund', 'refund_record', 'chargeback')
              AND payment_status NOT IN ('failed', 'cancelled')
              FOR UPDATE`,
             [failedRefund.order_id, failedRefund.mollie_payment_id]
@@ -7106,14 +7167,12 @@ async function refundEligibleDepositsAfterPaymentsSettled(connection, orderId) {
     }
 }
 
-app.post('/webhooks/mollie', async (req, res) => {
+async function reconcileMolliePayment(paymentId) {
     let connection;
 
     try {
-        const paymentId = req.body.id;
-
         if (!paymentId) {
-            return res.sendStatus(200);
+            return;
         }
 
         const [payment, prefetchedRefunds] = await Promise.all([
@@ -7126,8 +7185,13 @@ app.post('/webhooks/mollie', async (req, res) => {
 
         const mappedPaymentStatus = mapMolliePaymentStatus(payment.status);
         await syncMollieRefundsForPayment(connection, payment.id, prefetchedRefunds);
+        const dispute = await require('./services/mollieChargebacks').syncMollieChargebacks(connection, payment);
+        if (dispute.orderId) await refreshReturnCaseStatus(connection, dispute.orderId);
+        if (dispute.active) {
+            await connection.commit();
+            return;
+        }
 
-        let isDuplicateEvent = false;
         try {
             await connection.execute(
                 `INSERT INTO mollie_webhook_events
@@ -7139,7 +7203,6 @@ app.post('/webhooks/mollie', async (req, res) => {
             if (!isDuplicateKeyError(duplicateEventError)) {
                 throw duplicateEventError;
             }
-            isDuplicateEvent = true;
         }
 
         const [cashPaidRows] = await connection.execute(
@@ -7183,7 +7246,7 @@ app.post('/webhooks/mollie', async (req, res) => {
                 );
                 await refreshReturnCaseStatus(connection, cashPaidRows[0].order_id);
                 await connection.commit();
-                return res.sendStatus(200);
+                return;
             }
 
             await updateMollieSourcePaymentStatus(connection, {
@@ -7197,7 +7260,7 @@ app.post('/webhooks/mollie', async (req, res) => {
             });
 
             await connection.commit();
-            return res.sendStatus(200);
+            return;
         }
 
         const [paymentContextRows] = await connection.execute(
@@ -7277,7 +7340,7 @@ app.post('/webhooks/mollie', async (req, res) => {
             });
             await refreshReturnCaseStatus(connection, paymentContext.order_id);
             await connection.commit();
-            return res.sendStatus(200);
+            return;
         }
 
         if (additionalPaymentWasCancelled) {
@@ -7326,7 +7389,7 @@ app.post('/webhooks/mollie', async (req, res) => {
             }
 
             await connection.commit();
-            return res.sendStatus(200);
+            return;
         }
 
         if (paymentContext) {
@@ -7354,57 +7417,6 @@ app.post('/webhooks/mollie', async (req, res) => {
             await refreshReturnCaseStatus(connection, paymentContext.order_id);
         }
 
-        if (mappedPaymentStatus === 'charged_back' && !isDuplicateEvent && paymentContext) {
-            await connection.execute(
-                `UPDATE rental_orders
-                 SET payment_status = 'charged_back',
-                     return_case_status = 'payment_dispute'
-                 WHERE id = ?`,
-                [paymentContext.order_id]
-            );
-
-            const chargebackSourceTypes = getMollieSourcePaymentTypes(
-                paymentContext.payment_type
-            );
-            const chargebackSourcePlaceholders = chargebackSourceTypes
-                .map(() => '?')
-                .join(', ');
-            await connection.execute(
-                `INSERT INTO rental_order_payments
-         (
-            order_id,
-            order_item_id,
-            payment_type,
-            payment_method,
-            payment_status,
-            amount,
-            mollie_payment_id,
-            note
-         )
-         SELECT
-            order_id,
-            order_item_id,
-            'chargeback',
-            payment_method,
-            'charged_back',
-            -ABS(amount),
-            mollie_payment_id,
-            'Chargeback über Mollie erkannt'
-         FROM rental_order_payments
-         WHERE order_id = ?
-         AND mollie_payment_id = ?
-         AND mollie_refund_id IS NULL
-         AND payment_method = 'online'
-         AND payment_type IN (${chargebackSourcePlaceholders})
-         AND payment_status = 'charged_back'
-         ORDER BY CASE WHEN payment_type = 'initial_payment' THEN 0 ELSE 1 END,
-                  ABS(amount) DESC,
-                  id ASC
-         LIMIT 1`,
-                [paymentContext.order_id, payment.id, ...chargebackSourceTypes]
-            );
-        }
-
         const initialPaymentOrderId = paymentContext?.payment_type === 'initial_payment'
             ? paymentContext.order_id
             : null;
@@ -7420,7 +7432,7 @@ app.post('/webhooks/mollie', async (req, res) => {
 
         if (orders.length === 0) {
             await connection.commit();
-            return res.sendStatus(200);
+            return;
         }
 
         const order = orders[0];
@@ -7442,7 +7454,7 @@ app.post('/webhooks/mollie', async (req, res) => {
                 'Zusätzliche Initialzahlung nach bereits bezahlter Bestellung wurde automatisch erstattet'
             );
             await connection.commit();
-            return res.sendStatus(200);
+            return;
         }
 
         const newOrderStatus = deriveOrderStatusFromInitialPayment(order.status, payment.status);
@@ -7543,8 +7555,7 @@ app.post('/webhooks/mollie', async (req, res) => {
                     ? JSON.parse(paidOrder.confirmation_json || '{}')
                     : (paidOrder.confirmation_json || {});
                 const uniqueRecipients = [...new Set([
-                    paidOrder.customer_email,
-                    'orders@segnitzbau.de'
+                    paidOrder.customer_email
                 ].filter(Boolean).map(email => email.trim().toLowerCase()))];
 
                 await sendOrderEmail(
@@ -7576,7 +7587,7 @@ app.post('/webhooks/mollie', async (req, res) => {
 
         await connection.commit();
 
-        return res.sendStatus(200);
+        return;
 
     } catch (error) {
         console.error('Mollie Webhook Fehler:', error);
@@ -7589,14 +7600,29 @@ app.post('/webhooks/mollie', async (req, res) => {
             }
         }
 
-        return res.sendStatus(500);
+        throw error;
 
     } finally {
         if (connection) await connection.end();
     }
+}
+
+app.post('/webhooks/mollie', async (req, res) => {
+    const paymentId = req.body?.id;
+    if (typeof paymentId !== 'string' || !/^tr_[A-Za-z0-9_]+$/.test(paymentId)) return res.sendStatus(400);
+    try {
+        await reconcileMolliePayment(paymentId);
+        return res.sendStatus(200);
+    } catch (error) {
+        console.error('Mollie-Abgleich fehlgeschlagen:', error.message);
+        return res.sendStatus(500);
+    }
 });
 
 let cleanupTimer = null;
+const mollieReconciliationPoller = require('./services/mollieReconciliationPoller').startMollieReconciliationPoller(
+    () => mysql.createConnection(dbConfig), reconcileMolliePayment
+);
 const periodicCleanupRunner = createCleanupRunner(
     () => mysql.createConnection(dbConfig)
 );
@@ -7621,6 +7647,7 @@ async function stopApplication() {
     applicationStopPromise = (async () => {
         if (cleanupTimer) clearInterval(cleanupTimer);
         cleanupTimer = null;
+        await mollieReconciliationPoller.stop();
 
         await closeHttpServer(httpServer, {
             graceMs: Number(process.env.APP_HTTP_SHUTDOWN_GRACE_MS || 8000)

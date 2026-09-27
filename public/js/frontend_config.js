@@ -113,6 +113,30 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     progress(100);
 
+    // Do not show the static success text while the server verifies Mollie's state.
+    if (resultTitle) resultTitle.textContent = 'Zahlungsstatus wird geprüft';
+    if (resultText) resultText.textContent = 'Bitte warten Sie einen Moment.';
+    if (resultIcon) {
+        resultIcon.innerHTML = '<i class="bi bi-hourglass-split"></i>';
+        resultIcon.className = 'success-icon';
+    }
+    if (finalDiv) finalDiv.replaceChildren();
+
+    const unsuccessfulPayments = {
+        failed: {
+            title: 'Zahlung fehlgeschlagen',
+            text: 'Mollie konnte Ihre Zahlung nicht abschließen. Die Zahlung wurde nicht als bezahlt bestätigt.'
+        },
+        cancelled: {
+            title: 'Zahlung abgebrochen',
+            text: 'Der Zahlungsvorgang bei Mollie wurde abgebrochen. Die Zahlung ist weiterhin offen.'
+        },
+        expired: {
+            title: 'Zahlung verfallen',
+            text: 'Die Zahlungsfrist bei Mollie ist abgelaufen. Dieser Zahlungslink ist nicht mehr gültig.'
+        }
+    };
+
     const successMessages = {
         return: {
             title: 'Mietvorgang erfolgreich bezahlt',
@@ -132,10 +156,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     };
 
     const statusMessages = {
-        failed: 'Die Zahlung ist fehlgeschlagen.',
-        expired: 'Die Zahlung ist abgelaufen.',
-        cancelled: 'Die Zahlung wurde abgebrochen.',
-        canceled: 'Die Zahlung wurde abgebrochen.',
+        failed: unsuccessfulPayments.failed.text,
+        expired: unsuccessfulPayments.expired.text,
+        cancelled: unsuccessfulPayments.cancelled.text,
+        canceled: unsuccessfulPayments.cancelled.text,
         authorized: 'Die Zahlung wurde autorisiert, aber noch nicht endgültig eingezogen.',
         refund_pending: 'Die Bestellung ist geschlossen; die Rückerstattung wird noch verarbeitet.',
         refunded: 'Die Zahlung wurde zurückerstattet. Die Bestellung bleibt geschlossen.',
@@ -144,18 +168,20 @@ document.addEventListener('DOMContentLoaded', async () => {
         pending: 'Die Zahlung wurde noch nicht bestätigt.'
     };
 
-    const setPaymentErrorView = (status) => {
+    const setPaymentErrorView = (status, order = {}) => {
+        status = status === 'canceled' ? 'cancelled' : status;
         const message = statusMessages[status] || statusMessages.pending;
+        const closedOrder = paymentContext === 'return' && ['cancelled', 'returned'].includes(order.status);
         const canRetryInitialPayment =
-            paymentContext === 'return' &&
+            paymentContext === 'return' && !closedOrder &&
             ['failed', 'expired', 'cancelled', 'canceled', 'pending'].includes(status);
         const isRefundStatus = ['refund_pending', 'refunded', 'refund_failed'].includes(status);
-        const followUpText = isRefundStatus
+        const followUpText = isRefundStatus || closedOrder
             ? 'Für diese Bestellung ist keine weitere Zahlung erforderlich.'
             : paymentContext === 'return'
                 ? 'Sie können die Online-Zahlung erneut starten, sofern die Mietartikel noch verfügbar sind.'
             : ['extension', 'return_charge'].includes(paymentContext)
-                ? 'Alternativ kann die Nachzahlung bei der Übergabe vor Ort bar erfasst werden.'
+                ? 'Bitte kontaktieren Sie Segnitz Rental für einen neuen Zahlungslink oder eine Barzahlung vor Ort.'
                 : '';
 
         if (resultIcon) {
@@ -164,7 +190,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
 
         if (resultTitle) {
-            resultTitle.textContent = 'Zahlung nicht abgeschlossen';
+            resultTitle.textContent = unsuccessfulPayments[status]?.title || 'Zahlung nicht abgeschlossen';
         }
 
         if (resultText) {
@@ -173,10 +199,14 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         if (finalDiv) {
             finalDiv.innerHTML = `
-                <div class="alert alert-warning">
+                <div class="alert ${status === 'failed' ? 'alert-danger' : 'alert-warning'}" role="status">
                     ${message}<br>
                     ${followUpText}
                 </div>
+                ${['extension', 'return_charge'].includes(paymentContext) ? `
+                    <p>${paymentContext === 'extension' ? 'Nachzahlung zur Mietverlängerung' : 'Nachzahlung zur Rückgabe'}
+                    · Bestellung <strong>${escapeHtml(order.orderNo || order.order_no || orderId)}</strong></p>
+                ` : ''}
                 ${canRetryInitialPayment ? `
                     <button type="button" class="btn btn-primary"
                         data-frontend-action="retry-payment"
@@ -289,7 +319,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             return;
         }
 
-        setPaymentErrorView(status);
+        setPaymentErrorView(status, order);
     } catch (error) {
         console.error('Fehler beim Prüfen des Zahlungsstatus:', error);
         setPaymentErrorView('pending');
@@ -711,7 +741,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 if (data.role === 'global_admin') {
                     adminBtn.href = '/backend.html';
                     adminBtn.querySelector('button').innerHTML =
-                        '<i class="bi bi-gear"></i> Konfiguration';
+                        '<i class="bi bi-gear"></i> Admin Dashboard';
                 } else {
                     adminBtn.href = '#';
                     adminBtn.querySelector('button').innerHTML =

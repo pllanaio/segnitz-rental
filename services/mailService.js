@@ -1,5 +1,7 @@
 const crypto = require('node:crypto');
 const fetch = require('node-fetch');
+const { captureReceipt, label, iso } = require('./receiptService');
+const { presentMail } = require('./mailPresentation');
 const {
     EFFECT_TYPES,
     createOperationKey,
@@ -104,11 +106,13 @@ function normalizeRecipients(value) {
         }));
 }
 
-async function deliverGraphMail({ to, cc, bcc, subject, html, text, operationKey }) {
+async function deliverGraphMail(message) {
+    const { to, cc, bcc, subject, operationKey } = message;
     if (process.env.DISABLE_EMAILS === '1') {
         return { disabled: true };
     }
 
+    const { html, attachments } = await presentMail(message);
     const token = await getGraphAccessToken();
     const graphMailUser = getGraphMailUser();
 
@@ -124,9 +128,10 @@ async function deliverGraphMail({ to, cc, bcc, subject, html, text, operationKey
                 message: {
                     subject,
                     body: {
-                        contentType: html ? 'HTML' : 'Text',
-                        content: html || text || ''
+                        contentType: 'HTML',
+                        content: html
                     },
+                    attachments,
                     toRecipients: normalizeRecipients(to),
                     ccRecipients: normalizeRecipients(cc),
                     bccRecipients: normalizeRecipients(bcc),
@@ -151,6 +156,12 @@ async function deliverGraphMail({ to, cc, bcc, subject, html, text, operationKey
 
 async function sendGraphMail(message, options = {}) {
     const operationKey = options.operationKey || message.operationKey || `mail:${crypto.randomUUID()}`;
+    if (message.receipt && options.connection) {
+        const [existing] = await options.connection.execute(
+            'SELECT id FROM external_effects_outbox WHERE operation_key = ? LIMIT 1', [operationKey]
+        );
+        if (existing.length) return { queued: true, operationKey };
+    }
     const durableMessage = {
         ...message,
         operationKey
@@ -249,9 +260,10 @@ async function sendOrderEmail(
     `;
 
     const customerRecipient = recipients[0];
-    const internalRecipient = process.env.ORDER_BCC || 'orders@segnitzbau.de';
+    const internalRecipient = process.env.ORDER_BCC || undefined;
 
     await sendGraphMail({
+        receipt: await captureReceipt(deliveryOptions.connection, orderSummary.id, 'order'),
         to: customerRecipient,
         bcc: internalRecipient,
         subject: `Mietauftrag ${orderSummary.orderNo}`,
@@ -412,6 +424,7 @@ async function sendRentalAdjustmentEmailWithPayment(
     deliveryOptions = {}
 ) {
     await sendGraphMail({
+        receipt: await captureReceipt(deliveryOptions.connection, order.id, 'extension', item.id),
         to: order.customer_email,
         subject: `Mietzeitraum zu Auftrag ${order.order_no} wurde angepasst`,
         html: `
@@ -581,6 +594,7 @@ async function sendReturnSummaryEmail(order, item, payments = [], deliveryOption
     };
 
     await sendGraphMail({
+        receipt: deliveryOptions.receipt || await captureReceipt(deliveryOptions.connection, order.id || item.order_id, 'return', item.id),
         to: order.customer_email,
         subject: `Rückgabenachweis zu Mietauftrag ${order.order_no}`,
         html: `
@@ -606,7 +620,6 @@ async function sendReturnSummaryEmail(order, item, payments = [], deliveryOption
                 Verspätet: ${item.isLate || item.is_late ? 'Ja' : 'Nein'}<br>
                 ${item.damageDescription || item.damage_description ? `Schaden: ${escapeHtml(item.damageDescription || item.damage_description)}<br>` : ''}
                 ${item.lateDescription || item.late_description ? `Verspätung: ${escapeHtml(item.lateDescription || item.late_description)}<br>` : ''}
-                ${item.returnNotes || item.return_notes ? `Hinweise: ${escapeHtml(item.returnNotes || item.return_notes)}<br>` : ''}
             </p>
 
             <h3>Kaution und Nachzahlungen</h3>
@@ -625,7 +638,7 @@ async function sendReturnSummaryEmail(order, item, payments = [], deliveryOption
                 <p>
                     Rückgabe-Nachzahlung:
                     <strong>${Number(returnCharge.amount || 0).toFixed(2)} €</strong>
-                    (${escapeHtml(returnCharge.paymentStatus || returnCharge.payment_status || 'offen')})
+                    (${escapeHtml(label(returnCharge.paymentStatus || returnCharge.payment_status))})
                 </p>
             ` : ''}
 
@@ -633,7 +646,7 @@ async function sendReturnSummaryEmail(order, item, payments = [], deliveryOption
                 <p>
                     Kautionsrückerstattung:
                     <strong>${Math.abs(Number(depositRefund.amount || 0)).toFixed(2)} €</strong>
-                    (${escapeHtml(depositRefund.paymentStatus || depositRefund.payment_status || 'offen')})
+                    (${escapeHtml(label(depositRefund.paymentStatus || depositRefund.payment_status))})
                 </p>
             ` : ''}
 
@@ -655,7 +668,43 @@ async function sendReturnSummaryEmail(order, item, payments = [], deliveryOption
     });
 }
 
+async function sendBookingReceivedEmail(connection, receipt, orderId) {
+    await sendGraphMail({ to: receipt.email, receipt,
+        subject: `Bestellung ${receipt.orderNo} eingegangen`,
+        html: `<h2>Ihre Bestellung ist eingegangen</h2><p>Vielen Dank für Ihren Mietauftrag <strong>${escapeHtml(receipt.orderNo)}</strong>. Ihre Onlinezahlung steht noch aus. Bitte schließen Sie die Zahlung innerhalb der angezeigten Reservierungsfrist ab.</p>`
+    }, { connection, operationKey: `mail-order-received-${orderId}` });
+}
+
+async function sendCompletedOrderEmail(connection, orderId) {
+    const receipt = await captureReceipt(connection, orderId, 'completed');
+    if (receipt.status !== 'returned') return;
+    await sendGraphMail({ to: receipt.email, receipt,
+        subject: `Mietauftrag ${receipt.orderNo} abgeschlossen`,
+        html: `<h2>Ihr Mietauftrag ist abgeschlossen</h2><p>Vielen Dank für Ihre Miete bei uns. Die Rückgaben und die zugehörigen Zahlungen und Erstattungen zu Auftrag <strong>${escapeHtml(receipt.orderNo)}</strong> sind abgeschlossen.</p><p>Im Anhang finden Sie Ihren Abschlussbeleg mit der Übersicht Ihrer Mietartikel und Zahlungen.</p>`
+    }, { connection, operationKey: `mail-order-completed-${orderId}` });
+}
+
+async function sendSavedReturnEmail(connection, orderId, itemId) {
+    const [[order]] = await connection.execute('SELECT id, order_no, customer_email FROM rental_orders WHERE id = ?', [orderId]);
+    const [[item]] = await connection.execute(`SELECT i.*, p.title,
+        DATE_FORMAT(i.rental_start, '%Y-%m-%d') AS rental_start,
+        DATE_FORMAT(i.rental_end, '%Y-%m-%d') AS rental_end,
+        DATE_FORMAT(i.adjusted_rental_start, '%Y-%m-%d') AS adjusted_rental_start,
+        DATE_FORMAT(i.adjusted_rental_end, '%Y-%m-%d') AS adjusted_rental_end,
+        DATE_FORMAT(i.actual_return_date, '%Y-%m-%d') AS actual_return_date
+        FROM rental_order_items i JOIN rental_products p ON p.id = i.product_id WHERE i.id = ? AND i.order_id = ?`, [itemId, orderId]);
+    const [payments] = await connection.execute('SELECT * FROM rental_order_payments WHERE order_id = ? AND order_item_id = ? ORDER BY id DESC', [orderId, itemId]);
+    for (const key of ['rental_start', 'rental_end', 'adjusted_rental_start', 'adjusted_rental_end', 'actual_return_date']) {
+        if (item[key]) item[key] = iso(item[key]);
+    }
+    await sendReturnSummaryEmail(order, item, payments, { connection, operationKey: `mail-return-summary-${orderId}-${itemId}` });
+}
+
 module.exports = {
+    sendGraphMail,
+    sendBookingReceivedEmail,
+    sendCompletedOrderEmail,
+    sendSavedReturnEmail,
     deliverGraphMail,
     escapeHtml,
     sendOrderEmail,

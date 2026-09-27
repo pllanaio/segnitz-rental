@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="referrer" content="no-referrer">
+    <title>Widerruf – Segnitz Rental</title>
+    <link rel="stylesheet" href="/css/bootstrap.min.css"><link rel="stylesheet" href="/css/style.css"><link rel="stylesheet" href="/css/fonts.css">
+</head>
+<body>
+<header class="bg-primary text-white p-3"><a class="text-white" href="/index.html">Segnitz Rental · Zur Startseite</a></header>
+<main class="container py-5">
+    <div class="row justify-content-center"><div class="col-lg-8">
+        <h1 id="declarationTitle">Vertrag widerrufen</h1>
+        <p id="declarationIntro">Hier können Sie Ihre Widerrufserklärung ohne Anmeldung übermitteln. Eine Begründung ist nicht erforderlich. Andere Möglichkeiten des Widerrufs, etwa per E-Mail, bleiben bestehen.</p>
+        <div id="declarationError" class="alert alert-danger d-none" role="alert"></div>
+        <form id="declarationForm">
+            <div class="mb-3"><label class="form-label" for="declarationName">Ihr Name</label><input id="declarationName" class="form-control" autocomplete="name" maxlength="200" required></div>
+            <div class="mb-3"><label class="form-label" for="declarationEmail">E-Mail für die Eingangsbestätigung</label><input id="declarationEmail" class="form-control" type="email" autocomplete="email" maxlength="255" required></div>
+            <div class="mb-3"><label class="form-label" for="declarationReference">Bestellnummer oder eindeutige Vertragsbeschreibung</label><input id="declarationReference" class="form-control" maxlength="200" required><div class="form-text">Die Bestellnummer finden Sie in Ihrer Bestätigung.</div></div>
+            <div id="declarationScopeGroup" class="mb-3"><label class="form-label" for="declarationScope">Nur einen Teil widerrufen? (optional)</label><textarea id="declarationScope" class="form-control" maxlength="2000" rows="3" placeholder="Betroffene Artikel oder Vertragsbestandteile"></textarea><div class="form-text">Leer lassen, wenn Sie den gesamten Vertrag widerrufen.</div></div>
+            <button class="btn btn-primary" type="submit">Angaben prüfen</button>
+        </form>
+        <section id="declarationReview" class="d-none" aria-labelledby="reviewTitle">
+            <h2 id="reviewTitle">Ihre Erklärung prüfen</h2>
+            <p id="reviewDeclaration" class="fw-bold"></p><dl id="reviewDetails"></dl>
+            <button type="button" id="declarationEdit" class="btn btn-outline-primary">Angaben ändern</button>
+            <button type="button" id="declarationConfirm" class="btn btn-primary">Widerruf bestätigen</button>
+        </section>
+        <section id="declarationSuccess" class="d-none" aria-live="polite">
+            <h2 id="declarationSuccessTitle">Ihre Erklärung ist eingegangen</h2>
+            <p id="declarationSuccessText"></p><pre id="declarationReceipt" class="text-wrap border rounded p-3"></pre>
+            <button type="button" id="declarationDownload" class="btn btn-outline-primary">Eingangsbestätigung speichern</button>
+        </section>
+    </div></div>
+</main>
+<script src="/js/csrf.js"></script><script src="/js/contract_declarations.js"></script>
+</body></html>

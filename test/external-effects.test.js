@@ -491,7 +491,7 @@ test('Payment-Sync trennt Ursprungszahlung und Refund-Ledger trotz gemeinsamer M
         source.indexOf("app.post('/admin/order-payments/manual'")
     );
     const webhookRoute = source.slice(
-        source.indexOf("app.post('/webhooks/mollie'"),
+        source.indexOf("async function reconcileMolliePayment("),
         source.indexOf('let cleanupTimer = null')
     );
     const cancellationHelper = source.slice(
@@ -591,7 +591,7 @@ test('Verifikations- und Reset-Tokens werden scanner-sicher und ohne Query-Refer
 
     assert.match(appSource, /app\.get\('\/verify-email'[\s\S]*?res\.redirect\(`\/verify-email\.html#token=/u);
     assert.match(appSource, /app\.post\('\/verify-email\/complete'/u);
-    assert.match(appSource, /\/login\.html#resetToken=\$\{encodeURIComponent\(resetToken\)\}/u);
+    assert.match(appSource, /redirectTo: '\/email-verified\.html'/u);
     assert.match(appSource, /\/login\.html#resetToken=\$\{token\}/u);
     assert.match(loginSource, /window\.location\.hash\.slice\(1\)/u);
     assert.match(loginSource, /window\.history\.replaceState/u);

@@ -3,6 +3,7 @@ const router = express.Router();
 const mysql = require('mysql2/promise');
 const path = require('path');
 const fs = require('fs');
+const { normalizeProductAttributes, saveProductAttributes, generateProductKey } = require('../services/productAttributes');
 
 const dbConfig = require('../config/db');
 const { checkAdmin } = require('../middleware/auth');
@@ -44,6 +45,21 @@ router.get('/categories', async (req, res) => {
             await connection.end();
         }
     }
+});
+
+// Suggestions combine a starter list with the actual saved inventory.
+router.get('/product-attribute-options', checkAdmin, async (req, res) => {
+    let connection;
+    try {
+        connection = await mysql.createConnection(dbConfig);
+        const [products] = await connection.execute(
+            'SELECT DISTINCT product_kind, manufacturer, model FROM rental_products ORDER BY manufacturer, model'
+        );
+        res.set('Cache-Control', 'no-store').json({ brands: require('../config/productCatalog.json'), products });
+    } catch (error) {
+        console.error('Produktvorschläge:', error.message);
+        res.status(500).json({ error: 'Vorschläge konnten nicht geladen werden. Freie Eingabe ist weiterhin möglich.' });
+    } finally { if (connection) await connection.end(); }
 });
 
 router.get('/products', async (req, res) => {
@@ -178,13 +194,17 @@ router.get('/products/:id/availability', async (req, res) => {
 });
 
 router.post('/products', checkAdmin, async (req, res) => {
-    const { productKey, title, description, pricePerDay, deposit, imagePath, category, categories } = req.body;
+    const { title, description, pricePerDay, deposit, imagePath, category, categories } = req.body;
+    const productKey = generateProductKey();
+    let attributes;
+    try { attributes = normalizeProductAttributes(req.body); }
+    catch (error) { return res.status(400).json({ error: error.message }); }
 
     const normalizedPricePerDay = Number(String(pricePerDay).replace(',', '.'));
     const normalizedDeposit = Number(String(deposit).replace(',', '.'));
 
-    if (!productKey || !title) {
-        return res.status(400).json({ error: 'Produkt-Key und Titel sind Pflichtfelder.' });
+    if (typeof title !== 'string' || !title.trim() || title.length > 150) {
+        return res.status(400).json({ error: 'Bitte einen Titel mit maximal 150 Zeichen eingeben.' });
     }
 
     if (
@@ -212,19 +232,21 @@ router.post('/products', checkAdmin, async (req, res) => {
 
         const [result] = await connection.execute(
             `INSERT INTO rental_products 
-             (product_key, title, description, price_per_day, deposit, image_path, category)
-             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+             (product_key, title, description, price_per_day, deposit, image_path, category, is_active)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 productKey,
                 title,
-                description,
+                description || null,
                 normalizedPricePerDay,
                 normalizedDeposit,
                 imagePath || '',
-                normalizedCategories[0] || null
+                normalizedCategories[0] || null,
+                req.body.isActive === false ? 0 : 1
             ]
         );
 
+        await saveProductAttributes(connection, result.insertId, attributes);
         await syncProductCategories(connection, result.insertId, normalizedCategories);
         await deleteUnusedCategories(connection);
 
@@ -232,7 +254,7 @@ router.post('/products', checkAdmin, async (req, res) => {
 
         res.status(201).json({
             message: 'Produkt erstellt',
-            productId: result.insertId
+            productId: result.insertId, productKey
         });
     } catch (error) {
         if (connection) await connection.rollback();
@@ -246,10 +268,14 @@ router.post('/products', checkAdmin, async (req, res) => {
 router.put('/products/:id', checkAdmin, async (req, res) => {
     const { title, description, pricePerDay, deposit, imagePath, isActive, category, categories } = req.body;
 
+    let attributes;
+    try { attributes = normalizeProductAttributes(req.body, true); }
+    catch (error) { return res.status(400).json({ error: error.message }); }
+
     const normalizedPricePerDay = Number(String(pricePerDay).replace(',', '.'));
     const normalizedDeposit = Number(String(deposit).replace(',', '.'));
 
-    if (!title) {
+    if (typeof title !== 'string' || !title.trim() || title.length > 150) {
         return res.status(400).json({ error: 'Titel ist ein Pflichtfeld.' });
     }
 
@@ -271,6 +297,8 @@ router.put('/products/:id', checkAdmin, async (req, res) => {
     try {
         connection = await mysql.createConnection(dbConfig);
         await connection.beginTransaction();
+        const [[existing]] = await connection.execute('SELECT id FROM rental_products WHERE id = ? FOR UPDATE', [req.params.id]);
+        if (!existing) { await connection.rollback(); return res.status(404).json({ error: 'Produkt nicht gefunden.' }); }
 
         const normalizedCategories = Array.isArray(categories)
             ? categories
@@ -288,7 +316,7 @@ router.put('/products/:id', checkAdmin, async (req, res) => {
              WHERE id = ?`,
             [
                 title,
-                description,
+                description || null,
                 normalizedPricePerDay,
                 normalizedDeposit,
                 imagePath || '',
@@ -298,6 +326,7 @@ router.put('/products/:id', checkAdmin, async (req, res) => {
             ]
         );
 
+        await saveProductAttributes(connection, req.params.id, attributes);
         await syncProductCategories(connection, req.params.id, normalizedCategories);
         await deleteUnusedCategories(connection);
 

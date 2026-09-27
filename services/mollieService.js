@@ -30,7 +30,25 @@ async function withMollieTimeout(promise, operation = 'Mollie-Anfrage') {
 }
 
 function isTestMode() {
+    // This flag is an offline test double, NOT Mollie's test API.
+    // A test_ API key talks to the real sandbox with this flag disabled.
     return process.env.MOLLIE_TEST_MODE === '1';
+}
+
+function getWebhookUrl(override) {
+    const explicit = override || process.env.MOLLIE_WEBHOOK_URL;
+    const candidate = explicit || `${getBaseUrl()}/webhooks/mollie`;
+    const url = new URL(candidate);
+    const local = url.hostname === 'localhost' || url.hostname === '[::1]' ||
+        /^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(url.hostname);
+    if (local) {
+        if (explicit || process.env.NODE_ENV === 'production') {
+            throw new Error('MOLLIE_WEBHOOK_URL muss öffentlich erreichbar sein.');
+        }
+        return undefined;
+    }
+    if (url.protocol !== 'https:') throw new Error('Mollie-Webhooks benötigen eine öffentliche HTTPS-Adresse.');
+    return url.href;
 }
 
 function getMollieClient() {
@@ -223,12 +241,14 @@ async function createMolliePaymentForOrder(order) {
             order.redirectUrl ||
             `${baseUrl}/index.html?payment=return&orderId=${encodeURIComponent(order.id)}`,
 
-        webhookUrl:
-            order.webhookUrl ||
-            `${baseUrl}/webhooks/mollie`,
-
         metadata: buildPaymentMetadata(order, order.metadata || {})
     };
+
+    const webhookUrl = getWebhookUrl(order.webhookUrl);
+    if (webhookUrl) payload.webhookUrl = webhookUrl;
+    if (order.billingAddress) payload.billingAddress = order.billingAddress;
+    if (order.lines) payload.lines = order.lines;
+    payload.locale = order.locale || 'de_DE';
 
     if (order.customerId) payload.customerId = order.customerId;
     if (order.sequenceType) payload.sequenceType = order.sequenceType;
@@ -285,7 +305,22 @@ async function getMolliePayment(paymentId) {
 
     const mollie = getMollieClient();
 
-    return withMollieTimeout(mollie.payments.get(paymentId), 'Mollie-Zahlungsabfrage');
+    const [payment, chargebacks] = await Promise.all([
+        withMollieTimeout(mollie.payments.get(paymentId), 'Mollie-Zahlungsabfrage'),
+        listAllMollieResources(mollie.paymentChargebacks, paymentId, 'chargebacks')
+    ]);
+    return Object.assign(payment, { chargebacks });
+}
+
+async function listAllMollieResources(binder, paymentId, resource) {
+    const results = [];
+    let page = await withMollieTimeout(binder.page({ paymentId, limit: 250 }), `Mollie-${resource}`);
+    while (page) {
+        results.push(...(Array.isArray(page) ? page : (page._embedded?.[resource] || [])));
+        if (typeof page.nextPage !== 'function') break;
+        page = await withMollieTimeout(page.nextPage(), `Mollie-${resource}`);
+    }
+    return results;
 }
 
 async function createMollieRefundForPayment({
@@ -325,7 +360,7 @@ async function createMollieRefundForPayment({
             value: formattedAmount
         },
         description,
-        metadata
+        metadata: { ...metadata, ...(idempotencyKey ? { operationKey: idempotencyKey } : {}) }
     };
 
     if (idempotencyKey) payload.idempotencyKey = idempotencyKey;
@@ -344,9 +379,7 @@ async function listMollieRefundsForPayment(paymentId) {
 
     const mollie = getMollieClient();
 
-    return withMollieTimeout(mollie.paymentRefunds.page({
-        paymentId
-    }), 'Mollie-Rückerstattungsabfrage');
+    return listAllMollieResources(mollie.paymentRefunds, paymentId, 'refunds');
 }
 
 async function cancelMolliePayment(paymentId, options = {}) {
@@ -451,5 +484,7 @@ module.exports = {
 
     getMollieCheckoutUrl,
     formatMollieAmount,
-    withMollieTimeout
+    withMollieTimeout,
+    getWebhookUrl,
+    isTestMode
 };

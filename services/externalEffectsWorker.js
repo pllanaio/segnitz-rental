@@ -94,7 +94,7 @@ async function refreshCancelledOrderProjection(connection, orderId) {
 
 async function refreshReturnCaseProjection(connection, orderId) {
     const [orderRows] = await connection.execute(
-        `SELECT status, payment_status
+        `SELECT status, payment_status, return_case_status
          FROM rental_orders
          WHERE id = ?
          LIMIT 1
@@ -177,6 +177,9 @@ async function refreshReturnCaseProjection(connection, orderId) {
         'UPDATE rental_orders SET return_case_status = ? WHERE id = ?',
         [returnCaseStatus, orderId]
     );
+    if (returnCaseStatus === 'closed' && orderRows[0].return_case_status !== 'closed' && orderRows[0].status === 'returned') {
+        await require('./mailService').sendCompletedOrderEmail(connection, orderId);
+    }
     return returnCaseStatus;
 }
 
@@ -647,8 +650,10 @@ async function drainExternalEffects(options = {}) {
         }
 
         let processed = 0;
+        const { mailMustWaitForConfiguration } = require('./mailConfiguration');
         while (!workerStopping && processed < batchSize) {
             const effect = await claimExternalEffect({
+                excludeMail: !options.dependencies?.deliverMail && mailMustWaitForConfiguration(),
                 workerId,
                 leaseSeconds: Number(process.env.EXTERNAL_EFFECT_LEASE_SECONDS || 60),
                 applyDead: options.dependencies?.applyFailure || applyExternalEffectFailure
@@ -677,6 +682,11 @@ async function drainExternalEffects(options = {}) {
 
 async function startExternalEffectsWorker() {
     if (workerTimer) return workerTimer;
+
+    const { mailMustWaitForConfiguration, missingMailConfiguration } = require('./mailConfiguration');
+    if (mailMustWaitForConfiguration()) {
+        console.warn(`Mailversand wartet auf Konfiguration: ${missingMailConfiguration().join(', ')}. Mails bleiben ohne Verbrauch von Versandversuchen vorgemerkt.`);
+    }
 
     workerStopping = false;
 

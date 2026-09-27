@@ -195,6 +195,8 @@ const externalEffectsMigrationDependencies = Object.freeze([
     ensureUniqueIndex
 ]);
 
+const declarationsMigrationFile = path.join(__dirname, '20260927_contract_declarations.sql');
+
 const migrations = [
     {
         version: '20260813_01_align_dump_with_application',
@@ -605,6 +607,33 @@ const migrations = [
                 'auth_version',
                 'INT UNSIGNED NOT NULL DEFAULT 1'
             );
+        }
+    },
+    {
+        version: '20260927_07_contract_declarations',
+        checksumVersion: 1,
+        checksumSource: fs.readFileSync(declarationsMigrationFile, 'utf8'),
+        checksumDependencies: [readSqlStatements, removeSqlComments],
+        async up(connection) {
+            for (const statement of readSqlStatements(declarationsMigrationFile)) {
+                await connection.query(removeSqlComments(statement).replace(/^CREATE TABLE /, 'CREATE TABLE IF NOT EXISTS '));
+            }
+        }
+    },
+    {
+        version: '20260927_08_product_attributes',
+        checksumVersion: 1,
+        checksumSource: 'structured product attributes v1',
+        checksumDependencies: [readSqlStatements, removeSqlComments, quoteIdentifier, columnExists, ensureColumn],
+        async up(connection) {
+            await ensureColumn(connection, 'rental_products', 'product_kind', 'VARCHAR(30) NULL');
+            await ensureColumn(connection, 'rental_products', 'manufacturer', "VARCHAR(120) NOT NULL DEFAULT 'n.V.'");
+            await ensureColumn(connection, 'rental_products', 'model', "VARCHAR(160) NOT NULL DEFAULT 'n.V.'");
+            await ensureColumn(connection, 'rental_products', 'color', 'VARCHAR(80) NULL');
+            await ensureColumn(connection, 'rental_products', 'power_value', 'DECIMAL(8,2) NULL');
+            await ensureColumn(connection, 'rental_products', 'power_unit', 'VARCHAR(5) NULL');
+            await ensureColumn(connection, 'rental_products', 'operating_hours', 'DECIMAL(10,2) NULL');
+            await ensureColumn(connection, 'rental_products', 'mileage_km', 'DECIMAL(10,2) NULL');
         }
     }
 ];

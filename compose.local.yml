@@ -1,0 +1,37 @@
+name: segnitz-rental-local
+
+services:
+  app:
+    image: segnitz-rental:local
+    pull_policy: never
+    build:
+      context: .
+    environment:
+      # Local HTTP requires non-secure cookies and no HTTPS upgrade directive.
+      NODE_ENV: development
+      BASE_URL: http://localhost:${APP_PORT:-3000}
+      DB_HOST: db
+      DB_PORT: 3306
+      MOLLIE_TEST_MODE: ${MOLLIE_TEST_MODE:-0}
+      DISABLE_EMAILS: ${DISABLE_EMAILS:-0}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: mysql:8.4.11@sha256:b3b90af2a6552ae30c266fdb7d5dd55f3afb72404bb78d37fe8a23eb857fd3fb
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PW:?Set DB_PW in .env}
+      MYSQL_DATABASE: ${DB_NAME:?Set DB_NAME in .env}
+    volumes:
+      - local-database:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "MYSQL_PWD=\"$$MYSQL_ROOT_PASSWORD\" mysql -h 127.0.0.1 -uroot -e 'SELECT 1' >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    restart: unless-stopped
+
+volumes:
+  local-database:

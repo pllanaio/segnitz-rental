@@ -1,0 +1,45 @@
+"use strict";
+const { test, expect } = require('@playwright/test');
+const { TEST_ADMIN } = require('../support/test-database');
+test('legt Produkt mit automatisch erzeugtem Key und Merkmalen an und bearbeitet es', async ({ page }, testInfo) => {
+    const errors = []; page.on('pageerror', error => errors.push(error.message));
+    await page.goto('/login.html');
+    await page.locator('#username').fill(TEST_ADMIN.email); await page.locator('#password').fill(TEST_ADMIN.password);
+    await page.getByRole('button', { name: 'Einloggen' }).click(); await page.waitForURL(/backend/);
+    await expect(page.locator('#productKey')).toHaveAttribute('readonly', '');
+    await page.setViewportSize({ width: 1440, height: 1100 });
+    await page.locator('#productKind').selectOption('Baumaschine');
+    await expect(page.locator('#manufacturerOptions option[value="Wacker Neuson"]')).toHaveCount(1);
+    await page.locator('#title').fill('Browser-Merkmaltest');
+    await page.locator('#manufacturer').fill('Test-Hersteller'); await page.locator('#productModel').fill('Modell ABC');
+    await page.locator('#productColor').fill('Gelb'); await page.locator('#powerValue').fill('7.5'); await page.locator('#powerUnit').selectOption('kW');
+    await page.locator('#operatingHours').fill('125.25'); await page.locator('#mileageKm').fill('0');
+    await page.locator('#pricePerDay').fill('49.90'); await page.locator('#deposit').fill('150'); await page.locator('#isActive').uncheck();
+    await page.locator('#productForm').screenshot({ path: testInfo.outputPath('product-editor-desktop.png') });
+    const responsePromise = page.waitForResponse(r => r.url().endsWith('/products') && r.request().method() === 'POST');
+    await page.getByRole('button', { name: 'Produkt speichern', exact: true }).click();
+    const response = await responsePromise; expect(response.status()).toBe(201); const created = await response.json();
+    try {
+        await expect(page.locator('#productEditorTitle')).toHaveText('Produkt bearbeiten');
+        await expect(page.locator('#productKey')).toHaveValue(created.productKey);
+        await expect(page.locator('#operatingHours')).toHaveValue('125.25');
+        await expect(page.locator('#isActive')).not.toBeChecked();
+        await expect(page.locator('#modelOptions option[value="Modell ABC"]')).toHaveCount(1);
+        await page.reload();
+        const card = page.locator('#productList .card').filter({ hasText: 'Browser-Merkmaltest' });
+        await card.getByRole('button', { name: 'Bearbeiten', exact: true }).click();
+        await expect(page.locator('#manufacturer')).toHaveValue('Test-Hersteller');
+        await page.locator('#manufacturer').fill('n.V.'); await page.locator('#productModel').fill('n.V.'); await page.locator('#operatingHours').fill('');
+        const update = page.waitForResponse(r => r.url().endsWith('/products/' + created.productId) && r.request().method() === 'PUT');
+        await page.getByRole('button', { name: 'Änderungen speichern' }).click(); expect((await update).status()).toBe(200);
+        await expect(page.locator('#saveProductBtn')).toBeEnabled();
+        await page.locator('#globalAlertContainer').evaluate(el => el.replaceChildren());
+        await page.setViewportSize({ width: 390, height: 844 });
+        await page.locator('#productForm').screenshot({ path: testInfo.outputPath('product-editor-mobile.png') });
+        expect(await page.locator('#productForm').evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+        expect((await page.locator('#productForm').boundingBox()).width).toBeGreaterThan(340);
+        await page.locator('#resetProductBtn').click(); await expect(page.locator('#productKey')).toHaveValue('');
+        await expect(page.locator('#productEditorTitle')).toHaveText('Produkt anlegen');
+        expect(errors).toEqual([]);
+    } finally { await page.evaluate(id => fetch('/products/' + id, { method: 'DELETE' }), created.productId); }
+});

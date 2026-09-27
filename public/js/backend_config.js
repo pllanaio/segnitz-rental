@@ -3,6 +3,10 @@ let filteredProducts = [];
 let orders = [];
 let currentOrderItems = [];
 let currentOrderPayments = [];
+let selectedReturnImages = [];
+let returnPreviewUrls = [];
+let returnSaveInProgress = false;
+let returnPhotoDeleteInProgress = false;
 let availableCategories = [];
 let currentOrderPage = 1;
 let adminCsrfToken = '';
@@ -36,12 +40,8 @@ document.addEventListener('DOMContentLoaded', () => {
         ?.addEventListener('click', submitCancelOrderItem);
     document.getElementById('submitOrderItemReturnButton')
         ?.addEventListener('click', submitOrderItemReturn);
-    document.getElementById('uploadReturnImagesButton')?.addEventListener('click', () => {
-        const itemId = document.getElementById('returnItemId').value;
-        uploadReturnImagesForCurrentReturn(itemId);
-    });
     document.getElementById('returnImageUpload')
-        ?.addEventListener('change', renderSelectedReturnImagePreview);
+        ?.addEventListener('change', addSelectedReturnImages);
 
     const manualPaymentSubmitButton = document.getElementById('manualPaymentSubmitButton');
     manualPaymentSubmitButton?.addEventListener('click', () => {
@@ -172,6 +172,7 @@ function handleBackendActionClick(event) {
         ),
         'retry-online-refund': () => retryOnlineRefund(paymentId, orderId),
         'delete-return-image': () => deleteReturnImage(imageId, orderId),
+        'remove-selected-return-image': () => removeSelectedReturnImage(Number(button.dataset.imageIndex)),
         'mark-item-picked-up': () => markOrderItemPickedUp(orderId, itemId),
         'open-rental-period': () => openRentalPeriodModal(orderId, itemId),
         'open-cancel-item': () => openCancelOrderItemModal(orderId, itemId),
@@ -257,11 +258,13 @@ function createProductCard(product) {
 
 async function saveProduct(event) {
     event.preventDefault();
+    const saveButton = document.getElementById('saveProductBtn');
+    if (saveButton.disabled) return;
 
     const productId = document.getElementById('productId').value;
     const categories = getSelectedCategories();
     const payload = {
-        productKey: document.getElementById('productKey').value.trim(),
+        ...getProductAttributes(),
         title: document.getElementById('title').value.trim(),
         description: document.getElementById('description').value.trim(),
         pricePerDay: Number(document.getElementById('pricePerDay').value),
@@ -272,11 +275,12 @@ async function saveProduct(event) {
         isActive: document.getElementById('isActive').checked
     };
 
-    if (!payload.productKey || !payload.title) {
-        showAlert('Produkt-Key und Titel sind Pflichtfelder.', 'warning');
+    if (!payload.title || !payload.productKind) {
+        showAlert('Bitte Titel und Art ausfüllen.', 'warning');
         return;
     }
 
+    saveButton.disabled = true;
     try {
         const response = await fetch(productId ? `/products/${productId}` : '/products', {
             method: productId ? 'PUT' : 'POST',
@@ -294,7 +298,10 @@ async function saveProduct(event) {
         }
         const savedProductId = productId || result.productId;
 
+        document.getElementById('productId').value = savedProductId;
+        if (result.productKey) document.getElementById('productKey').value = result.productKey;
         await uploadProductImages(savedProductId);
+        await loadProductAttributeOptions();
 
         showAlert(result.message || 'Produkt gespeichert.', 'success');
 
@@ -309,8 +316,8 @@ async function saveProduct(event) {
         document.getElementById('productImages').value = '';
     } catch (error) {
         console.error('Fehler beim Speichern:', error);
-        showAlert('Fehler beim Speichern des Produkts.', 'danger');
-    }
+        showAlert('Speichern oder Bilder-Upload fehlgeschlagen. Bitte prüfen und erneut speichern.', 'danger');
+    } finally { saveButton.disabled = false; }
 }
 
 function editProduct(id) {
@@ -322,7 +329,8 @@ function editProduct(id) {
 
     document.getElementById('productId').value = product.id;
     document.getElementById('productKey').value = product.product_key;
-    document.getElementById('productKey').disabled = true;
+    document.getElementById('productEditorTitle').textContent = 'Produkt bearbeiten';
+    setProductAttributes(product);
     document.getElementById('title').value = product.title;
     document.getElementById('description').value = product.description || '';
     document.getElementById('pricePerDay').value = product.price_per_day;
@@ -537,7 +545,8 @@ async function deleteProduct(id) {
 function resetForm() {
     document.getElementById('productForm').reset();
     document.getElementById('productId').value = '';
-    document.getElementById('productKey').disabled = false;
+    document.getElementById('productEditorTitle').textContent = 'Produkt anlegen';
+    updateProductAttributeSuggestions();
     document.getElementById('isActive').checked = true;
     document.getElementById('saveProductBtn').textContent = 'Produkt speichern';
     document.getElementById('cancelEditBtn').classList.add('d-none');
@@ -893,7 +902,7 @@ function renderOrderPaymentActionPanel(order) {
 
     payments
         .filter(payment =>
-            ['rental_adjustment', 'return_additional_charge'].includes(payment.paymentType) &&
+            payment.paymentType === 'rental_adjustment' &&
             payment.paymentMethod === 'online' &&
             ['pending', 'open', 'authorized'].includes(payment.paymentStatus) &&
             getSafeCheckoutUrl(payment.checkoutUrl)
@@ -994,8 +1003,8 @@ function renderOrderPaymentActionPanel(order) {
     const openReturnCharges = payments.filter(payment =>
         !orderIsClosed &&
         payment.paymentType === 'return_additional_charge' &&
-        payment.paymentMethod === 'cash' &&
-        ['pending', 'open'].includes(payment.paymentStatus)
+        ['cash', 'online'].includes(payment.paymentMethod) &&
+        ['pending', 'open', 'authorized', 'failed', 'cancelled', 'expired'].includes(payment.paymentStatus)
     );
 
     openReturnCharges.forEach(payment => {
@@ -1008,6 +1017,13 @@ function renderOrderPaymentActionPanel(order) {
 
                 <div class="cash-action-controls">
                     <strong>${Number(payment.amount || 0).toFixed(2)} €</strong>
+                    ${payment.paymentMethod === 'online' &&
+                        ['pending', 'open', 'authorized'].includes(payment.paymentStatus) &&
+                        getSafeCheckoutUrl(payment.checkoutUrl) ? `
+                        <a class="btn btn-outline-primary btn-sm"
+                            href="${getSafeCheckoutUrl(payment.checkoutUrl)}"
+                            target="_blank" rel="noopener noreferrer">Zahlungslink öffnen</a>
+                    ` : ''}
                     <button type="button"
                         class="btn btn-success btn-sm"
                         data-backend-action="open-manual-payment"
@@ -1253,12 +1269,12 @@ function renderOrderItemCard(order, item) {
     <img src="/${escapeHtml(image.imagePath)}" class="img-fluid rounded border"
         style="height: 120px; object-fit: cover; width: 100%;">
 </a>
-                                <button type="button" class="btn btn-outline-danger btn-sm w-100 mt-1"
+                                ${!isReturnFinalized(item) ? `<button type="button" class="btn btn-outline-danger btn-sm w-100 mt-1"
                                     data-backend-action="delete-return-image"
                                     data-image-id="${image.id}"
                                     data-order-id="${order.id}">
                                     Foto löschen
-                                </button>
+                                </button>` : ''}
                             </div>
                         `).join('')}
                     </div>
@@ -1471,6 +1487,13 @@ function showConfirm(message, title = 'Aktion bestätigen') {
 }
 
 function switchBackendView(view) {
+    document.getElementById('declarationsView')?.classList.add('d-none');
+    document.getElementById('nav-declarations')?.classList.remove('active');
+    if (view === 'declarations') {
+        document.getElementById('declarationsView')?.classList.remove('d-none');
+        document.getElementById('nav-declarations')?.classList.add('active');
+        loadContractDeclarations();
+    }
     document.getElementById('productsView')?.classList.add('d-none');
     document.getElementById('ordersView')?.classList.add('d-none');
     document.getElementById('openingHoursView')?.classList.add('d-none');
@@ -1737,39 +1760,63 @@ function getReturnCaseBadge(status, orderStatus = null) {
     </span>`;
 }
 
+function updateReturnPhotoControls() {
+    const busy = returnSaveInProgress || returnPhotoDeleteInProgress;
+    document.querySelectorAll('#orderItemReturnModal [data-backend-action="delete-return-image"], #orderItemReturnModal [data-backend-action="remove-selected-return-image"], #submitOrderItemReturnButton, #returnImageUpload').forEach(button => { button.disabled = busy; });
+}
+
+function renderExistingReturnImages(item, orderId) {
+    document.getElementById('returnExistingImages').innerHTML = (item?.returnImages || []).map(image => `
+        <div class="col-6 col-md-3">
+            <a href="/${escapeHtml(image.imagePath)}" target="_blank" rel="noopener">
+                <img src="/${escapeHtml(image.imagePath)}" alt="Rückgabefoto" class="img-fluid rounded border"
+                    style="height:120px;object-fit:cover;width:100%;">
+            </a>
+            ${!isReturnFinalized(item) ? `<button type="button" class="btn btn-outline-danger btn-sm w-100 mt-1"
+                data-backend-action="delete-return-image" data-image-id="${image.id}" data-order-id="${orderId}">
+                Foto löschen
+            </button>` : ''}
+        </div>`).join('');
+    updateReturnPhotoControls();
+}
+
 async function deleteReturnImage(imageId, orderId) {
-    const confirmed = await showConfirm(
-        'Möchten Sie dieses Rückgabefoto wirklich löschen?',
-        'Rückgabefoto löschen'
-    );
-
-    if (!confirmed) {
-        return;
-    }
-
+    if (returnSaveInProgress || returnPhotoDeleteInProgress) return;
+    returnPhotoDeleteInProgress = true;
+    updateReturnPhotoControls();
     try {
+        const confirmed = await showConfirm('Möchten Sie dieses Rückgabefoto wirklich löschen?', 'Rückgabefoto löschen');
+        if (!confirmed) return;
         const response = await fetch(`/admin/return-images/${imageId}`, {
-            method: 'DELETE'
+            method: 'DELETE', headers: await getAdminCsrfHeaders()
         });
-
         const result = await response.json();
-
         if (!response.ok) {
             showAlert(result.error || 'Foto konnte nicht gelöscht werden.', 'danger');
             return;
         }
-
+        // Remove the confirmed deletion locally even if refreshing details fails.
+        currentOrderItems.forEach(item => { item.returnImages = (item.returnImages || []).filter(image => Number(image.id) !== Number(imageId)); });
+        const currentItemId = document.getElementById('returnItemId').value;
+        if (Number(document.getElementById('returnOrderId').value) === Number(orderId)) {
+            renderExistingReturnImages(findCurrentOrderItem(currentItemId), orderId);
+        }
         showAlert(result.message || 'Foto wurde gelöscht.', 'success');
-
         const detailsResponse = await fetch(`/admin/orders/${orderId}`);
         const updatedOrder = await detailsResponse.json();
-
         if (detailsResponse.ok) {
+            currentOrderItems = updatedOrder.items || [];
             renderOrderDetails(updatedOrder);
+            if (Number(document.getElementById('returnOrderId').value) === Number(orderId)) {
+                renderExistingReturnImages(findCurrentOrderItem(currentItemId), orderId);
+            }
         }
     } catch (error) {
         console.error('Fehler beim Löschen des Rückgabefotos:', error);
         showAlert('Foto konnte nicht gelöscht werden.', 'danger');
+    } finally {
+        returnPhotoDeleteInProgress = false;
+        updateReturnPhotoControls();
     }
 }
 
@@ -1868,11 +1915,6 @@ function renderItemPayments(order, item) {
 
     const itemPayments = payments.filter(payment =>
         Number(payment.orderItemId) === Number(item.id)
-    );
-
-    const hasPaidPayment = paymentType => itemPayments.some(payment =>
-        payment.paymentType === paymentType &&
-        payment.paymentStatus === 'paid'
     );
 
     const rentalAdjustment = itemPayments
@@ -1988,20 +2030,6 @@ ${rentalPaid
                     data-payment-type="deposit_refund"
                     data-amount="${Math.abs(Number(openCashDepositRefund.amount || 0))}">
                     Kaution bar erstatten
-                </button>
-            ` : ''}
-
-
-
-            ${canAcceptPayments && returnCharge && !hasPaidPayment('return_additional_charge') ? `
-                <button type="button"
-                    class="btn btn-outline-success btn-sm ms-2"
-                    data-backend-action="open-manual-payment"
-                    data-order-id="${returnCharge.orderId}"
-                    data-item-id="${returnCharge.orderItemId || ''}"
-                    data-payment-type="${returnCharge.paymentType}"
-                    data-amount="${Number(returnCharge.amount || 0)}">
-                    Barzahlung erfassen
                 </button>
             ` : ''}
         </div>
@@ -2192,7 +2220,9 @@ function formatPaymentType(type) {
         return_additional_charge: 'Nachzahlung Rückgabe',
         deposit_refund: 'Kautionsrückerstattung',
         order_cancellation_refund: 'Storno-Rückerstattung',
-        duplicate_payment_refund: 'Erstattung einer Doppelzahlung'
+        duplicate_payment_refund: 'Erstattung einer Doppelzahlung',
+        refund_record: 'Erstattung über Mollie',
+        chargeback: 'Rückbelastung (Chargeback)'
     };
 
     return labels[type] || type || '-';
@@ -2505,6 +2535,10 @@ async function submitCancelOrderItem() {
     }
 }
 
+function isReturnFinalized(item) {
+    return Boolean(item.returnedAt) || String(item.itemStatus || '').startsWith('returned_');
+}
+
 function openOrderItemReturnModal(orderId, itemId) {
     const item = findCurrentOrderItem(itemId);
 
@@ -2538,20 +2572,9 @@ function openOrderItemReturnModal(orderId, itemId) {
     document.getElementById('returnAdditionalChargePaymentMethod').value = 'online';
     document.getElementById('returnNotes').value = item.returnNotes || '';
     document.getElementById('returnImageUpload').value = '';
-    document.getElementById('returnExistingImages').innerHTML = (item.returnImages || []).map(image => `
-    <div class="col-6 col-md-3">
-        <a href="/${image.imagePath}" target="_blank">
-            <img src="/${image.imagePath}" class="img-fluid rounded border"
-                style="height: 120px; object-fit: cover; width: 100%;">
-        </a>
-        <button type="button" class="btn btn-outline-danger btn-sm w-100 mt-1"
-            data-backend-action="delete-return-image"
-            data-image-id="${image.id}"
-            data-order-id="${orderId}">
-            Foto löschen
-        </button>
-    </div>
-`).join('');
+    selectedReturnImages = [];
+    renderSelectedReturnImagePreview();
+    renderExistingReturnImages(item, orderId);
 
     applyOrderItemReturnModalRules();
 
@@ -2766,6 +2789,7 @@ async function saveOrderItemRentalAdjustment(itemId, orderId) {
 }
 
 async function saveOrderItemReturn(itemId, orderId) {
+    if (returnSaveInProgress || returnPhotoDeleteInProgress) return;
     applyOrderItemReturnModalRules();
 
     const payload = {
@@ -2796,6 +2820,11 @@ async function saveOrderItemReturn(itemId, orderId) {
     };
 
     try {
+        returnSaveInProgress = true;
+        updateReturnPhotoControls();
+        // Upload once before finalization; a failed upload must not finalize
+        // the return without its selected documentation.
+        await uploadReturnImagesForCurrentReturn(itemId);
         const response = await fetch(`/admin/order-items/${itemId}/return`, {
             method: 'PUT',
             headers: await getAdminCsrfHeaders({
@@ -2811,19 +2840,6 @@ async function saveOrderItemReturn(itemId, orderId) {
             return;
         }
 
-        try {
-            await uploadReturnImagesForCurrentReturn(itemId);
-        } catch (uploadError) {
-            console.error('Rückgabe gespeichert, aber Fotos konnten nicht hochgeladen werden:', uploadError);
-            showAlert('Rückgabe gespeichert, aber Rückgabefotos konnten nicht hochgeladen werden.', 'warning');
-        }
-
-        try {
-            await sendReturnSummaryEmailForItem(itemId);
-        } catch (mailError) {
-            console.error('Rückgabe gespeichert, aber Abschlussmail konnte nicht versendet werden:', mailError);
-            showAlert('Rückgabe gespeichert, aber Abschlussmail konnte nicht versendet werden.', 'warning');
-        }
 
         const detailsResponse = await fetch(`/admin/orders/${orderId}`);
         const updatedOrder = await detailsResponse.json();
@@ -2856,7 +2872,10 @@ async function saveOrderItemReturn(itemId, orderId) {
 
     } catch (error) {
         console.error('Fehler beim Speichern der Positionsrückgabe:', error);
-        showAlert('Rückgabe konnte nicht gespeichert werden.', 'danger');
+        showAlert(error.message || 'Rückgabe konnte nicht gespeichert werden.', 'danger');
+    } finally {
+        returnSaveInProgress = false;
+        updateReturnPhotoControls();
     }
 }
 
@@ -2881,42 +2900,74 @@ async function submitOrderItemReturn() {
     await saveOrderItemReturn(itemId, orderId);
 }
 
+function addSelectedReturnImages() {
+    const input = document.getElementById('returnImageUpload');
+    const next = [...selectedReturnImages];
+    for (const file of Array.from(input.files || [])) {
+        if (!next.some(existing => existing.name === file.name &&
+            existing.size === file.size && existing.lastModified === file.lastModified)) {
+            next.push(file);
+        }
+    }
+    input.value = '';
+    if (next.length > 10) {
+        showAlert('Bitte höchstens 10 Rückgabefotos pro Speichervorgang auswählen.', 'warning');
+        return;
+    }
+    selectedReturnImages = next;
+    renderSelectedReturnImagePreview();
+}
+
+function removeSelectedReturnImage(index) {
+    if (returnSaveInProgress || returnPhotoDeleteInProgress || !Number.isInteger(index) || index < 0 || index >= selectedReturnImages.length) return;
+    selectedReturnImages.splice(index, 1);
+    renderSelectedReturnImagePreview();
+}
+
 function renderSelectedReturnImagePreview() {
     const input = document.getElementById('returnImageUpload');
     const preview = document.getElementById('returnSelectedImagePreview');
 
     if (!input || !preview) return;
 
-    const files = Array.from(input.files || []);
+    returnPreviewUrls.forEach(url => URL.revokeObjectURL(url));
+    returnPreviewUrls = [];
+    const files = selectedReturnImages;
 
     if (files.length === 0) {
         preview.innerHTML = '';
         return;
     }
 
+    returnPreviewUrls = files.map(file => URL.createObjectURL(file));
     preview.innerHTML = `
+        <div class="form-text">${files.length} Foto(s) zum Speichern ausgewählt</div>
         <div class="row g-2 mt-2">
-            ${files.map(file => `
+            ${files.map((file, index) => `
                 <div class="col-6 col-md-3">
-                    <img src="${URL.createObjectURL(file)}"
+                    <img src="${returnPreviewUrls[index]}" alt="${escapeHtml(file.name)}"
                         class="img-fluid rounded border"
                         style="height: 120px; object-fit: cover; width: 100%;">
+                    <button type="button" class="btn btn-outline-danger btn-sm w-100 mt-1"
+                        data-backend-action="remove-selected-return-image" data-image-index="${index}"
+                        aria-label="${escapeHtml(file.name)} entfernen">Entfernen</button>
                 </div>
             `).join('')}
         </div>
     `;
+    updateReturnPhotoControls();
 }
 
 async function uploadReturnImagesForCurrentReturn(itemId) {
     const input = document.getElementById('returnImageUpload');
 
-    if (!input || input.files.length === 0) {
+    if (!input || selectedReturnImages.length === 0) {
         return;
     }
 
     const formData = new FormData();
 
-    Array.from(input.files).forEach(file => {
+    selectedReturnImages.forEach(file => {
         formData.append('images', file);
     });
 
@@ -2933,6 +2984,12 @@ async function uploadReturnImagesForCurrentReturn(itemId) {
     }
 
     input.value = '';
+    selectedReturnImages = [];
+    // Use persisted IDs so photos remain individually deletable if saving fails.
+    const item = findCurrentOrderItem(itemId);
+    if (item) item.returnImages = [...(item.returnImages || []), ...(result.images || [])];
+    renderSelectedReturnImagePreview();
+    renderExistingReturnImages(item, document.getElementById('returnOrderId').value);
 }
 
 function calculateOrderItemFinancials(item) {
@@ -3450,44 +3507,6 @@ function initCategoryUi() {
 
     renderCategoryTags();
     renderCategorySuggestions();
-}
-
-async function uploadReturnImagesBeforeSave() {
-    const itemId = document.getElementById('returnItemId').value;
-    const orderId = document.getElementById('returnOrderId').value;
-
-    if (!itemId || !orderId) {
-        showAlert('Artikel wurde nicht gefunden.', 'danger');
-        return;
-    }
-
-    try {
-        await uploadReturnImagesForCurrentReturn(itemId);
-
-        const detailsResponse = await fetch(`/admin/orders/${orderId}`);
-        const updatedOrder = await detailsResponse.json();
-
-        if (detailsResponse.ok) {
-            currentOrderItems = updatedOrder.items || [];
-
-            const updatedItem = currentOrderItems.find(
-                item => Number(item.id) === Number(itemId)
-            );
-
-            document.getElementById('returnExistingImages').innerHTML =
-                (updatedItem?.returnImages || []).map(image => `
-                    <div class="col-6 col-md-3">
-                        <img src="${image.imagePath}" class="img-fluid rounded border">
-                    </div>
-                `).join('');
-        }
-
-        showAlert('Rückgabefotos wurden hochgeladen.', 'success');
-
-    } catch (error) {
-        console.error('Fehler beim Hochladen der Rückgabefotos:', error);
-        showAlert('Rückgabefotos konnten nicht hochgeladen werden.', 'danger');
-    }
 }
 
 async function markOrderPickedUp(orderId) {

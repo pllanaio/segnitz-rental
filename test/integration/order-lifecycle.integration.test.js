@@ -210,7 +210,14 @@ async function createOrder(client, paymentMethod, rentalStart, rentalEnd) {
     });
 
     const body = await response.json();
-    assert.equal(response.status, 200, JSON.stringify(body));
+    if (response.status === 202 && paymentMethod === 'online') {
+        assert.equal(body.paymentPending, true);
+        const payment = await waitForDatabaseRow(
+            "SELECT checkout_url FROM rental_order_payments WHERE order_id = ? AND payment_type = 'initial_payment' ORDER BY id DESC LIMIT 1",
+            [body.orderId], row => Boolean(row.checkout_url), 'asynchrone Checkout-Erstellung'
+        );
+        body.checkoutUrl = payment.checkout_url;
+    } else assert.equal(response.status, 200, JSON.stringify(body));
 
     return body;
 }
@@ -226,7 +233,13 @@ before(async () => {
             BASE_URL,
             NODE_ENV: 'test',
             DISABLE_PERIODIC_CLEANUP: '1',
-            DISABLE_EMAILS: '1',
+            // Leave mails pending for snapshot assertions. Empty credentials
+            // guarantee that the real Graph transport cannot be called.
+            DISABLE_EMAILS: '0',
+            MS_TENANT_ID: '',
+            MS_CLIENT_ID: '',
+            MS_CLIENT_SECRET: '',
+            GRAPH_MAIL_USER: '',
             MOLLIE_TEST_MODE: '1',
             MOLLIE_API_KEY: process.env.MOLLIE_API_KEY || TEST_MOLLIE_API_KEY
         },
@@ -252,6 +265,16 @@ after(async () => {
         ]);
     }
 });
+
+async function receiptMails(orderId) {
+    const [order] = await queryRows('SELECT order_no FROM rental_orders WHERE id = ?', [orderId]);
+    const rows = await queryRows(
+        `SELECT payload_json FROM external_effects_outbox WHERE effect_type = 'mail.send'
+         AND JSON_UNQUOTE(JSON_EXTRACT(payload_json, '$.message.receipt.orderNo')) = ? ORDER BY id`,
+        [order.order_no]
+    );
+    return rows.map(row => (typeof row.payload_json === 'string' ? JSON.parse(row.payload_json) : row.payload_json).message);
+}
 
 test('schließt eine Barzahlungs-Bestellung ab und persistiert Miete sowie Kaution', async () => {
     const customer = new SessionClient();
@@ -846,13 +869,17 @@ test('Recheckout reaktiviert kein zwischenzeitlich deaktiviertes Produkt', async
     }
 });
 
-test('kassiert Barzahlung, blockiert vorzeitige Abholung und verarbeitet Rückgabe mit Kautionsauszahlung', async () => {
+test('kassiert Barzahlung, blockiert vorzeitige Abholung und verarbeitet Rückgabe mit Kautionsauszahlung', async t => {
     const customer = new SessionClient();
     await login(customer, TEST_CUSTOMER);
 
     const rentalStart = futureDate(30);
     const rentalEnd = futureDate(31);
     const order = await createOrder(customer, 'cash', rentalStart, rentalEnd);
+
+    const initialMails = await receiptMails(order.orderId);
+    assert.equal(initialMails.filter(mail => mail.receipt.kind === 'order').length, 1);
+    assert.equal(initialMails[0].receipt.signature, 'data:image/png;base64,dGVzdA==');
 
     const [item] = await queryRows(
         `SELECT id FROM rental_order_items WHERE order_id = ? LIMIT 1`,
@@ -884,6 +911,21 @@ test('kassiert Barzahlung, blockiert vorzeitige Abholung und verarbeitet Rückga
     });
     assert.equal(pickupResponse.status, 200, await pickupResponse.text());
 
+    const photoForm = new FormData();
+    const imageBytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGAAAAAEAAH2FzhVAAAAAElFTkSuQmCC', 'base64');
+    photoForm.append('images', new Blob([imageBytes], { type: 'image/png' }), 'behalten.png');
+    photoForm.append('images', new Blob([imageBytes], { type: 'image/png' }), 'entfernen.png');
+    const photoUpload = await admin.request(`/admin/order-items/${item.id}/return-images`, { method: 'POST', body: photoForm });
+    assert.equal(photoUpload.status, 200);
+    const uploaded = (await photoUpload.json()).images;
+    assert.equal(uploaded.length, 2);
+    const { RETURN_IMAGE_DIRECTORY } = require('../../utils/uploads');
+    t.after(async () => {
+        for (const image of uploaded) await require('node:fs/promises').rm(path.join(RETURN_IMAGE_DIRECTORY, path.basename(image.imagePath)), { force: true });
+    });
+    const removedPhoto = await admin.request(`/admin/return-images/${uploaded[1].id}`, { method: 'DELETE' });
+    assert.equal(removedPhoto.status, 200, await removedPhoto.text());
+
     const returnResponse = await admin.request(`/admin/order-items/${item.id}/return`, {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
@@ -907,6 +949,8 @@ test('kassiert Barzahlung, blockiert vorzeitige Abholung und verarbeitet Rückga
         })
     });
     assert.equal(returnResponse.status, 200, await returnResponse.text());
+    const protectedPhoto = await admin.request(`/admin/return-images/${uploaded[0].id}`, { method: 'DELETE' });
+    assert.equal(protectedPhoto.status, 409);
 
     const [returnedOrder] = await queryRows(
         `SELECT status, return_status, return_case_status, payment_status,
@@ -947,6 +991,14 @@ test('kassiert Barzahlung, blockiert vorzeitige Abholung und verarbeitet Rückga
         { method: 'cash', status: 'pending', amount: -300 }
     );
 
+    const beforeRefundMails = await receiptMails(order.orderId);
+    assert.equal(beforeRefundMails.filter(mail => mail.receipt.kind === 'return').length, 1);
+    const returnPhotos = beforeRefundMails.find(mail => mail.receipt.kind === 'return').receipt.photos;
+    assert.deepEqual(returnPhotos.map(photo => photo.id), [uploaded[0].id]);
+    assert.ok(Buffer.from(returnPhotos[0].contentBase64, 'base64').length > 0);
+    assert.equal(beforeRefundMails.filter(mail => mail.receipt.kind === 'completed').length, 0);
+    assert.doesNotMatch(JSON.stringify(beforeRefundMails), /Automatische unbeschädigte Rückgabe/);
+
     const settleRefund = await admin.request('/admin/order-payments/manual-refund', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -965,6 +1017,10 @@ test('kassiert Barzahlung, blockiert vorzeitige Abholung und verarbeitet Rückga
         [order.orderId]
     );
     assert.equal(closedOrder.return_case_status, 'closed');
+    const completedMails = (await receiptMails(order.orderId)).filter(mail => mail.receipt.kind === 'completed');
+    assert.equal(completedMails.length, 1);
+    assert.equal(completedMails[0].receipt.payments.find(p => p.type === 'deposit_refund').status, 'paid');
+    assert.equal((await receiptMails(order.orderId)).find(mail => mail.receipt.kind === 'return').receipt.payments.find(p => p.type === 'deposit_refund').status, 'pending');
 });
 
 test('validiert Schäden und nutzt für Rückgabe-Nachzahlungen den gewählten Mollie-Zahlungslink', async () => {
@@ -1463,6 +1519,11 @@ test('verlängert eine bezahlte Bar-Miete atomar und verrechnet offene Verlänge
         })
     });
     assert.equal(extension.status, 200, await extension.text());
+    const extensionMails = (await receiptMails(order.orderId)).filter(mail => mail.receipt.kind === 'extension');
+    assert.equal(extensionMails.length, 1);
+    assert.equal(extensionMails[0].receipt.items[0].end, extendedEnd);
+    assert.equal(extensionMails[0].receipt.items[0].originalEnd, rentalEnd);
+    assert.equal(extensionMails[0].receipt.payments.find(p => p.type === 'rental_adjustment').status, 'pending');
 
     const conflictingExtension = await admin.request(`/admin/order-items/${item.id}/rental-adjustment`, {
         method: 'PUT',
@@ -1527,6 +1588,8 @@ test('verlängert eine bezahlte Bar-Miete atomar und verrechnet offene Verlänge
     );
     assert.equal(depositRefund.payment_status, 'pending');
     assert.equal(Number(depositRefund.amount), -40);
+    const persistedExtension = (await receiptMails(order.orderId)).find(mail => mail.receipt.kind === 'extension');
+    assert.deepEqual(persistedExtension, extensionMails[0], 'spätere Verrechnung darf den Verlängerungsbeleg nicht verändern');
 });
 
 test('erstattet eine Online-Kaution auch mit historischer Zahlung nur am Auftrag', async () => {
@@ -1563,6 +1626,10 @@ test('erstattet eine Online-Kaution auch mit historischer Zahlung nur am Auftrag
         })
     });
     assert.equal(extension.status, 200, await extension.text());
+
+    const onlineReceipts = await receiptMails(order.orderId);
+    assert.ok(onlineReceipts.some(mail => mail.receipt.kind === 'order' && mail.receipt.paymentStatus === 'pending'));
+    assert.equal(onlineReceipts.filter(mail => mail.receipt.kind === 'extension').length, 1);
 
     const [extensionPayment] = await queryRows(
         `SELECT id, mollie_payment_id FROM rental_order_payments
@@ -1629,6 +1696,11 @@ test('erstattet eine Online-Kaution auch mit historischer Zahlung nur am Auftrag
         [order.orderId]
     );
     assert.equal(closedOrder.return_case_status, 'closed');
+    const finalMails = await receiptMails(order.orderId);
+    assert.equal(finalMails.filter(mail => mail.receipt.kind === 'completed').length, 1, 'Refund-Worker erstellt den Abschlussbeleg');
+    assert.equal(finalMails.filter(mail => mail.receipt.kind === 'return').length, 1);
+    const [mailAttempts] = await queryRows("SELECT SUM(attempt_count) AS count FROM external_effects_outbox WHERE effect_type = 'mail.send'");
+    assert.equal(Number(mailAttempts.count), 0, 'fehlende Mailkonfiguration verbraucht keine Versandversuche');
 });
 
 test('erstattet eine verspätete Online-Verlängerungszahlung, wenn sie bei Rückgabe bereits mit der Kaution verrechnet wurde', async () => {
@@ -2454,4 +2526,151 @@ test('verweigert unverifizierte Logins und gibt Verbindungen auf allen Fehlpfade
         afterConnections <= beforeConnections + 1,
         `Fehlgeschlagene Logins erhöhten Threads_connected von ${beforeConnections} auf ${afterConnections}`
     );
+});
+
+
+test('verbucht Teil-Chargebacks einmalig, wahrt den Mietstatus und verarbeitet Rücknahmen über mehrere Zahlungen', async () => {
+    const customer = new SessionClient();
+    await login(customer, TEST_CUSTOMER);
+    const order = await createOrder(customer, 'cash', futureDate(400), futureDate(401));
+    const paymentId = 'tr_test_paid_chargeback_' + order.orderId;
+    await execute("UPDATE rental_orders SET status = 'returned', payment_status = 'paid', mollie_payment_id = ? WHERE id = ?", [paymentId, order.orderId]);
+    await execute("UPDATE rental_order_payments SET payment_method = 'online', payment_status = 'paid', mollie_payment_id = ? WHERE order_id = ?", [paymentId, order.orderId]);
+    const mysql = require('mysql2/promise');
+    const connection = await mysql.createConnection(require('../../config/db'));
+    const { syncMollieChargebacks } = require('../../services/mollieChargebacks');
+    const chargeback = { id: 'chb_partial_' + order.orderId, paymentId,
+        amount: { currency: 'EUR', value: '20.00' } };
+    const sync = async payment => {
+        await connection.beginTransaction();
+        try { const result = await syncMollieChargebacks(connection, payment); await connection.commit(); return result; }
+        catch (error) { await connection.rollback(); throw error; }
+    };
+    try {
+        for (let i = 0; i < 2; i++) {
+            assert.equal((await sync({ id: paymentId, status: 'paid', chargebacks: [chargeback] })).active, true);
+        }
+        let rows = await queryRows("SELECT amount, payment_status FROM rental_order_payments WHERE order_id = ? AND payment_type = 'chargeback'", [order.orderId]);
+        assert.equal(rows.length, 1);
+        assert.equal(Number(rows[0].amount), -20);
+        let [state] = await queryRows('SELECT status, payment_status, return_case_status FROM rental_orders WHERE id = ?', [order.orderId]);
+        assert.equal(state.status, 'returned');
+        assert.equal(state.payment_status, 'charged_back');
+        assert.equal(state.return_case_status, 'payment_dispute');
+        const secondId = paymentId + '_second';
+        await execute("INSERT INTO rental_order_payments (order_id, payment_type, payment_method, payment_status, amount, mollie_payment_id) VALUES (?, 'rental_adjustment', 'online', 'paid', 30, ?)", [order.orderId, secondId]);
+        await sync({ id: secondId, status: 'paid', chargebacks: [{ ...chargeback, id: chargeback.id + '_second', paymentId: secondId }] });
+        assert.equal((await sync({ id: paymentId, status: 'paid', chargebacks: [{ ...chargeback, reversedAt: '2026-09-27T12:00:00Z' }] })).active, true);
+        assert.equal((await sync({ id: secondId, status: 'paid', chargebacks: [{ ...chargeback, id: chargeback.id + '_second', paymentId: secondId, reversedAt: '2026-09-27T12:00:00Z' }] })).active, false);
+        [state] = await queryRows('SELECT status, payment_status FROM rental_orders WHERE id = ?', [order.orderId]);
+        assert.equal(state.status, 'returned');
+        assert.equal(state.payment_status, 'paid');
+        rows = await queryRows("SELECT payment_status FROM rental_order_payments WHERE order_id = ? AND payment_type = 'chargeback'", [order.orderId]);
+        assert.ok(rows.every(row => row.payment_status === 'cancelled'));
+    } finally { await connection.end(); }
+});
+
+
+test('gleicht Dashboard-Refunds und frühe Refund-Webhooks ohne doppelte Buchung ab', async () => {
+    const customer = new SessionClient();
+    await login(customer, TEST_CUSTOMER);
+    const order = await createOrder(customer, 'cash', futureDate(402), futureDate(403));
+    const paymentId = 'tr_test_paid_refund_sync_' + order.orderId;
+    await execute("UPDATE rental_order_payments SET payment_method = 'online', payment_status = 'paid', mollie_payment_id = ? WHERE order_id = ?", [paymentId, order.orderId]);
+    const connection = await require('mysql2/promise').createConnection(require('../../config/db'));
+    const { syncMollieRefundsForPayment } = require('../../services/mollieRefunds');
+    const refund = { id: 're_dashboard_' + order.orderId, status: 'pending', amount: { currency: 'EUR', value: '12.30' } };
+    try {
+        await connection.beginTransaction();
+        await syncMollieRefundsForPayment(connection, paymentId, [refund]);
+        await syncMollieRefundsForPayment(connection, paymentId, [{ ...refund, status: 'refunded' }]);
+        const operationKey = 'early-refund-' + order.orderId;
+        await connection.execute("INSERT INTO rental_order_payments (order_id, payment_type, payment_method, payment_status, amount, mollie_payment_id, external_operation_key) VALUES (?, 'deposit_refund', 'online', 'pending', -5, ?, ?)", [order.orderId, paymentId, operationKey]);
+        await syncMollieRefundsForPayment(connection, paymentId, [{ id: 're_early_' + order.orderId, status: 'refunded', amount: { currency: 'EUR', value: '5.00' }, metadata: { operationKey } }]);
+        await connection.commit();
+        const rows = await queryRows("SELECT payment_type, amount, payment_status FROM rental_order_payments WHERE order_id = ? AND mollie_refund_id IS NOT NULL ORDER BY id", [order.orderId]);
+        assert.equal(rows.length, 2);
+        assert.equal(rows[0].payment_type, 'refund_record');
+        assert.equal(Number(rows[0].amount), -12.3);
+        assert.equal(rows[1].payment_type, 'deposit_refund');
+        assert.ok(rows.every(row => row.payment_status === 'paid'));
+    } catch (error) { await connection.rollback(); throw error; }
+    finally { await connection.end(); }
+});
+
+
+test('nimmt Widerrufe ohne Login und Fristsperre entgegen, bestätigt unverändert und schützt Adminzugriff', async () => {
+    const guest = new SessionClient(); await prepareCsrf(guest);
+    const data = { id: require('node:crypto').randomUUID(), kind: 'withdrawal', name: '<img src=x onerror=alert(1)>',
+        email: 'withdrawal.test@example.invalid', contractReference: 'Älterer Vertrag ohne Bestellnummer', scope: 'Nur Rüttelplatte' };
+    const submit = () => guest.request('/contract-declarations', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(data) });
+    const first = await submit(); assert.equal(first.status, 201, await first.clone().text());
+    const result = await first.json();
+    assert.match(result.receipt.declaration, /Hiermit widerrufe ich/);
+    assert.match(result.receipt.declaration, /Nur Rüttelplatte/);
+    const repeat = await submit(); assert.equal(repeat.status, 201);
+    const replay = await repeat.json();
+    assert.equal(new Date(replay.receipt.receivedAt).getTime(), new Date(result.receipt.receivedAt).getTime());
+    const rows = await queryRows('SELECT * FROM contract_declarations WHERE id = ?', [data.id]);
+    assert.equal(rows.length, 1); assert.equal(rows[0].order_id, null);
+    const mails = await queryRows('SELECT payload_json FROM external_effects_outbox WHERE operation_key = ?', ['mail-declaration-' + data.id]);
+    assert.equal(mails.length, 1);
+    const payload = typeof mails[0].payload_json === 'string' ? JSON.parse(mails[0].payload_json) : mails[0].payload_json;
+    assert.ok(payload.message.text.includes(result.receipt.receivedAt));
+    assert.ok(payload.message.text.includes(result.receipt.declaration));
+    assert.ok(!payload.message.html.includes('<img src=x'));
+    const forbidden = await guest.request('/admin/contract-declarations'); assert.equal(forbidden.status, 401);
+    const admin = new SessionClient(); await login(admin, TEST_ADMIN);
+    const list = await admin.request('/admin/contract-declarations'); assert.equal(list.status, 200);
+    assert.ok((await list.json()).items.some(item => item.id === data.id));
+    const processed = await admin.request('/admin/contract-declarations/' + data.id + '/processed', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ note: 'Zuordnung geklärt und Rückabwicklung veranlasst' }) });
+    assert.equal(processed.status, 200);
+    const [stored] = await queryRows('SELECT declaration_text, processing_status FROM contract_declarations WHERE id = ?', [data.id]);
+    assert.equal(stored.declaration_text, result.receipt.declaration);
+    assert.equal(stored.processing_status, 'processed');
+});
+
+test('Kunde storniert eigene bezahlte Bestellung kostenfrei und Erstattung wird nur einmal vorgemerkt', async () => {
+    const customer = new SessionClient(); await login(customer, TEST_CUSTOMER);
+    const stranger = new SessionClient(); await login(stranger, TEST_OTHER_CUSTOMER);
+    const order = await createOrder(customer, 'cash', futureDate(450), futureDate(451));
+    const admin = new SessionClient(); await login(admin, TEST_ADMIN);
+    const paid = await admin.request('/admin/order-payments/manual', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ orderId: order.orderId, paymentType: 'initial_payment', amount: 460 })
+    });
+    assert.equal(paid.status, 200, await paid.text());
+    const url = '/my-orders/' + order.orderId + '/cancel';
+    assert.equal((await stranger.request(url, { method: 'POST' })).status, 404);
+    for (let i = 0; i < 2; i++) {
+        const response = await customer.request(url, { method: 'POST' });
+        assert.equal(response.status, 200, await response.text());
+    }
+    const [cancelled] = await queryRows('SELECT status, payment_status FROM rental_orders WHERE id = ?', [order.orderId]);
+    assert.equal(cancelled.status, 'cancelled'); assert.equal(cancelled.payment_status, 'refund_pending');
+    const refunds = await queryRows("SELECT amount FROM rental_order_payments WHERE order_id = ? AND payment_type = 'order_cancellation_refund'", [order.orderId]);
+    assert.equal(refunds.length, 1); assert.ok(Number(refunds[0].amount) < 0);
+    const items = await queryRows('SELECT item_status FROM rental_order_items WHERE order_id = ?', [order.orderId]);
+    assert.ok(items.every(item => item.item_status === 'cancelled'));
+    const mails = await queryRows('SELECT id FROM external_effects_outbox WHERE operation_key = ?', ['mail-order-cancelled-' + order.orderId]);
+    assert.equal(mails.length, 1);
+});
+
+test('Widerruf nimmt keine Stornierungen an und bleibt nach Abholung unabhängig erreichbar', async () => {
+    const customer = new SessionClient(); await login(customer, TEST_CUSTOMER);
+    const order = await createOrder(customer, 'cash', futureDate(452), futureDate(453));
+    const guest = new SessionClient(); await prepareCsrf(guest);
+    const data = { id: require('node:crypto').randomUUID(), kind: 'cancellation', name: 'Test Kunde',
+        email: TEST_CUSTOMER.email, contractReference: order.orderNo, scope: '' };
+    const response = await guest.request('/contract-declarations', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(data) });
+    assert.equal(response.status, 400, await response.text());
+    const [before] = await queryRows('SELECT status FROM rental_orders WHERE id = ?', [order.orderId]);
+    assert.notEqual(before.status, 'cancelled');
+    assert.equal((await queryRows('SELECT id FROM contract_declarations WHERE id = ?', [data.id])).length, 0);
+    const picked = await createOrder(customer, 'cash', futureDate(454), futureDate(455));
+    await execute("UPDATE rental_order_items SET item_status = 'picked_up', picked_up_at = NOW() WHERE order_id = ?", [picked.orderId]);
+    const denied = await customer.request('/my-orders/' + picked.orderId + '/cancel', { method: 'POST' });
+    assert.equal(denied.status, 409, await denied.text());
+    const withdrawal = await guest.request('/contract-declarations', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...data, id: require('node:crypto').randomUUID(), kind: 'withdrawal', contractReference: picked.orderNo }) });
+    assert.equal(withdrawal.status, 201, await withdrawal.text());
 });

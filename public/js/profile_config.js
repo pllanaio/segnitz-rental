@@ -26,6 +26,7 @@ function handleProfileActionClick(event) {
 
     const actions = {
         'open-order-details': () => openMyOrderDetails(orderId),
+        'cancel-order': () => cancelMyOrder(orderId, button),
         'change-order-page': () => changeMyOrderPage(Number(button.dataset.direction)),
         'submit-review': () => submitProductReview(productId, orderId)
     };
@@ -159,9 +160,21 @@ function populateMyOrderFilters() {
         }
     );
 
-    setMyOrderSelectOptions('myOrderStatusFilter', myOrderFilterOptions.statuses || []);
-    setMyOrderSelectOptions('myOrderReturnStatusFilter', myOrderFilterOptions.returnStatuses || []);
-    setMyOrderSelectOptions('myOrderPaymentStatusFilter', myOrderFilterOptions.paymentStatuses || []);
+    setMyOrderSelectOptions('myOrderStatusFilter', myOrderFilterOptions.statuses || [], {
+        pending: 'Ausstehend', reserved: 'Reserviert', confirmed: 'Bestätigt',
+        paid: 'Bezahlt', active: 'Aktiv', picked_up: 'Abgeholt', returned: 'Zurückgegeben',
+        cancelled: 'Storniert', expired: 'Abgelaufen'
+    });
+    setMyOrderSelectOptions('myOrderReturnStatusFilter', myOrderFilterOptions.returnStatuses || [], {
+        pending: 'Offen', returned_ok: 'Ordnungsgemäß zurückgegeben',
+        returned_late: 'Verspätet zurückgegeben', returned_damaged: 'Beschädigt zurückgegeben',
+        returned_late_damaged: 'Verspätet und beschädigt', not_required: 'Nicht erforderlich'
+    });
+    setMyOrderSelectOptions('myOrderPaymentStatusFilter', myOrderFilterOptions.paymentStatuses || [], {
+        unpaid: 'Unbezahlt', pending: 'Ausstehend', open: 'Offen', authorized: 'Autorisiert',
+        paid: 'Bezahlt', failed: 'Fehlgeschlagen', refunded: 'Erstattet',
+        cancelled: 'Abgebrochen', expired: 'Abgelaufen'
+    });
 }
 
 async function loadMyOrders() {
@@ -240,6 +253,8 @@ function renderMyOrders() {
                         data-profile-action="open-order-details" data-order-id="${order.id}">
                         Details anzeigen
                     </button>
+                    ${['reserved', 'pending_payment', 'payment_failed', 'confirmed'].includes(order.status) && !(order.items || []).some(item => item.pickedUpAt || item.itemStatus === 'picked_up') ? `
+                    <button type="button" class="btn btn-outline-danger btn-sm" data-profile-action="cancel-order" data-order-id="${order.id}">Bestellung stornieren</button>` : ''}
                 </div>
             </div>
         </div>
@@ -1403,4 +1418,18 @@ function logout() {
             console.error('Netzwerkfehler beim Versuch, sich abzumelden:', error);
             showAlert('Netzwerkfehler', 'danger');
         });
+}
+
+
+async function cancelMyOrder(orderId, button) {
+    if (!window.confirm('Möchten Sie die gesamte Bestellung vor der Abholung kostenfrei stornieren? Bereits gezahlte Beträge werden zur Erstattung vorgemerkt.')) return;
+    button.disabled = true;
+    try {
+        const response = await fetch(`/my-orders/${orderId}/cancel`, { method: 'POST' });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Stornierung nicht möglich.');
+        showAlert(result.message, 'success');
+        await loadMyOrders();
+    } catch (error) { showAlert(error.message, 'danger'); }
+    finally { button.disabled = false; }
 }

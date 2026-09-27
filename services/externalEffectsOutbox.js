@@ -165,11 +165,13 @@ async function enqueueExternalEffect(effect, options = {}) {
 
 async function enqueueMolliePaymentCreation(connection, options) {
     const operationKey = options.operationKey;
+    const details = await require('./molliePaymentDetails').captureMolliePaymentDetails(connection, options.payment);
     return enqueueExternalEffect({
         operationKey,
         effectType: EFFECT_TYPES.MOLLIE_PAYMENT_CREATE,
         payload: {
             payment: {
+                ...details,
                 ...options.payment,
                 idempotencyKey: operationKey
             },
@@ -227,6 +229,7 @@ async function getExternalEffect(operationKey, options = {}) {
 
 async function claimExternalEffect({
     operationKey = null,
+    excludeMail = false,
     workerId,
     leaseSeconds = 60,
     applyDead = null,
@@ -283,6 +286,7 @@ async function claimExternalEffect({
                 OR (status = 'processing' AND locked_at < DATE_SUB(NOW(), INTERVAL ? SECOND))
              )
              AND attempt_count < max_attempts
+             ${excludeMail ? "AND effect_type <> 'mail.send'" : ''}
              ${operationFilter}
              ORDER BY id ASC
              LIMIT 1

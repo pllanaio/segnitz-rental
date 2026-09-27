@@ -82,6 +82,10 @@ class SessionClient {
         const responseCsrfToken = response.headers.get('x-csrf-token');
         if (responseCsrfToken) this.csrfToken = responseCsrfToken;
 
+        // fetch resolves at the headers; wait for the completed response (and
+        // session persistence) before a test sends its next sequential request.
+        await response.clone().arrayBuffer();
+
         return response;
     }
 }
@@ -458,6 +462,44 @@ test('liefert Rückgabefotos nur an Bestellinhaber und Admin ohne Cache aus', as
                 headers: { 'if-none-match': etag }
             });
             assert.equal(conditionalResponse.status, 200);
+        }
+
+        if (credentials === TEST_ADMIN) {
+            const inspection = await mysql.createConnection(dbConfig);
+            try {
+                const [[image]] = await inspection.execute(
+                    'SELECT id, order_item_id FROM rental_order_return_images WHERE image_path = ?',
+                    [imagePath]
+                );
+                const deletePhoto = () => client.request(`/admin/return-images/${image.id}`, { method: 'DELETE' });
+                assert.equal((await deletePhoto()).status, 409);
+                await fs.access(absoluteImagePath);
+
+                // The timestamp independently protects a finalized return.
+                await inspection.execute("UPDATE rental_order_items SET item_status = 'picked_up' WHERE id = ?", [image.order_item_id]);
+                assert.equal((await deletePhoto()).status, 409);
+
+                // Deletion must also wait for concurrent return finalization.
+                await inspection.execute('UPDATE rental_order_items SET returned_at = NULL WHERE id = ?', [image.order_item_id]);
+                await inspection.beginTransaction();
+                await inspection.execute("UPDATE rental_order_items SET item_status = 'returned_ok', returned_at = NOW() WHERE id = ?", [image.order_item_id]);
+                const concurrentDeletion = deletePhoto();
+                await delay(100);
+                await inspection.commit();
+                assert.equal((await concurrentDeletion).status, 409);
+                await fs.access(absoluteImagePath);
+                const [[preserved]] = await inspection.execute('SELECT COUNT(*) AS count FROM rental_order_return_images WHERE id = ?', [image.id]);
+                assert.equal(Number(preserved.count), 1);
+
+                // Draft photos remain removable before the return is finalized.
+                await inspection.execute("UPDATE rental_order_items SET item_status = 'picked_up', returned_at = NULL WHERE id = ?", [image.order_item_id]);
+                assert.equal((await deletePhoto()).status, 200);
+                await assert.rejects(fs.access(absoluteImagePath), { code: 'ENOENT' });
+                assert.equal((await deletePhoto()).status, 404);
+            } finally {
+                await inspection.rollback();
+                await inspection.end();
+            }
         }
     }
 });
@@ -957,216 +999,86 @@ test('vergibt parallelen Registrierungen atomar eindeutige Kundennummern', async
     customerNumbers.forEach(customerNo => assert.match(customerNo, /^K\d{9}$/));
 });
 
-test('bindet die Kontoaktivierung an einen neuen Passwortabschluss aus der Mailbox', async () => {
+test('bestätigt die Registrierung ohne Passwortwechsel und schützt das ursprüngliche Passwort bei erneuter Registrierung', async () => {
     const email = 'verification-recovery@example.com';
-    const attackerPassword = 'AttackerPassword1!';
-    const victimPassword = 'VictimRegistration1!';
-    const completedPassword = 'VictimCompleted1!';
-    const attackerRegistration = {
-        firstName: 'Angreifer',
-        lastName: 'Profil',
-        company: '',
-        email,
-        phone: '0123456789',
-        address: 'Teststrasse 2',
-        zip: '97070',
-        city: 'Wuerzburg',
-        password: attackerPassword
+    const password = 'RegistrationPassword1!';
+    const otherPassword = 'DifferentPassword2!';
+    const registration = {
+        firstName: 'Kunde', lastName: 'Registrierung', company: '', email,
+        phone: '0123456789', address: 'Teststrasse 2', zip: '97070', city: 'Wuerzburg', password
     };
-    const victimRegistration = {
-        ...attackerRegistration,
-        firstName: 'Opfer',
-        lastName: 'Profil',
-        address: 'Sicherer Weg 3',
-        password: victimPassword
-    };
-    const firstClient = new SessionClient();
-    const firstResponse = await firstClient.request('/register-customer', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(attackerRegistration)
+    const client = new SessionClient();
+    const register = data => client.request('/register-customer', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(data)
     });
-    assert.equal(firstResponse.status, 201, await firstResponse.text());
+    const readUser = async () => {
+        const connection = await mysql.createConnection(dbConfig);
+        try {
+            const [[user]] = await connection.execute('SELECT * FROM users WHERE username = ?', [email]);
+            return user;
+        } finally { await connection.end(); }
+    };
+    const registered = await register(registration);
+    assert.equal(registered.status, 201, await registered.text());
+    const original = await readUser();
+    assert.equal(await bcrypt.compare(password, original.password), true);
+
+    const blockedLogin = await new SessionClient().request('/login', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: email, password })
+    });
+    assert.equal(blockedLogin.status, 403);
 
     const connection = await mysql.createConnection(dbConfig);
-    let originalToken;
-    let originalUserId;
-    let originalOutboxId;
     try {
-        const [users] = await connection.execute(
-            'SELECT id, verification_token FROM users WHERE username = ?',
-            [email]
-        );
-        originalUserId = Number(users[0].id);
-        originalToken = users[0].verification_token;
-        const originalOperationKey = createOperationKey('mail-verify', {
-            email,
-            token: originalToken
-        });
-        const [effects] = await connection.execute(
-            `SELECT id FROM external_effects_outbox
-             WHERE operation_key = ?
-             LIMIT 1`,
-            [originalOperationKey]
-        );
-        originalOutboxId = effects[0].id;
         await connection.execute(
-            `UPDATE external_effects_outbox
-             SET status = 'dead', attempt_count = max_attempts, completed_at = NOW()
-             WHERE id = ?`,
-            [originalOutboxId]
+            "UPDATE external_effects_outbox SET status = 'dead', attempt_count = max_attempts, completed_at = NOW() WHERE operation_key = ?",
+            [createOperationKey('mail-verify', { email, token: original.verification_token })]
         );
-    } finally {
-        await connection.end();
+    } finally { await connection.end(); }
+    const resent = await register(registration);
+    assert.equal(resent.status, 202, await resent.text());
+    const conflicting = await register({ ...registration, password: otherPassword, firstName: 'Fremdes Profil' });
+    assert.equal(conflicting.status, 409, await conflicting.text());
+    assert.equal((await readUser()).password, original.password);
+    assert.equal((await readUser()).first_name, registration.firstName);
+    assert.equal((await readUser()).verification_token, original.verification_token);
+
+    for (let i = 0; i < 2; i++) {
+        const link = await client.request(`/verify-email?token=${original.verification_token}`, { redirect: 'manual' });
+        assert.equal(link.status, 302);
+        assert.equal(link.headers.get('location'), `/verify-email.html#token=${original.verification_token}`);
+        assert.equal(Number((await readUser()).email_verified), 0, 'Mail-Linkscanner dürfen das Konto nicht bestätigen');
     }
-
-    const resendClient = new SessionClient();
-    const resendResponse = await resendClient.request('/register-customer', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(victimRegistration)
-    });
-    const resendBody = await resendResponse.json();
-    assert.equal(resendResponse.status, 202, JSON.stringify(resendBody));
-    assert.match(resendBody.message, /neue Bestätigungsmail/i);
-
-    const verificationConnection = await mysql.createConnection(dbConfig);
-    let victimVerificationToken;
-    try {
-        const [users] = await verificationConnection.execute(
-            `SELECT verification_token, first_name, last_name, address
-             FROM users WHERE username = ?`,
-            [email]
-        );
-        victimVerificationToken = users[0].verification_token;
-        assert.equal(users[0].verification_token, originalToken);
-        assert.deepEqual({
-            firstName: users[0].first_name,
-            lastName: users[0].last_name,
-            address: users[0].address
-        }, {
-            firstName: attackerRegistration.firstName,
-            lastName: attackerRegistration.lastName,
-            address: attackerRegistration.address
-        });
-        const [effects] = await verificationConnection.execute(
-            `SELECT COUNT(*) AS count
-             FROM external_effects_outbox
-             WHERE operation_key = ? OR operation_key LIKE ?`,
-            [
-                createOperationKey('mail-verify', { email, token: originalToken }),
-                `mail-verify-resend-${originalUserId}-%`
-            ]
-        );
-        assert.equal(Number(effects[0].count), 2);
-    } finally {
-        await verificationConnection.end();
-    }
-
-    const attackerRaceResponse = await new SessionClient().request('/register-customer', {
-        method: 'POST',
-        headers: {
-            'content-type': 'application/json',
-            'x-forwarded-for': '198.51.100.30'
-        },
-        body: JSON.stringify(attackerRegistration)
-    });
-    assert.equal(attackerRaceResponse.status, 202, await attackerRaceResponse.text());
-    const raceConnection = await mysql.createConnection(dbConfig);
-    try {
-        const [users] = await raceConnection.execute(
-            'SELECT verification_token FROM users WHERE username = ?',
-            [email]
-        );
-        assert.equal(users[0].verification_token, victimVerificationToken);
-    } finally {
-        await raceConnection.end();
-    }
-
-    for (let requestNumber = 0; requestNumber < 2; requestNumber += 1) {
-        const verificationResponse = await resendClient.request(
-            `/verify-email?token=${victimVerificationToken}`,
-            { redirect: 'manual' }
-        );
-        assert.equal(verificationResponse.status, 302);
-        assert.equal(
-            verificationResponse.headers.get('location'),
-            `/verify-email.html#token=${victimVerificationToken}`
-        );
-
-        const stateConnection = await mysql.createConnection(dbConfig);
-        try {
-            const [users] = await stateConnection.execute(
-                `SELECT email_verified, verification_token
-                 FROM users WHERE username = ?`,
-                [email]
-            );
-            assert.equal(Number(users[0].email_verified), 0);
-            assert.equal(users[0].verification_token, victimVerificationToken);
-        } finally {
-            await stateConnection.end();
-        }
-    }
-
-    const confirmationPage = await resendClient.request('/verify-email.html');
+    const confirmationPage = await client.request('/verify-email.html');
     assert.equal(confirmationPage.status, 200);
     assert.match(confirmationPage.headers.get('cache-control') || '', /no-store/i);
     assert.equal(confirmationPage.headers.get('referrer-policy'), 'no-referrer');
-
     const csrfRejected = await fetch(`${BASE_URL}/verify-email/complete`, {
-        method: 'POST',
-        headers: {
-            'content-type': 'application/json',
-            cookie: resendClient.cookie
-        },
-        body: JSON.stringify({ token: victimVerificationToken })
+        method: 'POST', headers: { 'content-type': 'application/json', cookie: client.cookie },
+        body: JSON.stringify({ token: original.verification_token })
     });
-    assert.equal(csrfRejected.status, 403, await csrfRejected.text());
-
-    const completeVerification = await resendClient.request('/verify-email/complete', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ token: victimVerificationToken })
+    assert.equal(csrfRejected.status, 403);
+    const complete = () => client.request('/verify-email/complete', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: original.verification_token })
     });
-    const completeVerificationBody = await completeVerification.json();
-    assert.equal(completeVerification.status, 200, JSON.stringify(completeVerificationBody));
-    assert.match(
-        completeVerificationBody.redirectTo,
-        /^\/login\.html#resetToken=[a-f0-9]{64}&registrationComplete=1$/
-    );
-    const completionToken = new URLSearchParams(
-        new URL(completeVerificationBody.redirectTo, BASE_URL).hash.slice(1)
-    ).get('resetToken');
-
-    const reusedVerification = await resendClient.request('/verify-email/complete', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ token: victimVerificationToken })
-    });
-    assert.equal(reusedVerification.status, 409, await reusedVerification.text());
-
-    for (const password of [attackerPassword, victimPassword]) {
-        const loginResponse = await new SessionClient().request('/login', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ username: email, password })
+    const confirmation = await complete();
+    assert.equal(confirmation.status, 200);
+    assert.deepEqual(await confirmation.json(), { redirectTo: '/email-verified.html' });
+    const confirmed = await readUser();
+    assert.equal(Number(confirmed.email_verified), 1);
+    assert.equal(confirmed.password, original.password, 'Bestätigung darf das Passwort nicht ersetzen');
+    assert.equal(confirmed.verification_token, null);
+    assert.equal(confirmed.reset_token, null);
+    assert.equal(confirmed.reset_token_expires, null);
+    assert.equal((await complete()).status, 409);
+    const successPage = await client.request('/email-verified.html');
+    assert.match(await successPage.text(), /E-Mail erfolgreich bestätigt/);
+    for (const [candidate, status] of [[password, 200], [otherPassword, 401]]) {
+        const login = await new SessionClient().request('/login', {
+            method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: email, password: candidate })
         });
-        assert.equal(loginResponse.status, 401, `${password}: ${await loginResponse.text()}`);
+        assert.equal(login.status, status, await login.text());
     }
-
-    const completionResponse = await new SessionClient().request('/password-reset', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ token: completionToken, password: completedPassword })
-    });
-    assert.equal(completionResponse.status, 200, await completionResponse.text());
-
-    const loginResponse = await new SessionClient().request('/login', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ username: email, password: completedPassword })
-    });
-    assert.equal(loginResponse.status, 200, await loginResponse.text());
 });
 
 test('Passwortwechsel widerruft alte Kunden- und Admin-Sessions über auth_version', async () => {
@@ -1325,7 +1237,7 @@ test('Passwort-Reset-Token kann bei parallelen Requests nur einmal verbraucht we
     }
 });
 
-test('blockiert Bestell- und Artikelstornos für Kunden auch direkt an der API', async () => {
+test('blockiert weiterhin direkte Artikelstornos für Kunden', async () => {
     const client = new SessionClient();
     const loginResponse = await client.request('/login', {
         method: 'POST',
@@ -1338,7 +1250,7 @@ test('blockiert Bestell- und Artikelstornos für Kunden auch direkt an der API',
 
     assert.equal(loginResponse.status, 200);
 
-    for (const pathname of ['/my-orders/1/cancel', '/my-orders/1/items/1/cancel']) {
+    for (const pathname of ['/my-orders/1/items/1/cancel']) {
         const response = await client.request(pathname, { method: 'POST' });
         assert.equal(response.status, 403);
         assert.deepEqual(await response.json(), {
@@ -1373,4 +1285,36 @@ test('behandelt unbekannte Verifikationstoken ohne Schemafehler', async () => {
 
     assert.equal(response.status, 400);
     assert.match(await response.text(), /ungültig oder abgelaufen/i);
+});
+
+
+test('Produktmerkmale werden validiert, gespeichert und Keys ausschließlich serverseitig erzeugt', async () => {
+    const admin = new SessionClient();
+    const login = await admin.request('/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: TEST_ADMIN.email, password: TEST_ADMIN.password }) });
+    assert.equal(login.status, 200);
+    const body = { productKey: 'untrusted-key', title: 'Merkmaltest', description: '', pricePerDay: 20, deposit: 50, isActive: false,
+        productKind: 'Baumaschine', manufacturer: 'Testmarke', model: 'Modell 2026', color: 'Gelb', powerValue: '3,25', powerUnit: 'kW', operatingHours: '120.50', mileageKm: '' };
+    const send = (url, method, data) => admin.request(url, { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(data) });
+    const forbidden = await new SessionClient().request('/products', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    assert.equal(forbidden.status, 401);
+    for (const invalid of [{ powerValue: -1 }, { mileageKm: 'Infinity' }, { operatingHours: false }, { productKind: 'Unbekannt' }, { powerUnit: 'Volt' }, { manufacturer: 'x'.repeat(121) }]) {
+        assert.equal((await send('/products', 'POST', { ...body, ...invalid })).status, 400);
+    }
+    const created = await send('/products', 'POST', body);
+    assert.equal(created.status, 201, await created.clone().text());
+    const result = await created.json(); assert.match(result.productKey, /^SR-[A-F0-9]{32}$/);
+    const list = await (await admin.request('/products')).json();
+    const product = list.find(p => p.id === result.productId);
+    assert.equal(product.product_key, result.productKey); assert.equal(product.is_active, 0);
+    assert.equal(product.manufacturer, body.manufacturer); assert.equal(product.model, body.model); assert.equal(product.color, body.color);
+    assert.equal(Number(product.power_value), 3.25); assert.equal(Number(product.operating_hours), 120.5); assert.equal(product.mileage_km, null);
+    const options = await (await admin.request('/product-attribute-options')).json();
+    assert.ok(options.products.some(p => p.manufacturer === 'Testmarke' && p.model === 'Modell 2026'));
+    assert.ok(options.brands.Auto.includes('Volkswagen'));
+    assert.equal((await send('/products/' + result.productId, 'PUT', { ...body, manufacturer: '', model: '', operatingHours: '', mileageKm: '0', powerValue: '' })).status, 200);
+    const updated = (await (await admin.request('/products')).json()).find(p => p.id === result.productId);
+    assert.equal(updated.manufacturer, 'n.V.'); assert.equal(updated.model, 'n.V.'); assert.equal(updated.operating_hours, null); assert.equal(Number(updated.mileage_km), 0); assert.equal(updated.power_value, null);
+    assert.equal(updated.product_key, result.productKey);
+    const second = await (await send('/products', 'POST', body)).json(); assert.notEqual(second.productKey, result.productKey);
+    assert.equal((await send('/products/99999999', 'PUT', body)).status, 404);
 });

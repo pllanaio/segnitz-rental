@@ -33,7 +33,7 @@
     </style>
 </head>
 
-<body>
+<body class="backend-page">
     <div id="globalAlertContainer" class="position-fixed top-0 start-50 translate-middle-x mt-5"
         style="z-index: 4000; width: 90%; max-width: 520px;">
     </div>
@@ -42,15 +42,14 @@
         <div class="row g-0 min-vh-100">
 
             <aside class="col-12 col-md-3 col-xl-2 bg-primary text-white p-4">
-                <div class="sidebar-brand text-center mb-4">
-                    <img src="img/logo.png" alt="Segnitz Rental Logo" class="img-fluid sidebar-logo mb-3">
-
-                    <h2 class="sidebar-title">Vermietung</h2>
+                <div class="sidebar-brand text-center mb-3">
+                    <img src="img/logo.png" alt="Segnitz Rental Logo" class="img-fluid sidebar-logo">
                 </div>
 
                 <p id="backend-login-status" class="mt-4 small"></p>
 
                 <nav class="nav flex-column mt-4">
+                    <button class="btn btn-outline-light text-start mb-2" id="nav-declarations" data-backend-view="declarations">Widerrufe &amp; Stornierungen</button>
                     <button class="btn btn-outline-light text-start mb-2 active" id="nav-products"
                         data-backend-view="products">
                         <i class="bi bi-box-seam"></i>
@@ -73,7 +72,7 @@
                 <a href="/index.html">
                     <button type="button" class="btn btn-light w-100 mt-4">
                         <i class="bi bi-arrow-left-circle"></i>
-                        Konfiguration beenden
+                        Admin Dashboard verlassen
                     </button>
                 </a>
 
@@ -81,101 +80,70 @@
                     <i class="bi bi-x-circle"></i>
                     Abmelden
                 </button>
+            <div class="sidebar-legal"><a href="/widerruf.html">Widerruf</a></div>
             </aside>
 
             <main class="col-12 col-md-9 col-xl-10 p-4 p-lg-5">
                 <div id="qbox-container_form" class="w-100">
 
+                    <section id="declarationsView" class="d-none">
+                        <h2>Widerrufe &amp; Stornierungen</h2>
+                        <p>Der Eingang wurde bereits bestätigt. Klären Sie die Zuordnung und wickeln Sie Rückgabe bzw. Erstattung ab. Dokumentieren Sie anschließend die erledigten Schritte.</p>
+                        <button type="button" id="reloadDeclarations" class="btn btn-outline-primary mb-3">Aktualisieren</button>
+                        <div id="declarationsList" aria-live="polite"></div>
+                    </section>
                     <div id="productsView">
-                        <h4 class="mb-4">Produkte verwalten</h4>
 
                         <div id="productMessage" class="alert d-none"></div>
 
-                        <form id="productForm" class="mb-5">
+                        <header class="product-editor-heading">
+                            <h2 id="productEditorTitle">Produkt anlegen</h2>
+                            <p>Stammdaten, Merkmale und Mietkonditionen</p>
+                        </header>
+                        <form id="productForm" class="product-editor mb-5">
                             <input type="hidden" id="productId">
-
-                            <div class="row g-3">
-                                <div class="col-12 col-lg-4">
-                                    <label class="form-label" for="productKey">Produkt-Key</label>
-                                    <input type="text" class="form-control" id="productKey"
-                                        placeholder="z.B. bautrockner">
+                            <section class="product-editor-section" aria-labelledby="productBasicsHeading">
+                                <div class="product-section-heading">
+                                    <h3 id="productBasicsHeading">Stammdaten</h3>
+                                    <div class="form-check form-switch"><input class="form-check-input" type="checkbox" id="isActive" checked><label class="form-check-label" for="isActive">Produkt aktiv</label></div>
                                 </div>
-
-                                <div class="col-12 col-lg-8">
-                                    <label class="form-label" for="title">Titel</label>
-                                    <input type="text" class="form-control" id="title" placeholder="z.B. Bautrockner">
-                                </div>
-
-                                <div class="col-12">
-                                    <label class="form-label" for="description">Beschreibung</label>
-                                    <textarea class="form-control" id="description" rows="3"></textarea>
-                                </div>
-
-                                <div class="col-12 col-lg-4">
-                                    <label class="form-label">Kategorien</label>
-
-                                    <input type="hidden" id="category">
-
-                                    <div class="card p-3">
-                                        <div id="categoryTags" class="d-flex flex-wrap gap-2 mb-3">
-                                        </div>
-
-                                        <div class="input-group">
-                                            <input type="text" class="form-control" id="categoryInput"
-                                                placeholder="Kategorie hinzufügen">
-                                            <button type="button" class="btn btn-outline-primary" id="addCategoryBtn">
-                                                Hinzufügen
-                                            </button>
-                                        </div>
-
-                                        <div id="categorySuggestionList" class="mt-3"></div>
-
-                                        <small class="text-muted mt-2">
-                                            Mehrere Kategorien möglich.
-                                        </small>
+                                <div class="row g-4">
+                                    <div class="col-12 col-lg-6"><label class="form-label" for="productKey">Produkt-Key</label><input type="text" class="form-control" id="productKey" readonly placeholder="Wird automatisch vergeben"></div>
+                                    <div class="col-12 col-lg-6"><label class="form-label" for="title">Titel *</label><input type="text" class="form-control" id="title" maxlength="150" required placeholder="z. B. Minibagger 1,8 t"></div>
+                                    <div class="col-12"><label class="form-label" for="description">Beschreibung</label><textarea class="form-control" id="description" rows="3" placeholder="Einsatzbereich, Ausstattung und Lieferumfang"></textarea></div>
+                                    <div class="col-12"><label class="form-label" for="categoryInput">Kategorien</label><input type="hidden" id="category">
+                                        <div id="categoryTags" class="d-flex flex-wrap gap-2 mb-2"></div>
+                                        <div class="input-group"><input type="text" class="form-control" id="categoryInput" placeholder="Kategorie hinzufügen"><button type="button" class="btn btn-outline-primary" id="addCategoryBtn">Hinzufügen</button></div>
+                                        <div id="categorySuggestionList" class="mt-2"></div><div class="form-text">Mehrere Kategorien möglich.</div>
                                     </div>
                                 </div>
-
-                                <div class="col-12 col-lg-4">
-                                    <label class="form-label" for="pricePerDay">Preis pro Tag</label>
-                                    <input type="number" step="0.01" min="0" max="999999.99" class="form-control"
-                                        id="pricePerDay">
+                            </section>
+                            <section class="product-editor-section" aria-labelledby="productAttributesHeading">
+                                <h3 id="productAttributesHeading">Artikelmerkmale</h3>
+                                <div class="row g-4">
+                                    <div class="col-12 col-lg-4"><label class="form-label" for="productKind">Art *</label><select class="form-select" id="productKind" required><option value="">Bitte auswählen</option><option>Baumaschine</option><option>Auto</option><option>Werkzeug</option></select></div>
+                                    <div class="col-12 col-lg-4"><label class="form-label" for="manufacturer">Hersteller / Marke</label><input class="form-control" id="manufacturer" maxlength="120" list="manufacturerOptions" placeholder="Auswählen oder eingeben" autocomplete="off"><datalist id="manufacturerOptions"><option value="n.V."></datalist></div>
+                                    <div class="col-12 col-lg-4"><label class="form-label" for="productModel">Modell</label><input class="form-control" id="productModel" maxlength="160" list="modelOptions" placeholder="Auswählen oder eingeben" autocomplete="off"><datalist id="modelOptions"><option value="n.V."></datalist></div>
+                                    <div class="col-12"><p class="form-text m-0" id="productSuggestionsHint">Marke und Modell frei eingeben oder Vorschläge nutzen. Nicht vorhanden: n.V. Neue Angaben stehen nach dem Speichern als Vorschläge zur Verfügung.</p></div>
+                                    <div class="col-12 col-lg-4"><label class="form-label" for="productColor">Farbe <span class="product-optional">(optional)</span></label><input class="form-control" id="productColor" maxlength="80" placeholder="z. B. Gelb / Schwarz"></div>
+                                    <div class="col-12 col-lg-4"><label class="form-label" for="powerValue">Leistung <span class="product-optional">(optional)</span></label><div class="input-group"><input type="number" class="form-control" id="powerValue" min="0" max="999999.99" step="0.01"><select class="form-select product-unit" id="powerUnit" aria-label="Einheit der Leistung"><option>kW</option><option>PS</option><option>W</option></select></div></div>
+                                    <div class="col-12 col-lg-4"><label class="form-label" for="operatingHours">Betriebsstunden <span class="product-optional">(optional)</span></label><div class="input-group"><input type="number" class="form-control" id="operatingHours" min="0" max="99999999.99" step="0.01"><span class="input-group-text">h</span></div></div>
+                                    <div class="col-12 col-lg-4"><label class="form-label" for="mileageKm">km-Stand <span class="product-optional">(optional)</span></label><div class="input-group"><input type="number" class="form-control" id="mileageKm" min="0" max="99999999.99" step="0.01"><span class="input-group-text">km</span></div></div>
                                 </div>
-
-                                <div class="col-12 col-lg-4">
-                                    <label class="form-label" for="deposit">Kaution</label>
-                                    <input type="number" step="0.01" min="0" max="999999.99" class="form-control"
-                                        id="deposit">
+                            </section>
+                            <section class="product-editor-section" aria-labelledby="productPricingHeading">
+                                <h3 id="productPricingHeading">Mietkonditionen</h3>
+                                <div class="row g-4">
+                                    <div class="col-12 col-md-6"><label class="form-label" for="pricePerDay">Preis pro Tag *</label><div class="input-group"><input type="number" step="0.01" min="0" max="999999.99" class="form-control" id="pricePerDay" required><span class="input-group-text">EUR</span></div></div>
+                                    <div class="col-12 col-md-6"><label class="form-label" for="deposit">Kaution *</label><div class="input-group"><input type="number" step="0.01" min="0" max="999999.99" class="form-control" id="deposit" required><span class="input-group-text">EUR</span></div></div>
                                 </div>
-
-                                <div class="col-12">
-                                    <label class="form-label" for="productImages">Produktbilder</label>
-                                    <input type="file" class="form-control" id="productImages" accept="image/*"
-                                        multiple>
-                                    <small class="text-muted">Maximal 10 Bilder pro Produkt.</small>
-                                </div>
-
-                                <div class="col-12 d-none" id="existingImagesWrapper">
-                                    <label class="form-label">Vorhandene Bilder</label>
-                                    <div id="existingImages" class="row g-2"></div>
-                                </div>
-
-                                <div class="col-12">
-                                    <div class="form-check form-switch">
-                                        <input class="form-check-input" type="checkbox" id="isActive" checked>
-                                        <label class="form-check-label" for="isActive">Produkt aktiv</label>
-                                    </div>
-                                </div>
-
-                                <div class="col-12">
-                                    <button type="submit" class="btn btn-success" id="saveProductBtn">
-                                        Produkt speichern
-                                    </button>
-                                    <button type="button" class="btn btn-secondary d-none" id="cancelEditBtn">
-                                        Bearbeiten abbrechen
-                                    </button>
-                                </div>
-                            </div>
+                            </section>
+                            <section class="product-editor-section" aria-labelledby="productPhotosHeading">
+                                <h3 id="productPhotosHeading">Produktfotos</h3>
+                                <div class="product-photo-upload"><label class="form-label" for="productImages"><i class="bi bi-upload" aria-hidden="true"></i> Bilder auswählen</label><input type="file" class="form-control" id="productImages" accept="image/*" multiple><div class="form-text">Bis zu 10 Bilder. Die Bilder werden mit dem Produkt gespeichert.</div></div>
+                                <div class="mt-3 d-none" id="existingImagesWrapper"><p class="form-label">Vorhandene Bilder</p><div id="existingImages" class="row g-2"></div></div>
+                            </section>
+                            <div class="product-editor-actions"><span class="form-text">* Pflichtfelder</span><button type="button" class="btn btn-outline-primary" id="resetProductBtn">Zurücksetzen</button><button type="button" class="btn btn-secondary d-none" id="cancelEditBtn">Bearbeiten abbrechen</button><button type="submit" class="btn btn-primary" id="saveProductBtn">Produkt speichern</button></div>
                         </form>
 
                         <div class="d-flex justify-content-between align-items-center mb-3">
@@ -462,14 +430,10 @@
                         <div class="col-12">
                             <label class="form-label">Rückgabefotos</label>
                             <input type="file" class="form-control" id="returnImageUpload" accept="image/*" multiple>
+                            <div class="form-text">Bis zu 10 Fotos auswählen oder nacheinander hinzufügen. Der Upload erfolgt einmalig mit „Rückgabe speichern“.</div>
                             <div id="returnSelectedImagePreview"></div>
                             <div id="returnExistingImages" class="row g-2 mt-2"></div>
                         </div>
-
-                        <button type="button" class="btn btn-outline-primary btn-sm mt-2"
-                            id="uploadReturnImagesButton">
-                            Fotos hochladen
-                        </button>
 
                         <div class="col-12">
                             <div class="alert alert-secondary mb-0" id="returnPricePreview">
@@ -536,8 +500,10 @@
     <!-- Javascript to handle Alerts -->
     <script type="text/javascript" src="js/alerts.js"></script>
     <!-- General Functionalities -->
+    <script src="js/product_attributes.js"></script>
     <script type="text/javascript" src="js/backend_config.js"></script>
 
+<script src="js/admin_declarations.js"></script>
 </body>
 
 </html>

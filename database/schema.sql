@@ -72,6 +72,14 @@ CREATE TABLE customer_number_sequences (
 CREATE TABLE rental_products (
     id INT NOT NULL AUTO_INCREMENT,
     product_key VARCHAR(100) NOT NULL,
+    product_kind VARCHAR(30) NULL,
+    manufacturer VARCHAR(120) NOT NULL DEFAULT 'n.V.',
+    model VARCHAR(160) NOT NULL DEFAULT 'n.V.',
+    color VARCHAR(80) NULL,
+    power_value DECIMAL(8,2) NULL,
+    power_unit VARCHAR(5) NULL,
+    operating_hours DECIMAL(10,2) NULL,
+    mileage_km DECIMAL(10,2) NULL,
     title VARCHAR(150) NOT NULL,
     description TEXT NULL,
     price_per_day DECIMAL(10,2) NOT NULL DEFAULT 0.00,
@@ -476,3 +484,28 @@ CREATE TABLE user_sessions (
     data MEDIUMTEXT COLLATE utf8mb4_bin NULL,
     PRIMARY KEY (session_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+
+CREATE TABLE contract_declarations (
+    id CHAR(36) NOT NULL,
+    payload_hash CHAR(64) NOT NULL,
+    kind VARCHAR(20) NOT NULL,
+    customer_name VARCHAR(200) NOT NULL,
+    customer_email VARCHAR(255) NOT NULL,
+    contract_reference VARCHAR(200) NOT NULL,
+    contract_scope TEXT NOT NULL,
+    declaration_text TEXT NOT NULL,
+    received_at DATETIME(3) NOT NULL,
+    order_id INT NULL,
+    processing_status VARCHAR(30) NOT NULL DEFAULT 'received',
+    processing_note TEXT NULL,
+    processed_at DATETIME NULL,
+    processed_by VARCHAR(255) NULL,
+    confirmation_token_hash CHAR(64) NULL,
+    confirmation_expires_at DATETIME NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_declaration_confirmation (confirmation_token_hash),
+    KEY idx_declaration_status_received (processing_status, received_at),
+    KEY idx_declaration_order (order_id),
+    CONSTRAINT fk_declaration_order FOREIGN KEY (order_id) REFERENCES rental_orders (id) ON DELETE SET NULL,
+    CONSTRAINT chk_declaration_kind CHECK (kind IN ('withdrawal', 'cancellation'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
