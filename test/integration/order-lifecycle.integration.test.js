@@ -222,6 +222,18 @@ async function createOrder(client, paymentMethod, rentalStart, rentalEnd) {
     return body;
 }
 
+async function createTestCoupon(admin, code, percent, extra = {}) {
+    const response = await admin.request('/admin/coupons', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code, percent, active: true, validFrom: null, validUntil: null, ...extra }) });
+    const result = await response.json(); assert.equal(response.status, 201, JSON.stringify(result)); return result.id;
+}
+async function previewTestCoupon(customer, code) {
+    const response = await customer.request('/cart/coupon-preview', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code }) });
+    const result = await response.json(); assert.equal(response.status, 200, JSON.stringify(result)); return result;
+}
+async function submitCouponOrder(customer, quote, paymentMethod = 'cash') {
+    return customer.request('/data', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ paymentMethod, form: orderForm(TEST_CUSTOMER.email), coupon: { code: quote.coupon.code, revision: quote.coupon.revision, totalCents: Math.round(quote.totals.grandTotalBeforeDepositReturn * 100) } }) });
+}
+
 async function signHandoverBeforePickup(admin, itemId) {
     const [item] = await queryRows('SELECT order_id FROM rental_order_items WHERE id = ?', [itemId]);
     const endpoint = `/admin/orders/${item.order_id}/handover`;
@@ -701,13 +713,15 @@ test('verarbeitet Online-Zahlung, Mollie-Webhook und vollständigen Storno-Refun
         futureDate(21)
     );
 
-    assert.equal(order.message, 'Online-Zahlung wurde vorbereitet.');
-    assert.match(order.checkoutUrl, /^https:\/\/checkout\.test\.mollie\.local\//);
-
-    const [pendingOrder] = await queryRows(
+    if (order.paymentPending) {
+        assert.match(order.message, /Online-Zahlung wird vorbereitet/);
+    } else {
+        assert.match(order.checkoutUrl, /^https:\/\/checkout\.test\.mollie\.local\//);
+    }
+    const pendingOrder = await waitForDatabaseRow(
         `SELECT payment_method, payment_status, mollie_payment_id
          FROM rental_orders WHERE id = ?`,
-        [order.orderId]
+        [order.orderId], row => Boolean(row.mollie_payment_id), 'Online-Zahlung vorbereitet'
     );
 
     assert.equal(pendingOrder.payment_method, 'online');
@@ -2810,4 +2824,76 @@ test('Übergabeprotokoll: Entwurf, Fotos, Unterschrift, dauerhafter PDF-Beleg un
     assert.equal(allowedPickup.status, 200, await allowedPickup.text());
     assert.equal((await queryRows('SELECT item_status FROM rental_order_items WHERE id = ?', [itemId]))[0].item_status, 'picked_up');
 
+});
+
+test('Gutscheine: Adminrechte, Ablauf, deaktivierte Codes und veränderte Vorschau werden geprüft', async () => {
+    const admin = new SessionClient(), customer = new SessionClient(); await login(admin, TEST_ADMIN); await login(customer, TEST_CUSTOMER);
+    assert.equal((await customer.request('/admin/coupons')).status, 403);
+    const id = await createTestCoupon(admin, 'VALIDATE10', 10);
+    await createTestCoupon(admin, 'EXPIRED10', 10, { validUntil: '2020-01-01' });
+    await createTestCoupon(admin, 'FUTURE10', 10, { validFrom: '2099-01-01' });
+    await createTestCoupon(admin, 'DISABLED10', 10, { active: false });
+    await addCartItem(customer, futureDate(900), futureDate(901));
+    for (const code of ['EXPIRED10', 'FUTURE10', 'DISABLED10', 'UNKNOWN10']) {
+        const response = await customer.request('/cart/coupon-preview', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code }) }); assert.equal(response.status, 400);
+    }
+    const quote = await previewTestCoupon(customer, ' validate10 '); assert.equal(quote.totals.discountAmount, 16); assert.equal(quote.totals.depositTotal, 300); assert.equal(quote.totals.grandTotalBeforeDepositReturn, 444);
+    const update = await admin.request(`/admin/coupons/${id}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: 'VALIDATE10', percent: 20, active: true, validFrom: null, validUntil: null, revision: 1 }) }); assert.equal(update.status, 200);
+    assert.equal((await submitCouponOrder(customer, quote)).status, 409);
+    const fresh = await previewTestCoupon(customer, 'VALIDATE10'); assert.equal(fresh.totals.grandTotalBeforeDepositReturn, 428);
+    const response = await submitCouponOrder(customer, fresh); assert.equal(response.status, 200, await response.clone().text());
+    const result = await response.json();
+    const [order] = await queryRows('SELECT coupon_code, discount_amount, total_amount FROM rental_orders WHERE id = ?', [result.orderId]); assert.equal(Number(order.discount_amount), 32); assert.equal(Number(order.total_amount), 428);
+});
+
+test('Gutscheine: Barzahlung, Verlängerung und Rückgabe behalten die volle Kaution', async () => {
+    const admin = new SessionClient(), customer = new SessionClient(); await login(admin, TEST_ADMIN); await login(customer, TEST_CUSTOMER);
+    await createTestCoupon(admin, 'RENTAL10', 10);
+    const start = futureDate(910), end = futureDate(911), extended = futureDate(912);
+    await addCartItem(customer, start, end); const quote = await previewTestCoupon(customer, 'RENTAL10');
+    const response = await submitCouponOrder(customer, quote); assert.equal(response.status, 200); const { orderId } = await response.json();
+    let result = await admin.request('/admin/order-payments/manual', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ orderId, paymentType: 'initial_payment', amount: 444 }) }); assert.equal(result.status, 200, await result.text());
+    const [item] = await queryRows('SELECT * FROM rental_order_items WHERE order_id = ?', [orderId]); assert.equal(Number(item.discount_amount), 16); assert.equal(Number(item.deposit), 300);
+    const receipts = await receiptMails(orderId); assert.equal(receipts[0].receipt.items[0].rental, 144); assert.equal(receipts[0].receipt.items[0].discountAmount, 16);
+    await signHandoverBeforePickup(admin, item.id); result = await admin.request(`/admin/order-items/${item.id}/pickup`, { method: 'PUT' }); assert.equal(result.status, 200);
+    result = await admin.request(`/admin/order-items/${item.id}/rental-adjustment`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ adjustedRentalStart: start, adjustedRentalEnd: extended, adjustedPricePerDay: 80 }) }); assert.equal(result.status, 200, await result.text());
+    const [adjustment] = await queryRows("SELECT amount FROM rental_order_payments WHERE order_id = ? AND payment_type = 'rental_adjustment'", [orderId]); assert.equal(Number(adjustment.amount), 80);
+    result = await admin.request('/admin/order-payments/manual', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ orderId, orderItemId: item.id, paymentType: 'rental_adjustment', amount: 80 }) }); assert.equal(result.status, 200, await result.text());
+    result = await admin.request(`/admin/order-items/${item.id}/return`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ actualReturnDate: extended, adjustedRentalStart: start, adjustedRentalEnd: extended, adjustedPricePerDay: 80, isDamaged: false, additionalChargeAmount: 0 }) }); assert.equal(result.status, 200, await result.text());
+    const [returned] = await queryRows('SELECT deposit_refund_amount, adjusted_rental_total FROM rental_order_items WHERE id = ?', [item.id]); assert.equal(Number(returned.deposit_refund_amount), 300); assert.equal(Number(returned.adjusted_rental_total), 224);
+});
+
+test('Gutscheine: Online-Zahlungsbetrag, Mollie-Positionen und Teilstorno berücksichtigen gespeicherte Rabatte', async () => {
+    const admin = new SessionClient(), customer = new SessionClient(); await login(admin, TEST_ADMIN); await login(customer, TEST_CUSTOMER);
+    const couponId = await createTestCoupon(admin, 'ONLINE10', 10);
+    await addCartItem(customer, futureDate(920), futureDate(921)); await addCartItem(customer, futureDate(925), futureDate(926));
+    const quote = await previewTestCoupon(customer, 'ONLINE10'); assert.equal(quote.totals.grandTotalBeforeDepositReturn, 888);
+    const response = await submitCouponOrder(customer, quote, 'online'); assert.ok([200, 202].includes(response.status)); const { orderId } = await response.json();
+    await waitForDatabaseRow('SELECT mollie_payment_id FROM rental_orders WHERE id = ?', [orderId], row => Boolean(row.mollie_payment_id), 'Online-Gutscheinzahlung');
+    const [payment] = await queryRows("SELECT amount FROM rental_order_payments WHERE order_id = ? AND payment_type = 'initial_payment'", [orderId]); assert.equal(Number(payment.amount), 888);
+    const connection = await require('mysql2/promise').createConnection(require('../../config/db'));
+    try { const details = await require('../../services/molliePaymentDetails').captureMolliePaymentDetails(connection, { id: orderId, type: 'order_payment', totalAmount: 888 }); assert.deepEqual(details.lines.map(line => Number(line.totalAmount.value)), [144, 300, 144, 300]); } finally { await connection.end(); }
+    const paidId = `tr_test_paid_coupon_${orderId}`;
+    await execute('UPDATE rental_orders SET mollie_payment_id = ? WHERE id = ?', [paidId, orderId]); await execute('UPDATE rental_order_payments SET mollie_payment_id = ? WHERE order_id = ?', [paidId, orderId]);
+    await customer.request('/webhooks/mollie', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: paidId }) });
+    await admin.request(`/admin/coupons/${couponId}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: 'ONLINE10', percent: 99, active: false, validFrom: null, validUntil: null, revision: 1 }) });
+    const items = await queryRows('SELECT id FROM rental_order_items WHERE order_id = ? ORDER BY id', [orderId]);
+    const cancelled = await admin.request(`/admin/order-items/${items[0].id}/cancel`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ reason: 'Gutschein-Teilstornotest' }) }); assert.equal(cancelled.status, 200, await cancelled.text());
+    const refund = await waitForDatabaseRow("SELECT amount, payment_status FROM rental_order_payments WHERE order_id = ? AND order_item_id = ? AND payment_type = 'order_cancellation_refund'", [orderId, items[0].id], row => row.payment_status === 'paid', 'rabattierte Teilerstattung'); assert.equal(Number(refund.amount), -444);
+    const [remaining] = await queryRows('SELECT total_amount FROM rental_orders WHERE id = ?', [orderId]); assert.equal(Number(remaining.total_amount), 444);
+});
+
+test('Gutscheine: 100 Prozent ohne Kaution bestätigt eine Bestellung ohne Mollie-Zahlungsauftrag', async () => {
+    const admin = new SessionClient(), customer = new SessionClient(); await login(admin, TEST_ADMIN); await login(customer, TEST_CUSTOMER);
+    await createTestCoupon(admin, 'FREE100', 100);
+    await execute('UPDATE rental_products SET deposit = 0 WHERE id = ?', [TEST_PRODUCT.id]);
+    try {
+        await addCartItem(customer, futureDate(940), futureDate(941)); const quote = await previewTestCoupon(customer, 'FREE100'); assert.equal(quote.totals.grandTotalBeforeDepositReturn, 0);
+        const response = await submitCouponOrder(customer, quote, 'online'); assert.equal(response.status, 200, await response.clone().text()); const { orderId, amountDue } = await response.json(); assert.equal(amountDue, 0);
+        const [order] = await queryRows('SELECT payment_status, mollie_payment_id FROM rental_orders WHERE id = ?', [orderId]); assert.equal(order.payment_status, 'paid'); assert.equal(order.mollie_payment_id, null);
+        const requests = await queryRows('SELECT id FROM external_effects_outbox WHERE operation_key = ?', [`initial-order-payment-${orderId}`]); assert.equal(requests.length, 0);
+        const mails = await receiptMails(orderId);
+        assert.match(mails[0].html, /keine Zahlung erforderlich/);
+        assert.doesNotMatch(mails[0].html, /Onlinezahlung steht noch aus/);
+    } finally { await execute('UPDATE rental_products SET deposit = ? WHERE id = ?', [TEST_PRODUCT.deposit, TEST_PRODUCT.id]); }
 });

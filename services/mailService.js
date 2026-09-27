@@ -239,6 +239,7 @@ async function sendOrderEmail(
 
         <h3>Summen</h3>
         <p>
+            ${orderSummary.coupon ? `Gutschein ${escapeHtml(orderSummary.coupon.code)} (${Number(orderSummary.coupon.percent)} %): −${Number(orderSummary.totals.discountAmount || 0).toFixed(2)} €<br>` : ''}
             Miete: ${Number(orderSummary.totals.rentalTotal || 0).toFixed(2)} €<br>
             Kaution: ${Number(orderSummary.totals.depositTotal || 0).toFixed(2)} €<br>
             Gesamt vor Kautionsrückgabe: ${Number(orderSummary.totals.grandTotalBeforeDepositReturn || 0).toFixed(2)} €
@@ -669,9 +670,12 @@ async function sendReturnSummaryEmail(order, item, payments = [], deliveryOption
 }
 
 async function sendBookingReceivedEmail(connection, receipt, orderId) {
+    const noPaymentDue = receipt.paymentStatus === 'paid' && receipt.items.every(item => item.rental + item.deposit === 0);
     await sendGraphMail({ to: receipt.email, receipt,
-        subject: `Bestellung ${receipt.orderNo} eingegangen`,
-        html: `<h2>Ihre Bestellung ist eingegangen</h2><p>Vielen Dank für Ihren Mietauftrag <strong>${escapeHtml(receipt.orderNo)}</strong>. Ihre Onlinezahlung steht noch aus. Bitte schließen Sie die Zahlung innerhalb der angezeigten Reservierungsfrist ab.</p>`
+        subject: noPaymentDue ? `Bestellung ${receipt.orderNo} bestätigt` : `Bestellung ${receipt.orderNo} eingegangen`,
+        html: noPaymentDue
+            ? `<h2>Ihre Bestellung ist bestätigt</h2><p>Vielen Dank für Ihren Mietauftrag <strong>${escapeHtml(receipt.orderNo)}</strong>. Nach Anwendung Ihres Gutscheins ist keine Zahlung erforderlich. Ihre Mietprodukte sind verbindlich eingeplant. Ihren Bestellbeleg finden Sie im Anhang.</p>`
+            : `<h2>Ihre Bestellung ist eingegangen</h2><p>Vielen Dank für Ihren Mietauftrag <strong>${escapeHtml(receipt.orderNo)}</strong>. Ihre Onlinezahlung steht noch aus. Bitte schließen Sie die Zahlung innerhalb der angezeigten Reservierungsfrist ab.</p>`
     }, { connection, operationKey: `mail-order-received-${orderId}` });
 }
 

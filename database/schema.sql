@@ -190,6 +190,9 @@ CREATE TABLE rental_orders (
     status VARCHAR(50) NOT NULL DEFAULT 'reserved',
     reserved_until DATETIME NULL,
     confirmation_json JSON NULL,
+    coupon_code VARCHAR(40) NULL,
+    coupon_percent DECIMAL(5,2) NULL,
+    discount_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00,
     total_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00,
     payment_method VARCHAR(50) NULL,
     payment_status VARCHAR(50) NULL,
@@ -265,6 +268,7 @@ CREATE TABLE rental_order_items (
     rental_end DATE NOT NULL,
     price_per_day DECIMAL(10,2) NOT NULL DEFAULT 0.00,
     deposit DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    discount_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00,
     adjusted_rental_start DATE NULL,
     adjusted_rental_end DATE NULL,
     adjusted_price_per_day DECIMAL(10,2) NULL,
@@ -522,4 +526,20 @@ CREATE TABLE handover_reports (
     PRIMARY KEY (order_id),
     CONSTRAINT fk_handover_order FOREIGN KEY (order_id) REFERENCES rental_orders (id),
     CONSTRAINT chk_handover_status CHECK (status IN ('draft', 'signed'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE discount_codes (
+    id INT NOT NULL AUTO_INCREMENT,
+    code VARCHAR(40) NOT NULL,
+    percent DECIMAL(5,2) NOT NULL,
+    active TINYINT(1) NOT NULL DEFAULT 1,
+    valid_from DATE NULL,
+    valid_until DATE NULL,
+    revision INT UNSIGNED NOT NULL DEFAULT 1,
+    updated_by VARCHAR(255) NOT NULL,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_discount_code (code),
+    CONSTRAINT chk_discount_percent CHECK (percent > 0 AND percent <= 100),
+    CONSTRAINT chk_discount_dates CHECK (valid_from IS NULL OR valid_until IS NULL OR valid_until >= valid_from)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

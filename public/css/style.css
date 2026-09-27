@@ -1113,6 +1113,20 @@ input[name="paymentMethod"] {
   white-space: nowrap;
 }
 
+#checkoutCouponTotals > div > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+#checkoutCouponTotals > div > strong {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+#couponList h3 {
+  overflow-wrap: anywhere;
+}
+
 .checkout-summary-total-row {
   display: flex;
   align-items: baseline;

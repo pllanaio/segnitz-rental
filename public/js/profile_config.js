@@ -537,6 +537,7 @@ function renderMyOrderItemCard(item, order) {
         <span>Miete gesamt inkl. MwSt.</span>
         <strong>${financials.rentalTotal.toFixed(2)} €</strong>
     </div>
+    ${Number(item.discountAmount || 0) > 0 ? `<p class="small mb-2">Gutscheinrabatt bereits berücksichtigt: −${Number(item.discountAmount).toFixed(2)} €</p>` : ''}
 
     <div class="checkout-summary-row">
         <span>Kaution</span>
@@ -650,8 +651,8 @@ function calculateOrderItemFinancials(item) {
 
     const pricePerDay = Number(item.adjustedPricePerDay || item.pricePerDay || 0);
     const lateFee = lateDays * pricePerDay;
-    const rentalTotal = effectiveDays * pricePerDay;
-    const originalRentalTotal = originalDays * Number(item.pricePerDay || 0);
+    const rentalTotal = Math.max(0, effectiveDays * pricePerDay - Number(item.discountAmount || 0));
+    const originalRentalTotal = Math.max(0, originalDays * Number(item.pricePerDay || 0) - Number(item.discountAmount || 0));
     const rentalAdjustment = rentalTotal - originalRentalTotal;
 
     const deposit = Number(item.deposit || 0);

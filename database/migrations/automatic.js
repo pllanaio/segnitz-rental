@@ -646,6 +646,21 @@ const migrations = [
                 await connection.query(removeSqlComments(statement).replace(/^CREATE TABLE /, 'CREATE TABLE IF NOT EXISTS '));
             }
         }
+    },
+    {
+        version: '20260927_10_discount_codes',
+        checksumVersion: 1,
+        checksumSource: fs.readFileSync(path.join(__dirname, '20260927_discount_codes.sql'), 'utf8') + ' order/item discount snapshots v1',
+        checksumDependencies: [readSqlStatements, removeSqlComments, quoteIdentifier, columnExists, ensureColumn],
+        async up(connection) {
+            for (const statement of readSqlStatements(path.join(__dirname, '20260927_discount_codes.sql'))) {
+                await connection.query(removeSqlComments(statement).replace(/^CREATE TABLE /, 'CREATE TABLE IF NOT EXISTS '));
+            }
+            await ensureColumn(connection, 'rental_orders', 'coupon_code', 'VARCHAR(40) NULL');
+            await ensureColumn(connection, 'rental_orders', 'coupon_percent', 'DECIMAL(5,2) NULL');
+            await ensureColumn(connection, 'rental_orders', 'discount_amount', 'DECIMAL(10,2) NOT NULL DEFAULT 0.00');
+            await ensureColumn(connection, 'rental_order_items', 'discount_amount', 'DECIMAL(10,2) NOT NULL DEFAULT 0.00');
+        }
     }
 ];
 

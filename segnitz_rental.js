@@ -1,3 +1,4 @@
+const { loadValidCoupon, applyCouponToSummary } = require('./services/couponService');
 const { captureReceipt } = require('./services/receiptService');
 const { sendCompletedOrderEmail, sendSavedReturnEmail, sendBookingReceivedEmail } = require('./services/mailService');
 const express = require("express");
@@ -1183,6 +1184,14 @@ app.post('/data', guestOrderLimiter, async (req, res) => {
         const orderNo = await generateOrderNo(connection);
         const initialOrderStatus = paymentMethod === 'cash' ? 'confirmed' : 'reserved';
         const orderSummary = buildOrderSummary(orderNo, cartItems, initialOrderStatus);
+        if (req.body.coupon) {
+            const coupon = await loadValidCoupon(connection, req.body.coupon.code, true);
+            applyCouponToSummary(orderSummary, coupon);
+            if (req.body.coupon.revision !== coupon.revision || req.body.coupon.totalCents !== Math.round(orderSummary.totals.grandTotalBeforeDepositReturn * 100)) {
+                throw Object.assign(new Error('Gutschein oder Warenkorb wurden geändert. Bitte den Code erneut anwenden und die neue Summe prüfen.'), { statusCode: 409 });
+            }
+        }
+
 
         const [orderResult] = await connection.execute(
             `INSERT INTO rental_orders
@@ -1216,6 +1225,11 @@ app.post('/data', guestOrderLimiter, async (req, res) => {
         );
 
         const orderId = orderResult.insertId;
+        if (orderSummary.coupon) {
+            await connection.execute('UPDATE rental_orders SET coupon_code = ?, coupon_percent = ?, discount_amount = ? WHERE id = ?',
+                [orderSummary.coupon.code, orderSummary.coupon.percent, orderSummary.totals.discountAmount, orderId]);
+        }
+
 
         const [orderRows] = await connection.execute(
             `SELECT DATE_FORMAT(reserved_until, '%Y-%m-%d %H:%i:%s') AS reservedUntil
@@ -1226,21 +1240,34 @@ app.post('/data', guestOrderLimiter, async (req, res) => {
 
         const reservedUntil = orderRows[0].reservedUntil;
 
-        for (const item of cartItems) {
+        for (const item of orderSummary.items) {
             await connection.execute(
                 `INSERT INTO rental_order_items
-                (order_id, product_id, rental_start, rental_end, price_per_day, deposit)
-                VALUES (?, ?, ?, ?, ?, ?)`,
+                (order_id, product_id, rental_start, rental_end, price_per_day, deposit, discount_amount)
+                VALUES (?, ?, ?, ?, ?, ?, ?)`,
                 [
                     orderId,
                     item.productId,
                     item.rentalStart,
                     item.rentalEnd,
                     item.pricePerDay,
-                    item.deposit
+                    item.deposit,
+                    item.discountAmount || 0
                 ]
             );
 
+        }
+
+        if (orderSummary.totals.grandTotalBeforeDepositReturn === 0) {
+            await connection.execute("UPDATE rental_orders SET payment_method = ?, payment_status = 'paid', status = 'confirmed', paid_at = NOW(), reserved_until = NULL WHERE id = ?", [paymentMethod, orderId]);
+            await connection.execute("INSERT INTO rental_order_payments (order_id, payment_type, payment_method, payment_status, amount, paid_at, note) VALUES (?, 'initial_payment', ?, 'paid', 0, NOW(), 'Kein Zahlbetrag nach Gutschein')", [orderId, paymentMethod]);
+            await connection.execute("UPDATE rental_carts SET status = 'converted', updated_at = NOW() WHERE id = ?", [cartId]);
+            await sendBookingReceivedEmail(connection, await captureReceipt(connection, orderId, 'order'), orderId);
+            await connection.commit();
+            rememberGuestOrder(req, orderId);
+            if (orderAccessGrant) setOrderAccessCookie(res, orderId, orderAccessGrant);
+            if (!req.session.user) consumeGuestVerification(req);
+            return res.json({ orderId, orderNo, amountDue: 0, message: 'Bestellung bestätigt. Es ist keine Zahlung erforderlich.' });
         }
 
         console.log('Payment-Methode Backend:', paymentMethod);
@@ -1439,6 +1466,8 @@ app.post('/data', guestOrderLimiter, async (req, res) => {
                 console.error('Rollback fehlgeschlagen:', rollbackError);
             }
         }
+
+        if (error.statusCode) return res.status(error.statusCode).json({ error: error.message });
 
         return sendTransactionFailure(
             res,
@@ -2204,6 +2233,7 @@ app.get('/my-orders/:id', async (req, res) => {
                 DATE_FORMAT(roi.rental_start, '%Y-%m-%d') AS rentalStart,
                 DATE_FORMAT(roi.rental_end, '%Y-%m-%d') AS rentalEnd,
                 roi.price_per_day AS pricePerDay,
+                roi.discount_amount AS discountAmount,
                 roi.deposit AS deposit,
                 roi.item_status AS itemStatus,
                 DATE_FORMAT(roi.picked_up_at, '%Y-%m-%d %H:%i:%s') AS pickedUpAt,
@@ -2724,7 +2754,7 @@ async function createCancellationRefunds(connection, order, item = null) {
 
     if (item) {
         baseRefundAmount = roundMoney(
-            calculateRentalDays(item.rental_start, item.rental_end) * Number(item.price_per_day || 0) +
+            calculateRentalDays(item.rental_start, item.rental_end) * Number(item.price_per_day || 0) - Number(item.discount_amount || 0) +
             Number(item.deposit || 0)
         );
     }
@@ -2920,6 +2950,11 @@ require('./routes/handoverReports').registerHandoverReports(app, {
     transact: runInTransactionWithRetry, checkAdmin, limiter: adminReturnMutationLimiter
 });
 
+require('./routes/coupons').registerCouponRoutes(app, {
+    createConnection: () => mysql.createConnection(dbConfig),
+    transact: runInTransactionWithRetry, checkAdmin, limiter: adminReturnMutationLimiter, publicLimiter: guestOrderLimiter
+});
+
 app.get('/admin/orders', checkAdmin, async (req, res) => {
     let connection;
 
@@ -3098,6 +3133,7 @@ app.get('/admin/orders/:id', checkAdmin, async (req, res) => {
                 DATE_FORMAT(roi.rental_start, '%Y-%m-%d') AS rentalStart,
                 DATE_FORMAT(roi.rental_end, '%Y-%m-%d') AS rentalEnd,
                 roi.price_per_day AS pricePerDay,
+                roi.discount_amount AS discountAmount,
                 roi.deposit,
                 DATE_FORMAT(roi.actual_return_date, '%Y-%m-%d') AS actualReturnDate,
                 roi.return_status AS returnStatus,
@@ -3558,6 +3594,7 @@ app.put('/admin/order-items/:itemId/cancel', checkAdmin, adminReturnMutationLimi
     roi.rental_start,
     roi.rental_end,
     roi.price_per_day,
+    roi.discount_amount,
     roi.deposit,
     ro.payment_method,
     ro.payment_status,
@@ -3617,7 +3654,7 @@ FOR UPDATE`,
 
         const cancelledBaseRentalAmount = roundMoney(
             calculateRentalDays(item.rental_start, item.rental_end) *
-            Number(item.price_per_day || 0)
+            Number(item.price_per_day || 0) - Number(item.discount_amount || 0)
         );
         const cancelledBaseAmount = roundMoney(
             cancelledBaseRentalAmount + Number(item.deposit || 0)
@@ -3935,6 +3972,7 @@ app.post('/admin/order-items/:itemId/send-return-summary', checkAdmin, async (re
                 DATE_FORMAT(roi.actual_return_date, '%Y-%m-%d') AS actualReturnDate,
                 roi.adjusted_price_per_day AS adjustedPricePerDay,
                 roi.price_per_day AS pricePerDay,
+                roi.discount_amount AS discountAmount,
                 roi.return_status AS returnStatus,
                 roi.is_damaged AS isDamaged,
                 roi.is_late AS isLate,
@@ -4062,6 +4100,7 @@ app.put('/admin/order-items/:itemId/rental-adjustment', checkAdmin, async (req, 
     roi.order_id,
     roi.product_id,
     roi.price_per_day,
+    roi.discount_amount,
     DATE_FORMAT(roi.rental_start, '%Y-%m-%d') AS rental_start,
     DATE_FORMAT(roi.rental_end, '%Y-%m-%d') AS rental_end,
     DATE_FORMAT(roi.adjusted_rental_start, '%Y-%m-%d') AS adjusted_rental_start,
@@ -4162,7 +4201,7 @@ FOR UPDATE`,
         }
 
         const days = calculateRentalDays(finalStart, finalEnd);
-        const adjustedRentalTotal = days * finalPricePerDay;
+        const adjustedRentalTotal = roundMoney(Math.max(0, days * finalPricePerDay - Number(item.discount_amount || 0)));
 
         const available = await checkProductAvailability(
             connection,
@@ -4481,6 +4520,7 @@ app.put('/admin/order-items/:itemId/return', checkAdmin, adminReturnMutationLimi
     roi.id,
     roi.order_id,
     roi.price_per_day,
+    roi.discount_amount,
     DATE_FORMAT(roi.rental_start, '%Y-%m-%d') AS rental_start,
     DATE_FORMAT(roi.rental_end, '%Y-%m-%d') AS rental_end,
     DATE_FORMAT(roi.adjusted_rental_start, '%Y-%m-%d') AS current_adjusted_rental_start,
@@ -4573,7 +4613,7 @@ FOR UPDATE`,
         }
 
         const days = calculateRentalDays(finalStart, finalEnd);
-        const adjustedRentalTotal = days * finalPricePerDay;
+        const adjustedRentalTotal = roundMoney(Math.max(0, days * finalPricePerDay - Number(item.discount_amount || 0)));
         const deposit = Number(item.deposit || 0);
         const plannedReturnDate = agreedEnd;
         const lateDays = calculateLateDays(actualReturnDate, plannedReturnDate);
@@ -5459,6 +5499,7 @@ app.post('/orders/:id/mollie-checkout', async (req, res) => {
                     DATE_FORMAT(rental_start, '%Y-%m-%d') AS rentalStart,
                     DATE_FORMAT(rental_end, '%Y-%m-%d') AS rentalEnd,
                     price_per_day AS pricePerDay,
+                    discount_amount AS discountAmount,
                     deposit
              FROM rental_order_items
              WHERE order_id = ?
@@ -5527,6 +5568,7 @@ app.post('/orders/:id/mollie-checkout', async (req, res) => {
                     DATE_FORMAT(rental_start, '%Y-%m-%d') AS rentalStart,
                     DATE_FORMAT(rental_end, '%Y-%m-%d') AS rentalEnd,
                     price_per_day AS pricePerDay,
+                    discount_amount AS discountAmount,
                     deposit
              FROM rental_order_items
              WHERE order_id = ?
@@ -5689,7 +5731,7 @@ app.post('/orders/:id/mollie-checkout', async (req, res) => {
         const operationKey = `checkout-retry-${order.id}-${checkoutAttempt}`;
 
         const rentalTotal = roundMoney(items.reduce((sum, item) => {
-            return sum + calculateRentalDays(item.rentalStart, item.rentalEnd) * Number(item.pricePerDay || 0);
+            return sum + calculateRentalDays(item.rentalStart, item.rentalEnd) * Number(item.pricePerDay || 0) - Number(item.discountAmount || 0);
         }, 0));
         const depositTotal = roundMoney(items.reduce((sum, item) => sum + Number(item.deposit || 0), 0));
 
@@ -7296,6 +7338,7 @@ async function reconcileMolliePayment(paymentId) {
                 DATE_FORMAT(roi.rental_start, '%Y-%m-%d') AS rental_start,
                 DATE_FORMAT(roi.rental_end, '%Y-%m-%d') AS rental_end,
                 roi.price_per_day,
+    roi.discount_amount,
                 roi.deposit
              FROM rental_order_payments rop
              JOIN rental_orders ro ON ro.id = rop.order_id

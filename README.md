@@ -258,3 +258,25 @@ Jede neue Abholung setzt ein unterschriebenes und festgeschriebenes Übergabepro
 voraus. Ohne Protokoll oder mit einem Entwurf bleibt die Abholung gesperrt. Bereits
 abgeholte Aufträge erhalten kein nachträglich als Übergabe ausgegebenes Protokoll.
 Neue Datenbanktabelle: `handover_reports`, automatische Migration `20260927_09_handover_reports`.
+
+### Gutscheincodes und Rabatte
+
+Unter **Admin Dashboard → Gutscheine & Rabatte** lassen sich Codes mit prozentualem
+Rabatt, optionalem Gültigkeitsbeginn und -ende sowie Aktivierungsstatus verwalten.
+Ohne Enddatum gilt ein aktivierter Code unbegrenzt; ein Enddatum gilt einschließlich
+dieses Tages in der konfigurierten Geschäftszeitzone. Codes sind mehrfach verwendbar,
+pro Bestellung ist ein Code möglich. Groß-/Kleinschreibung spielt keine Rolle.
+
+Der Kunde wendet den Code im letzten Checkout-Schritt vor der Unterschrift an.
+Rabattiert wird ausschließlich die ursprüngliche Mietsumme, centgenau über die
+Positionen verteilt. **Die Kaution bleibt unverändert.** Spätere Verlängerungen,
+Schäden und Zusatzforderungen werden nicht rabattiert. Die neue Gesamtsumme wird
+vor dem Abschluss angezeigt; eine Änderung am Gutschein löscht eine bereits
+geleistete Checkout-Unterschrift. Der Server prüft Gültigkeit und Vorschau erneut.
+
+Code, Prozentsatz und Rabattbeträge werden an der Bestellung gespeichert. Änderungen
+oder Deaktivierungen des Codes verändern bestehende Bestellungen nicht. Zahlungen,
+Belege und Stornoerstattungen berücksichtigen die gespeicherten Rabatte. Eine
+Bestellung ohne verbleibenden Zahlbetrag wird ohne Zahlungsanbieter bestätigt.
+Die automatische Migration `20260927_10_discount_codes` legt die Verwaltungstabelle
+und zusätzliche Bestellfelder an; vorhandene Bestellungen erhalten keinen Rabatt.

@@ -1,0 +1,76 @@
+'use strict';
+const { test, expect } = require('@playwright/test');
+const { TEST_ADMIN, TEST_USER, TEST_PRODUCT } = require('../support/test-database');
+const screenshotDir = process.env.COUPON_SCREENSHOT_DIR || require('os').tmpdir();
+
+test('Gutscheinverwaltung und mobiler Checkout rabattieren nur die Miete', async ({ page, browser }) => {
+    const errors = []; page.on('pageerror', error => errors.push(error.message));
+    page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+    const code = `BROWSER${Date.now()}`;
+    await page.goto('/login.html');
+    await page.locator('#username').fill(TEST_ADMIN.email);
+    await page.locator('#password').fill(TEST_ADMIN.password);
+    await page.getByRole('button', { name: 'Einloggen' }).click();
+    await page.waitForURL(/backend.html/);
+    await page.locator('[data-backend-view="coupons"]').click();
+    await page.locator('#couponCode').fill(code);
+    await page.locator('#couponPercent').fill('10');
+    await page.locator('#couponSave').click();
+    const couponCard = page.locator('#couponList article').filter({ hasText: code });
+    await expect(couponCard).toContainText('Unbegrenzt gültig');
+    await couponCard.getByRole('button', { name: 'Bearbeiten' }).click();
+    await page.locator('#couponPercent').fill('20');
+    await page.locator('#couponSave').click();
+    await expect(couponCard).toContainText('20 %');
+    await page.locator('#couponsView').screenshot({ path: screenshotDir + '/coupon-admin.png' });
+
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    try {
+        const customer = await context.newPage(); customer.on('pageerror', error => errors.push(error.message));
+        customer.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+        await customer.goto(new URL('/login.html', page.url()).href);
+        await customer.locator('#username').fill(TEST_USER.email);
+        await customer.locator('#password').fill(TEST_USER.password);
+        await customer.getByRole('button', { name: 'Einloggen' }).click();
+        await customer.waitForURL(/index.html/);
+        await customer.locator('#productGrid .product-card').filter({ hasText: TEST_PRODUCT.title }).getByRole('button', { name: 'Details' }).click();
+        await expect(customer.locator('#productDetailsModal')).toBeVisible();
+        await customer.evaluate(() => {
+            const date = new Date(); date.setDate(date.getDate() + 1000);
+            document.getElementById('modalRentalStart').value = date.toISOString().slice(0, 10);
+            date.setDate(date.getDate() + 1);
+            document.getElementById('modalRentalEnd').value = date.toISOString().slice(0, 10);
+        });
+        await customer.locator('#selectProductFromModal').click();
+        await expect(customer.locator('#cartItemCount')).toHaveText('1');
+        await customer.locator('#next-btn').click();
+        await customer.locator('#next-btn').click();
+        await customer.locator('#next-btn').click();
+        await expect(customer.locator('#page3')).toBeVisible();
+        await customer.locator('#checkoutCouponCode').fill(code.toLowerCase());
+        await customer.locator('#checkoutCouponApply').click();
+        await expect(customer.locator('#checkoutCouponStatus')).toContainText('Gutschein angewendet');
+        await expect(customer.locator('#checkoutCouponTotals')).toContainText('229,84');
+        await expect(customer.locator('#checkoutCouponTotals')).toContainText('150,00');
+        await customer.locator('#checkoutCouponRemove').click();
+        await expect(customer.locator('#checkoutCouponTotals')).toContainText('249,80');
+        await customer.locator('#checkoutCouponCode').fill(code);
+        await customer.locator('#checkoutCouponApply').click();
+        await expect(customer.locator('#checkoutCouponTotals')).toContainText('229,84');
+        await customer.locator('#checkoutCouponTotals').locator('..').screenshot({ path: screenshotDir + '/coupon-checkout-mobile.png' });
+        expect(await customer.locator('#checkoutCouponTotals').evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+        const canvas = customer.locator('#signature-pad canvas');
+        await canvas.scrollIntoViewIfNeeded();
+        const box = await canvas.boundingBox();
+        await customer.mouse.move(box.x + 25, box.y + 30); await customer.mouse.down();
+        await customer.mouse.move(box.x + 90, box.y + 65, { steps: 8 }); await customer.mouse.up();
+        await customer.locator('#agbs').check(); await customer.locator('#dsgvo').check();
+        await customer.locator('.payment-option-card').filter({ has: customer.locator('#paymentMethodCash') }).click();
+        await expect(customer.locator('#paymentMethodCash')).toBeChecked();
+        const resultPromise = customer.waitForResponse(r => r.url().endsWith('/data') && r.request().method() === 'POST');
+        await customer.locator('#submit-btn').click();
+        const result = await resultPromise; expect(result.status()).toBe(200);
+        expect((await result.json()).amountDue).toBe(229.84);
+        expect(errors).toEqual([]);
+    } finally { await context.close(); }
+});

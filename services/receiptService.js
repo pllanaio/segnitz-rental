@@ -62,6 +62,7 @@ async function captureReceipt(connection, orderId, kind, itemId = null) {
         issuer: { name: process.env.RECEIPT_COMPANY_NAME || 'Segnitz Rental', address: process.env.RECEIPT_COMPANY_ADDRESS || '', email: process.env.GRAPH_MAIL_USER || '' },
         customer: [order.customer_company, `${order.customer_first_name || ''} ${order.customer_last_name || ''}`.trim(), order.customer_address, `${order.customer_zip || ''} ${order.customer_city || ''}`.trim()].filter(Boolean),
         signature: order.signature_data_url || null,
+        couponCode: order.coupon_code || null, couponPercent: Number(order.coupon_percent || 0),
         items: selected.map(item => {
             const start = iso(item.adjusted_rental_start || item.rental_start).slice(0, 10);
             const end = iso(item.adjusted_rental_end || item.rental_end).slice(0, 10);
@@ -69,7 +70,8 @@ async function captureReceipt(connection, orderId, kind, itemId = null) {
             return {
                 id: item.id, title: item.title, start, end, status: item.item_status,
                 originalStart: iso(item.rental_start), originalEnd: iso(item.rental_end),
-                rental: Number(item.adjusted_rental_total ?? (days * Number(item.adjusted_price_per_day ?? item.price_per_day))),
+                rental: Number(item.adjusted_rental_total ?? Math.max(0, days * Number(item.adjusted_price_per_day ?? item.price_per_day) - Number(item.discount_amount || 0))),
+                discountAmount: Number(item.discount_amount || 0),
                 deposit: Number(item.deposit || 0), returnDate: iso(item.actual_return_date),
                 returnStatus: item.return_status, refund: Number(item.deposit_refund_amount || 0),
                 retained: Number(item.deposit_deduction_amount || 0), extra: Number(item.additional_charge_amount || 0),
@@ -139,6 +141,7 @@ async function renderReceiptPdf(receipt, operationKey = '') {
             heading(`${item.title} · Position ${item.id}`);
             row('Mietzeitraum', `${date(item.start)} bis ${date(item.end)}`);
             if (receipt.kind === 'extension') row('Ursprünglich bestellt', `${date(item.originalStart)} bis ${date(item.originalEnd)}`);
+            if (item.discountAmount > 0) row(`Gutschein ${receipt.couponCode || ''} (${receipt.couponPercent} %) · Rabatt auf ursprüngliche Miete`, `-${money(item.discountAmount)}`);
             row('Miete für diesen Zeitraum', money(item.rental));
             row('Ursprüngliche Kaution', money(item.deposit));
             if (item.status === 'cancelled') row('Position', 'Storniert');

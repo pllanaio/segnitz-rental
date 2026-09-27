@@ -1,3 +1,5 @@
+let appliedCoupon = null;
+let couponBusy = false;
 const progress = (value) => {
     document
         .getElementsByClassName('progress-bar')[0]
@@ -537,6 +539,10 @@ function serializeFormToStepJson() {
 
 submitBtn.addEventListener('click', async (event) => {
     event.preventDefault();
+    if (couponBusy || (document.getElementById('checkoutCouponCode').value.trim() && !appliedCoupon)) {
+        showAlert('Bitte den Gutscheincode zuerst anwenden oder entfernen.', 'warning');
+        return;
+    }
 
     submitSignature();
 
@@ -583,7 +589,8 @@ submitBtn.addEventListener('click', async (event) => {
             },
             body: JSON.stringify({
                 form: formData,
-                paymentMethod: selectedPaymentMethod.value
+                paymentMethod: selectedPaymentMethod.value,
+                coupon: appliedCoupon ? { code: appliedCoupon.coupon.code, revision: appliedCoupon.coupon.revision, totalCents: Math.round(appliedCoupon.totals.grandTotalBeforeDepositReturn * 100) } : null
             })
         });
 
@@ -596,7 +603,7 @@ submitBtn.addEventListener('click', async (event) => {
 
             if (response.status === 409) {
                 showAlert(
-                    `${result.error || 'Diese E-Mail-Adresse ist bereits registriert.'} Bitte loggen Sie sich ein.`,
+                    result.error || 'Die Bestellung wurde zwischenzeitlich geändert. Bitte prüfen Sie Ihre Angaben.',
                     'warning',
                     8000
                 );
@@ -661,10 +668,11 @@ submitBtn.addEventListener('click', async (event) => {
         } else {
             if (resultTitle) {
                 resultTitle.textContent = 'Barzahlungs-Miete bestätigt';
+                if (Number(result.amountDue) === 0) resultTitle.textContent = 'Bestellung bestätigt';
             }
 
             if (resultText) {
-                resultText.textContent = 'Ihre Mietprodukte sind verbindlich eingeplant. Miete und Kaution zahlen Sie vollständig bei der Abholung.';
+                resultText.textContent = Number(result.amountDue) === 0 ? 'Ihre Mietprodukte sind verbindlich eingeplant. Es ist keine Zahlung erforderlich.' : 'Ihre Mietprodukte sind verbindlich eingeplant. Den ausgewiesenen Betrag zahlen Sie bei der Abholung.';
             }
 
             if (finalDiv) {
@@ -1367,6 +1375,11 @@ async function loadCart() {
             throw new Error(cart.error || 'Warenkorb konnte nicht geladen werden.');
         }
 
+        if (appliedCoupon && JSON.stringify(currentCart.items) !== JSON.stringify(cart.items)) {
+            appliedCoupon = null;
+            const status = document.getElementById('checkoutCouponStatus');
+            if (status) status.textContent = 'Warenkorb geändert. Bitte den Code erneut anwenden.';
+        }
         currentCart = cart;
         renderCart();
         renderCartReview();
@@ -1665,7 +1678,7 @@ function renderCartReview() {
         `;
     }).join('');
 
-    const totals = calculateCartTotals(items);
+    const totals = appliedCoupon ? appliedCoupon.totals : calculateCartTotals(items);
     const grandTotal = totals.rentalTotal + totals.depositTotal;
     const cartReviewGrandTotal = document.getElementById('cartReviewGrandTotal');
 
@@ -1691,6 +1704,7 @@ function renderCartReview() {
     if (cartReviewDepositTotal) {
         cartReviewDepositTotal.textContent = formatCurrency(totals.depositTotal);
     }
+    renderCouponTotals();
 }
 
 window.deleteCartItem = deleteCartItem;
@@ -2254,4 +2268,43 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     });
+});
+
+function renderCouponTotals() {
+    const box = document.getElementById('checkoutCouponTotals'); if (!box) return;
+    const totals = appliedCoupon ? appliedCoupon.totals : calculateCartTotals(currentCart.items || []);
+    box.innerHTML = `<div class="checkout-summary-row"><span>Miete vor Rabatt</span><strong>${formatCurrency(totals.originalRentalTotal ?? totals.rentalTotal)}</strong></div>
+        ${appliedCoupon ? `<div class="checkout-summary-row"><span>Gutschein ${escapeHtml(appliedCoupon.coupon.code)} (${Number(appliedCoupon.coupon.percent)} %)</span><strong>−${formatCurrency(totals.discountAmount)}</strong></div>` : ''}
+        <div class="checkout-summary-row"><span>Kaution (unverändert)</span><strong>${formatCurrency(totals.depositTotal)}</strong></div>
+        <div class="checkout-summary-total-row"><span>Gesamt inkl. MwSt.</span><strong>${formatCurrency(totals.rentalTotal + totals.depositTotal)}</strong></div>`;
+}
+function clearCouponSignature() {
+    if (typeof signaturePad !== 'undefined' && !signaturePad.isEmpty()) {
+        signaturePad.clear();
+        showAlert('Die Summe wurde geändert. Bitte unterschreiben Sie erneut.', 'info');
+    }
+}
+document.getElementById('checkoutCouponApply').addEventListener('click', async () => {
+    if (couponBusy) return;
+    couponBusy = true;
+    const button = document.getElementById('checkoutCouponApply'); button.disabled = true;
+    const input = document.getElementById('checkoutCouponCode'); input.disabled = true;
+    document.getElementById('checkoutCouponRemove').disabled = true;
+    appliedCoupon = null; renderCartReview(); clearCouponSignature();
+    const cartSnapshot = JSON.stringify(currentCart.items);
+    try {
+        const response = await fetch('/cart/coupon-preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: input.value }) });
+        const result = await response.json(); if (!response.ok) throw new Error(result.error);
+        if (JSON.stringify(currentCart.items) !== cartSnapshot) throw new Error('Warenkorb geändert. Bitte den Code erneut anwenden.');
+        appliedCoupon = result; input.value = result.coupon.code;
+        document.getElementById('checkoutCouponStatus').textContent = 'Gutschein angewendet. Die Kaution bleibt unverändert.';
+    } catch (error) { document.getElementById('checkoutCouponStatus').textContent = error.message; }
+    finally { couponBusy = false; button.disabled = false; input.disabled = false; document.getElementById('checkoutCouponRemove').disabled = false; renderCartReview(); }
+});
+document.getElementById('checkoutCouponRemove').addEventListener('click', () => {
+    appliedCoupon = null; document.getElementById('checkoutCouponCode').value = ''; document.getElementById('checkoutCouponStatus').textContent = 'Gutschein entfernt.'; clearCouponSignature(); renderCartReview();
+});
+document.getElementById('checkoutCouponCode').addEventListener('input', () => {
+    if (appliedCoupon) { appliedCoupon = null; clearCouponSignature(); renderCartReview(); }
+    document.getElementById('checkoutCouponStatus').textContent = 'Bitte den Code mit „Anwenden“ prüfen.';
 });

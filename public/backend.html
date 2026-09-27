@@ -7,7 +7,7 @@
     <title>Segnitz Rental - Backend</title>
     <!-- CSS -->
     <link rel="stylesheet" href="css/bootstrap.min.css">
-    <link rel="stylesheet" href="css/style.css?v=b54cedeac01a">
+    <link rel="stylesheet" href="css/style.css?v=d26847e36e0e">
     <link rel="stylesheet" href="css/bootstrap-icons-1.11.3/font/bootstrap-icons.min.css">
     <!-- FONT -->
     <link rel="stylesheet" href="css/fonts.css">
@@ -49,6 +49,7 @@
                 <p id="backend-login-status" class="mt-4 small"></p>
 
                 <nav class="nav flex-column mt-4">
+                    <button class="btn btn-outline-light text-start mb-2" id="nav-coupons" data-backend-view="coupons">Gutscheine &amp; Rabatte</button>
                     <button class="btn btn-outline-light text-start mb-2" id="nav-declarations" data-backend-view="declarations">Widerrufe &amp; Stornierungen</button>
                     <button class="btn btn-outline-light text-start mb-2 active" id="nav-products"
                         data-backend-view="products">
@@ -86,6 +87,17 @@
             <main class="col-12 col-md-9 col-xl-10 p-4 p-lg-5">
                 <div id="qbox-container_form" class="w-100">
 
+                    <section id="couponsView" class="d-none">
+                        <h2>Gutscheine &amp; Rabatte</h2><p>Pro Bestellung kann ein Code auf die ursprüngliche Mietsumme angewendet werden. Kaution, spätere Verlängerungen und Zusatzforderungen bleiben unverändert.</p>
+                        <form id="couponForm" class="card p-4 mb-4"><h3 class="h5" id="couponEditorTitle">Gutscheincode anlegen</h3><div class="row g-3">
+                            <div class="col-md-6"><label class="form-label" for="couponCode">Code</label><input class="form-control" id="couponCode" required minlength="3" maxlength="40" pattern="[A-Za-z0-9][A-Za-z0-9_\-]{2,39}" placeholder="SOMMER10"></div>
+                            <div class="col-md-6"><label class="form-label" for="couponPercent">Rabatt in Prozent</label><input class="form-control" id="couponPercent" type="number" min="0.01" max="100" step="0.01" required></div>
+                            <div class="col-md-6"><label class="form-label" for="couponFrom">Gültig ab (leer = sofort)</label><input class="form-control" id="couponFrom" type="date"></div>
+                            <div class="col-md-6"><label class="form-label" for="couponUntil">Gültig bis einschließlich (leer = unbegrenzt)</label><input class="form-control" id="couponUntil" type="date"></div>
+                            <div class="col-12"><label class="form-check"><input class="form-check-input" type="checkbox" id="couponActive" checked><span class="form-check-label">Code aktiviert</span></label></div>
+                            <div class="col-12 d-flex gap-2 flex-wrap"><button type="submit" class="btn btn-primary" id="couponSave">Gutscheincode speichern</button><button type="button" class="btn btn-outline-secondary" id="couponReset">Neuer Code / Zurücksetzen</button></div>
+                        </div></form><div id="couponList" aria-live="polite"></div>
+                    </section>
                     <section id="declarationsView" class="d-none">
                         <h2>Widerrufe &amp; Stornierungen</h2>
                         <p>Der Eingang wurde bereits bestätigt. Klären Sie die Zuordnung und wickeln Sie Rückgabe bzw. Erstattung ab. Dokumentieren Sie anschließend die erledigten Schritte.</p>
@@ -501,9 +513,10 @@
     <script type="text/javascript" src="js/alerts.js?v=e22b72864f7d"></script>
     <!-- General Functionalities -->
     <script src="js/product_attributes.js"></script>
-    <script type="text/javascript" src="js/backend_config.js?v=27abce272f14"></script>
+    <script type="text/javascript" src="js/backend_config.js?v=7224bb926fe0"></script>
 
 <script src="js/admin_declarations.js"></script>
+<script src="js/admin_coupons.js?v=84fc4200ed95"></script>
 <script src="js/handover.js?v=51d14d0ba472"></script>
 </body>
 

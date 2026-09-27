@@ -694,8 +694,11 @@ test('Checkout-Lock verhindert Positionsverlust bei parallelem Cart-Add', async 
             lockReleased = true;
 
             const [orderResponse, addResponse] = await Promise.all([orderPromise, addPromise]);
-            assert.equal(orderResponse.status, 200);
+            // Payment creation is queued after commit; either completion or a pending
+            // response is valid while testing the cart transaction's isolation.
+            assert.ok([200, 202].includes(orderResponse.status));
             const orderResult = await orderResponse.json();
+            if (orderResponse.status === 202) assert.equal(orderResult.paymentPending, true);
             assert.ok(Number.isInteger(Number(orderResult.orderId)));
             const setCookies = typeof orderResponse.headers.getSetCookie === 'function'
                 ? orderResponse.headers.getSetCookie()

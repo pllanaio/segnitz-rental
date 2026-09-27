@@ -27,15 +27,15 @@ async function captureMolliePaymentDetails(connection, payment) {
     let lines = [];
     if (!payment.type || payment.type === 'order_payment') {
         const [items] = await connection.execute(
-            `SELECT p.title, roi.price_per_day, roi.deposit,
+            `SELECT p.title, roi.price_per_day, roi.deposit, roi.discount_amount,
                     DATEDIFF(roi.rental_end, roi.rental_start) + 1 AS rental_days
              FROM rental_order_items roi JOIN rental_products p ON p.id = roi.product_id
              WHERE roi.order_id = ? AND COALESCE(roi.item_status, 'active') NOT IN ('cancelled', 'expired')
              ORDER BY roi.id`, [payment.id]
         );
         for (const item of items) {
-            if (Number(item.price_per_day) > 0) lines.push(line(
-                `${item.title} – Miete (${item.rental_days} Tage)`, Number(item.price_per_day) * item.rental_days
+            if (Number(item.price_per_day) * item.rental_days - Number(item.discount_amount || 0) > 0) lines.push(line(
+                `${item.title} – Miete (${item.rental_days} Tage)${Number(item.discount_amount || 0) > 0 ? " nach Gutschein" : ""}`, Number(item.price_per_day) * item.rental_days - Number(item.discount_amount || 0)
             ));
             if (Number(item.deposit) > 0) lines.push(line(`${item.title} – Kaution`, item.deposit));
         }

@@ -6,6 +6,7 @@ const path = require('node:path');
 const schemaPath = path.resolve(__dirname, '../../database/schema.sql');
 
 const tableNames = Object.freeze([
+    'discount_codes',
     'handover_reports',
     'contract_declarations',
     'user_sessions',
