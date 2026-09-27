@@ -801,3 +801,31 @@ test('zeigt vor dem Mollie-Abgleich keine Erfolgsmeldung und vertraut keinem URL
     } finally { release(); }
     await expect(page.locator('#paymentResultTitle')).toHaveText('Zahlung fehlgeschlagen');
 });
+
+
+test('Kalender und Warenkorb-Datumswahl funktionieren ohne CDN', async ({ page }) => {
+    await page.route('https://cdn.jsdelivr.net/**', route => route.abort());
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('/');
+    const card = page.locator('#productGrid .product-card', { hasText: TEST_PRODUCT.title });
+    await card.getByRole('button', { name: 'Details' }).click();
+    await expect(page.locator('#productDetailsModal')).toBeVisible();
+    await expect(page.locator('#modalRentalRange')).toBeHidden();
+    await expect(page.locator('#modalCalendarContainer .flatpickr-calendar')).toBeVisible();
+    // Move to a future month and select an actual range through the calendar UI.
+    await page.locator('#modalCalendarContainer .flatpickr-next-month').click();
+    const days = page.locator('#modalCalendarContainer .flatpickr-day:not(.flatpickr-disabled):not(.prevMonthDay):not(.nextMonthDay)');
+    await days.nth(4).click();
+    await days.nth(6).click();
+    await expect(page.locator('#modalRentalInfo')).toContainText('3 Tage');
+    await page.locator('#selectProductFromModal').click();
+    await expect(page.locator('#cartItemCount')).toHaveText('1');
+    await page.locator('[data-bs-target="#cartModal"]').click();
+    await page.getByRole('button', { name: 'Zeitraum ändern' }).click();
+    await expect(page.locator('#cartItemEditModal')).toBeVisible();
+    await page.locator('#editCartRentalRange').click();
+    await expect(page.locator('.flatpickr-calendar.open')).toBeVisible();
+    expect(errors).toEqual([]);
+});

@@ -900,33 +900,6 @@ function renderOrderPaymentActionPanel(order) {
     const actions = [];
     const orderIsClosed = ['cancelled', 'expired'].includes(orderStatus);
 
-    payments
-        .filter(payment =>
-            payment.paymentType === 'rental_adjustment' &&
-            payment.paymentMethod === 'online' &&
-            ['pending', 'open', 'authorized'].includes(payment.paymentStatus) &&
-            getSafeCheckoutUrl(payment.checkoutUrl)
-        )
-        .forEach(payment => {
-            const checkoutUrl = getSafeCheckoutUrl(payment.checkoutUrl);
-            actions.push(`
-                <div class="cash-action-row">
-                    <div>
-                        <div class="cash-action-title">${formatPaymentType(payment.paymentType)}</div>
-                        <div class="small text-muted">Der Mollie-Zahlungslink ist noch offen.</div>
-                    </div>
-
-                    <div class="cash-action-controls">
-                        <strong>${Number(payment.amount || 0).toFixed(2)} €</strong>
-                        <a class="btn btn-outline-primary btn-sm" href="${checkoutUrl}"
-                            target="_blank" rel="noopener noreferrer">
-                            Zahlungslink öffnen
-                        </a>
-                    </div>
-                </div>
-            `);
-        });
-
     const openInitialPayments = payments.filter(payment =>
         ['rental', 'deposit'].includes(payment.paymentType) &&
         payment.paymentMethod === 'cash' &&
@@ -972,8 +945,8 @@ function renderOrderPaymentActionPanel(order) {
     const openRentalAdjustments = payments.filter(payment =>
         !orderIsClosed &&
         payment.paymentType === 'rental_adjustment' &&
-        payment.paymentMethod === 'cash' &&
-        ['pending', 'open'].includes(payment.paymentStatus)
+        ['cash', 'online'].includes(payment.paymentMethod) &&
+        ['pending', 'open', 'authorized', 'failed', 'cancelled', 'expired'].includes(payment.paymentStatus)
     );
 
     openRentalAdjustments.forEach(payment => {
@@ -986,6 +959,13 @@ function renderOrderPaymentActionPanel(order) {
 
                 <div class="cash-action-controls">
                     <strong>${Number(payment.amount || 0).toFixed(2)} €</strong>
+                    ${payment.paymentMethod === 'online' &&
+                        ['pending', 'open', 'authorized'].includes(payment.paymentStatus) &&
+                        getSafeCheckoutUrl(payment.checkoutUrl) ? `
+                        <a class="btn btn-outline-primary btn-sm"
+                            href="${getSafeCheckoutUrl(payment.checkoutUrl)}"
+                            target="_blank" rel="noopener noreferrer">Zahlungslink öffnen</a>
+                    ` : ''}
                     <button type="button"
                         class="btn btn-success btn-sm"
                         data-backend-action="open-manual-payment"
@@ -1858,9 +1838,6 @@ function getSafeCheckoutUrl(value) {
 
 function renderItemPayments(order, item) {
 
-    const orderStatus = String(order.status || '').toLowerCase();
-    const canAcceptPayments = !['cancelled', 'expired'].includes(orderStatus);
-
     const payments = order.payments || [];
 
     const itemPayments = payments.filter(payment =>
@@ -1871,25 +1848,12 @@ function renderItemPayments(order, item) {
         .filter(payment => payment.paymentType === 'rental_adjustment')
         .sort((a, b) => Number(b.id || 0) - Number(a.id || 0))[0];
 
-    const openRentalAdjustment = itemPayments
-        .filter(payment =>
-            payment.paymentType === 'rental_adjustment' &&
-            ['pending', 'open', 'authorized', 'failed', 'cancelled', 'expired'].includes(payment.paymentStatus)
-        )
-        .sort((a, b) => Number(b.id || 0) - Number(a.id || 0))[0];
-
     const returnCharge = itemPayments.find(payment =>
         payment.paymentType === 'return_additional_charge'
     );
 
     const depositRefund = itemPayments.find(payment =>
         payment.paymentType === 'deposit_refund'
-    );
-
-    const openCashDepositRefund = itemPayments.find(payment =>
-        payment.paymentType === 'deposit_refund' &&
-        payment.paymentMethod === 'cash' &&
-        ['pending', 'open'].includes(payment.paymentStatus)
     );
 
     const depositRefundAmount = Number(item.depositRefundAmount || 0);
@@ -1900,12 +1864,6 @@ function renderItemPayments(order, item) {
         depositRefundAmount <= 0 &&
         depositAmount > 0 &&
         additionalChargeAmount >= depositAmount;
-
-    const hasCashDepositRefund = itemPayments.some(payment =>
-        payment.paymentType === 'deposit_refund' &&
-        payment.paymentMethod === 'cash' &&
-        payment.paymentStatus === 'paid'
-    );
 
     const rentalPaid =
         String(order.payment_status || '').toLowerCase() === 'paid' ||
@@ -1921,9 +1879,6 @@ function renderItemPayments(order, item) {
     const rentalPaidLabel = String(order.payment_method || '').toLowerCase() === 'online'
         ? 'Online bezahlt'
         : 'Bar bezahlt';
-
-    const itemFinancials = calculateOrderItemFinancials(item);
-    const rentalCashAmount = itemFinancials.originalRentalTotal;
 
     return `
         <div class="mt-3 p-3 border rounded bg-white">
@@ -1942,20 +1897,6 @@ ${rentalPaid
         }
         <br>
 
-            ${canAcceptPayments && openRentalAdjustment ? `
-                <button type="button"
-                    class="btn btn-outline-success btn-sm ms-2"
-                    data-backend-action="open-manual-payment"
-                    data-order-id="${openRentalAdjustment.orderId}"
-                    data-item-id="${openRentalAdjustment.orderItemId || ''}"
-                    data-payment-type="${openRentalAdjustment.paymentType}"
-                    data-amount="${Number(openRentalAdjustment.amount || 0)}">
-                    Barzahlung erfassen
-                </button>
-            ` : ''}
-
-            <br>
-
             Rückgabe-Nachzahlung:
             ${returnCharge
             ? formatPaymentStatusBadge(returnCharge.paymentStatus)
@@ -1971,17 +1912,6 @@ ${rentalPaid
                 : '<span class="badge bg-secondary">Nicht erfasst</span>'
         }
 
-            ${openCashDepositRefund && !hasCashDepositRefund ? `
-                <button type="button"
-                    class="btn btn-outline-danger btn-sm ms-2"
-                    data-backend-action="open-manual-refund"
-                    data-order-id="${order.id}"
-                    data-item-id="${item.id}"
-                    data-payment-type="deposit_refund"
-                    data-amount="${Math.abs(Number(openCashDepositRefund.amount || 0))}">
-                    Kaution bar erstatten
-                </button>
-            ` : ''}
         </div>
     `;
 }

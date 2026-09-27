@@ -444,6 +444,7 @@ function isPublicStaticAssetPath(pathname) {
         pathname === '/favicon.ico' ||
         PUBLIC_BRAND_ASSET_PATHS.has(pathname) ||
         pathname.startsWith('/css/') ||
+        pathname.startsWith('/vendor/flatpickr/4.6.13/') ||
         pathname.startsWith('/js/') ||
         pathname.startsWith('/img/products/');
 }
@@ -6346,356 +6347,360 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
         return res.status(400).json({ error: 'Für eine Nachzahlung ist die Bestellposition erforderlich.' });
     }
 
-    let connection;
+    // Retry only stale preflight snapshots, before any money or outbox write.
+    for (let snapshotAttempt = 1; snapshotAttempt <= 3; snapshotAttempt += 1) {
+        let connection;
 
-    try {
-        connection = await mysql.createConnection(dbConfig);
+        try {
+            connection = await mysql.createConnection(dbConfig);
 
-        let additionalPaymentSnapshot = null;
-        let prefetchedAdditionalMolliePayment = null;
-        if (['rental_adjustment', 'return_additional_charge'].includes(paymentType) && orderItemId) {
-            const [snapshotRows] = await connection.execute(
-                `SELECT id, amount, payment_method, mollie_payment_id, payment_status
-                 FROM rental_order_payments
-                 WHERE order_id = ?
-                 AND order_item_id = ?
-                 AND payment_type = ?
-                 AND payment_status IN ('pending', 'open', 'authorized', 'failed', 'cancelled', 'expired')
-                 ORDER BY id DESC
-                 LIMIT 1`,
-                [orderId, orderItemId, paymentType]
-            );
-            additionalPaymentSnapshot = snapshotRows[0] || null;
+            let additionalPaymentSnapshot = null;
+            let prefetchedAdditionalMolliePayment = null;
+            if (['rental_adjustment', 'return_additional_charge'].includes(paymentType) && orderItemId) {
+                const [snapshotRows] = await connection.execute(
+                    `SELECT id, amount, payment_method, mollie_payment_id, payment_status
+                     FROM rental_order_payments
+                     WHERE order_id = ?
+                     AND order_item_id = ?
+                     AND payment_type = ?
+                     AND payment_status IN ('pending', 'open', 'authorized', 'failed', 'cancelled', 'expired')
+                     ORDER BY id DESC
+                     LIMIT 1`,
+                    [orderId, orderItemId, paymentType]
+                );
+                additionalPaymentSnapshot = snapshotRows[0] || null;
 
-            if (
-                additionalPaymentSnapshot?.payment_method === 'online' &&
-                additionalPaymentSnapshot.mollie_payment_id
-            ) {
-                try {
-                    prefetchedAdditionalMolliePayment = await getMolliePayment(
-                        additionalPaymentSnapshot.mollie_payment_id
-                    );
-                } catch (providerError) {
-                    console.error(
-                        'Mollie-Zahlungsstatus konnte vor der Barzahlung nicht geladen werden:',
-                        providerError
-                    );
-                    return res.status(503).json({
-                        error: 'Der Zahlungsanbieter ist vorübergehend nicht erreichbar. Bitte erneut versuchen.'
-                    });
+                if (
+                    additionalPaymentSnapshot?.payment_method === 'online' &&
+                    additionalPaymentSnapshot.mollie_payment_id
+                ) {
+                    try {
+                        prefetchedAdditionalMolliePayment = await getMolliePayment(
+                            additionalPaymentSnapshot.mollie_payment_id
+                        );
+                    } catch (providerError) {
+                        console.error(
+                            'Mollie-Zahlungsstatus konnte vor der Barzahlung nicht geladen werden:',
+                            providerError
+                        );
+                        return res.status(503).json({
+                            error: 'Der Zahlungsanbieter ist vorübergehend nicht erreichbar. Bitte erneut versuchen.'
+                        });
+                    }
                 }
             }
-        }
 
-        await connection.beginTransaction();
+            await connection.beginTransaction();
 
-        const recordedByUserId = await getUserIdByEmail(connection, req.session.user);
+            const recordedByUserId = await getUserIdByEmail(connection, req.session.user);
 
-        const [orders] = await connection.execute(
-            `SELECT id, order_no, customer_email, payment_method, status
-             FROM rental_orders
-             WHERE id = ?
+            const [orders] = await connection.execute(
+                `SELECT id, order_no, customer_email, payment_method, status
+                 FROM rental_orders
+                 WHERE id = ?
+                 LIMIT 1
+                 FOR UPDATE`,
+                [orderId]
+            );
+
+            if (orders.length === 0) {
+                return res.status(404).json({ error: 'Bestellung nicht gefunden.' });
+            }
+            const order = orders[0];
+
+            if (['cancelled', 'expired'].includes(String(order.status || '').toLowerCase())) {
+                return res.status(409).json({
+                    error: 'Für stornierte oder abgelaufene Bestellungen dürfen keine Zahlungen mehr angenommen werden.'
+                });
+            }
+
+            const initialPaymentMethod = order.payment_method;
+
+            if (paymentType === 'initial_payment' && initialPaymentMethod !== 'cash') {
+                return res.status(409).json({
+                    error: 'Die Initialzahlung darf nur bei Barzahlungs-Bestellungen manuell erfasst werden.'
+                });
+            }
+
+            if (paymentType === 'initial_payment') {
+                if (orderItemId) {
+                    return res.status(400).json({
+                        error: 'Die Initialzahlung wird auf Bestellungsebene erfasst, nicht auf Artikelebene.'
+                    });
+                }
+
+                const [openInitialPayments] = await connection.execute(
+                    `SELECT id, payment_type, amount
+             FROM rental_order_payments
+             WHERE order_id = ?
+             AND order_item_id IS NULL
+             AND payment_type IN ('rental', 'deposit')
+             AND payment_method = 'cash'
+             AND payment_status IN ('pending', 'open')
+             FOR UPDATE`,
+                    [orderId]
+                );
+
+                if (openInitialPayments.length === 0) {
+                    return res.status(409).json({
+                        error: 'Für diese Bestellung ist keine offene Bar-Initialzahlung vorhanden.'
+                    });
+                }
+
+                const expectedAmount = openInitialPayments.reduce(
+                    (sum, payment) => sum + Number(payment.amount || 0),
+                    0
+                );
+
+                if (Number(amount).toFixed(2) !== Number(expectedAmount).toFixed(2)) {
+                    return res.status(400).json({
+                        error: `Der Barzahlungsbetrag muss exakt ${expectedAmount.toFixed(2)} € betragen.`
+                    });
+                }
+
+                await connection.execute(
+                    `UPDATE rental_order_payments
+             SET payment_status = 'paid',
+                 paid_at = NOW(),
+                 recorded_by_user_id = ?,
+                 note = COALESCE(?, note)
+             WHERE order_id = ?
+             AND order_item_id IS NULL
+             AND payment_type IN ('rental', 'deposit')
+             AND payment_method = 'cash'
+             AND payment_status IN ('pending', 'open')`,
+                    [
+                        recordedByUserId,
+                        note || 'Miete und Kaution bar bei Abholung kassiert',
+                        orderId
+                    ]
+                );
+
+                const [cashInitialPayment] = await connection.execute(
+                    `INSERT INTO rental_order_payments
+             (
+                order_id,
+                order_item_id,
+                payment_type,
+                payment_method,
+                payment_status,
+                amount,
+                paid_at,
+                recorded_by_user_id,
+                note
+             )
+             VALUES (?, NULL, 'initial_payment', 'cash', 'paid', ?, NOW(), ?, ?)`,
+                    [
+                        orderId,
+                        Number(amount),
+                        recordedByUserId,
+                        note || 'Gesamtzahlung aus Miete und Kaution bar kassiert'
+                    ]
+                );
+
+                await connection.execute(
+                    `UPDATE rental_orders
+             SET payment_method = 'cash',
+                 payment_status = 'paid',
+                 paid_at = NOW()
+             WHERE id = ?`,
+                    [orderId]
+                );
+
+                await sendPaymentReceiptEmail(order, {
+                    id: cashInitialPayment.insertId,
+                    amount: Number(amount),
+                    payment_type: 'initial_payment',
+                    payment_method: 'cash',
+                    note: note || 'Miete und Kaution bar bei Abholung kassiert'
+                }, {
+                    connection,
+                    operationKey: `mail-payment-receipt-${cashInitialPayment.insertId}`
+                });
+
+                await connection.commit();
+
+                return res.json({
+                    message: 'Barzahlung für Miete und Kaution wurde erfasst.'
+                });
+            }
+
+            let openAdditionalPayment = null;
+
+            if (['rental_adjustment', 'return_additional_charge'].includes(paymentType) && orderItemId) {
+                const [openPayments] = await connection.execute(
+                    `SELECT id, amount, payment_method, mollie_payment_id, payment_status
+             FROM rental_order_payments
+             WHERE order_id = ?
+             AND order_item_id = ?
+             AND payment_type = ?
+             AND payment_status IN ('pending', 'open', 'authorized', 'failed', 'cancelled', 'expired')
+             ORDER BY id DESC
              LIMIT 1
              FOR UPDATE`,
-            [orderId]
-        );
+                    [orderId, orderItemId, paymentType]
+                );
 
-        if (orders.length === 0) {
-            return res.status(404).json({ error: 'Bestellung nicht gefunden.' });
-        }
-        const order = orders[0];
+                if (!paymentConcurrencySnapshotsMatch(additionalPaymentSnapshot, openPayments[0] || null)) {
+                    await connection.rollback();
+                    if (snapshotAttempt < 3) continue;
+                    return res.status(409).json({
+                        error: 'Die Nachzahlung wurde gleichzeitig geändert. Bitte erneut laden.'
+                    });
+                }
 
-        if (['cancelled', 'expired'].includes(String(order.status || '').toLowerCase())) {
-            return res.status(409).json({
-                error: 'Für stornierte oder abgelaufene Bestellungen dürfen keine Zahlungen mehr angenommen werden.'
-            });
-        }
+                if (openPayments.length === 0) {
+                    return res.status(409).json({
+                        error: 'Für diese Nachzahlung ist kein offener Zahlungsdatensatz vorhanden.'
+                    });
+                }
 
-        const initialPaymentMethod = order.payment_method;
+                openAdditionalPayment = openPayments[0];
+                const expectedAmount = Number(openAdditionalPayment.amount || 0);
 
-        if (paymentType === 'initial_payment' && initialPaymentMethod !== 'cash') {
-            return res.status(409).json({
-                error: 'Die Initialzahlung darf nur bei Barzahlungs-Bestellungen manuell erfasst werden.'
-            });
-        }
+                if (Number(amount).toFixed(2) !== expectedAmount.toFixed(2)) {
+                    return res.status(400).json({
+                        error: `Der Barzahlungsbetrag muss exakt ${expectedAmount.toFixed(2)} € betragen.`
+                    });
+                }
 
-        if (paymentType === 'initial_payment') {
-            if (orderItemId) {
-                return res.status(400).json({
-                    error: 'Die Initialzahlung wird auf Bestellungsebene erfasst, nicht auf Artikelebene.'
-                });
+                if (openAdditionalPayment.payment_method === 'online' && openAdditionalPayment.mollie_payment_id) {
+                    if (!prefetchedAdditionalMolliePayment) {
+                        await connection.rollback();
+                        return res.status(503).json({
+                            error: 'Der Zahlungsstatus ist nicht verfügbar. Bitte erneut versuchen.'
+                        });
+                    }
+                    const molliePayment = prefetchedAdditionalMolliePayment;
+                    const mollieStatus = mapMolliePaymentStatus(molliePayment.status);
+
+                    if (mollieStatus === 'paid') {
+                        await updateMollieSourcePaymentStatus(connection, {
+                            orderId,
+                            paymentId: openAdditionalPayment.mollie_payment_id,
+                            paymentType,
+                            paymentStatus: 'paid',
+                            paymentRecordId: openAdditionalPayment.id
+                        });
+                        await refundEligibleDepositsAfterPaymentsSettled(connection, orderId);
+                        await refreshReturnCaseStatus(connection, orderId);
+                        await connection.commit();
+                        return res.status(409).json({
+                            error: 'Diese Nachzahlung ist inzwischen online bezahlt worden und darf nicht zusätzlich bar verbucht werden.'
+                        });
+                    }
+
+                    if (isOpenPaymentStatus(mollieStatus)) {
+                        await enqueueMollieCancellationIntent(
+                            connection,
+                            openAdditionalPayment.mollie_payment_id
+                        );
+                    }
+                }
             }
 
-            const [openInitialPayments] = await connection.execute(
-                `SELECT id, payment_type, amount
-         FROM rental_order_payments
-         WHERE order_id = ?
-         AND order_item_id IS NULL
-         AND payment_type IN ('rental', 'deposit')
-         AND payment_method = 'cash'
-         AND payment_status IN ('pending', 'open')
-         FOR UPDATE`,
-                [orderId]
-            );
+            let receiptPaymentRecordId = null;
+            if (['rental_adjustment', 'return_additional_charge'].includes(paymentType) && orderItemId) {
+                if (openAdditionalPayment.payment_method === 'cash') {
+                    await connection.execute(
+                        `UPDATE rental_order_payments
+                         SET payment_status = 'paid', paid_at = NOW(),
+                             recorded_by_user_id = ?, note = COALESCE(?, note)
+                         WHERE id = ?`,
+                        [recordedByUserId, note || null, openAdditionalPayment.id]
+                    );
+                    receiptPaymentRecordId = openAdditionalPayment.id;
+                } else {
+                    await connection.execute(
+                        `UPDATE rental_order_payments
+                         SET payment_status = 'replaced',
+                             note = CONCAT(COALESCE(note, ''),
+                                CASE WHEN note IS NULL OR note = '' THEN '' ELSE ' | ' END,
+                                'Online-Nachzahlung durch Barzahlung ersetzt')
+                         WHERE id = ?`,
+                        [openAdditionalPayment.id]
+                    );
+                    const [cashReplacement] = await connection.execute(
+                        `INSERT INTO rental_order_payments
+                         (order_id, order_item_id, payment_type, payment_method, payment_status,
+                          amount, paid_at, recorded_by_user_id, note)
+                         VALUES (?, ?, ?, 'cash', 'paid', ?, NOW(), ?, ?)`,
+                        [
+                            orderId,
+                            orderItemId,
+                            paymentType,
+                            Number(amount),
+                            recordedByUserId,
+                            note || 'Online-Nachzahlung bar vor Ort beglichen'
+                        ]
+                    );
+                    receiptPaymentRecordId = cashReplacement.insertId;
+                }
 
-            if (openInitialPayments.length === 0) {
-                return res.status(409).json({
-                    error: 'Für diese Bestellung ist keine offene Bar-Initialzahlung vorhanden.'
-                });
+            } else {
+                const [cashPayment] = await connection.execute(
+                    `INSERT INTO rental_order_payments
+             (order_id, order_item_id, payment_type, payment_method, payment_status, amount, paid_at, recorded_by_user_id, note)
+             VALUES (?, ?, ?, 'cash', 'paid', ?, NOW(), ?, ?)`,
+                    [
+                        orderId,
+                        orderItemId || null,
+                        paymentType,
+                        Number(amount),
+                        recordedByUserId,
+                        note || null
+                    ]
+                );
+                receiptPaymentRecordId = cashPayment.insertId;
             }
 
-            const expectedAmount = openInitialPayments.reduce(
-                (sum, payment) => sum + Number(payment.amount || 0),
-                0
-            );
-
-            if (Number(amount).toFixed(2) !== Number(expectedAmount).toFixed(2)) {
-                return res.status(400).json({
-                    error: `Der Barzahlungsbetrag muss exakt ${expectedAmount.toFixed(2)} € betragen.`
-                });
+            if (
+                ['rental_adjustment', 'return_additional_charge'].includes(paymentType) &&
+                orderItemId
+            ) {
+                await refundEligibleDepositsAfterPaymentsSettled(connection, orderId);
+                await refreshReturnCaseStatus(connection, orderId);
             }
 
-            await connection.execute(
-                `UPDATE rental_order_payments
-         SET payment_status = 'paid',
-             paid_at = NOW(),
-             recorded_by_user_id = ?,
-             note = COALESCE(?, note)
-         WHERE order_id = ?
-         AND order_item_id IS NULL
-         AND payment_type IN ('rental', 'deposit')
-         AND payment_method = 'cash'
-         AND payment_status IN ('pending', 'open')`,
-                [
-                    recordedByUserId,
-                    note || 'Miete und Kaution bar bei Abholung kassiert',
-                    orderId
-                ]
-            );
+            if (paymentType === 'rental') {
+                await connection.execute(
+                    `UPDATE rental_orders
+                     SET payment_method = 'cash',
+                         payment_status = 'paid',
+                         paid_at = NOW()
+                     WHERE id = ?`,
+                    [orderId]
+                );
+            }
 
-            const [cashInitialPayment] = await connection.execute(
-                `INSERT INTO rental_order_payments
-         (
-            order_id,
-            order_item_id,
-            payment_type,
-            payment_method,
-            payment_status,
-            amount,
-            paid_at,
-            recorded_by_user_id,
-            note
-         )
-         VALUES (?, NULL, 'initial_payment', 'cash', 'paid', ?, NOW(), ?, ?)`,
-                [
-                    orderId,
-                    Number(amount),
-                    recordedByUserId,
-                    note || 'Gesamtzahlung aus Miete und Kaution bar kassiert'
-                ]
-            );
-
-            await connection.execute(
-                `UPDATE rental_orders
-         SET payment_method = 'cash',
-             payment_status = 'paid',
-             paid_at = NOW()
-         WHERE id = ?`,
-                [orderId]
-            );
-
-            await sendPaymentReceiptEmail(order, {
-                id: cashInitialPayment.insertId,
+            await sendPaymentReceiptEmail(orders[0], {
+                id: receiptPaymentRecordId,
                 amount: Number(amount),
-                payment_type: 'initial_payment',
+                payment_type: paymentType,
                 payment_method: 'cash',
-                note: note || 'Miete und Kaution bar bei Abholung kassiert'
+                note
             }, {
                 connection,
-                operationKey: `mail-payment-receipt-${cashInitialPayment.insertId}`
+                operationKey: `mail-payment-receipt-${receiptPaymentRecordId}`
             });
 
             await connection.commit();
 
-            return res.json({
-                message: 'Barzahlung für Miete und Kaution wurde erfasst.'
-            });
-        }
+            return res.json({ message: 'Barzahlung wurde erfasst.' });
 
-        let openAdditionalPayment = null;
-
-        if (['rental_adjustment', 'return_additional_charge'].includes(paymentType) && orderItemId) {
-            const [openPayments] = await connection.execute(
-                `SELECT id, amount, payment_method, mollie_payment_id, payment_status
-         FROM rental_order_payments
-         WHERE order_id = ?
-         AND order_item_id = ?
-         AND payment_type = ?
-         AND payment_status IN ('pending', 'open', 'authorized', 'failed', 'cancelled', 'expired')
-         ORDER BY id DESC
-         LIMIT 1
-         FOR UPDATE`,
-                [orderId, orderItemId, paymentType]
-            );
-
-            if (!paymentConcurrencySnapshotsMatch(additionalPaymentSnapshot, openPayments[0] || null)) {
-                await connection.rollback();
-                return res.status(409).json({
-                    error: 'Die Nachzahlung wurde gleichzeitig geändert. Bitte erneut laden.'
-                });
-            }
-
-            if (openPayments.length === 0) {
-                return res.status(409).json({
-                    error: 'Für diese Nachzahlung ist kein offener Zahlungsdatensatz vorhanden.'
-                });
-            }
-
-            openAdditionalPayment = openPayments[0];
-            const expectedAmount = Number(openAdditionalPayment.amount || 0);
-
-            if (Number(amount).toFixed(2) !== expectedAmount.toFixed(2)) {
-                return res.status(400).json({
-                    error: `Der Barzahlungsbetrag muss exakt ${expectedAmount.toFixed(2)} € betragen.`
-                });
-            }
-
-            if (openAdditionalPayment.payment_method === 'online' && openAdditionalPayment.mollie_payment_id) {
-                if (!prefetchedAdditionalMolliePayment) {
+        } catch (error) {
+            if (connection) {
+                try {
                     await connection.rollback();
-                    return res.status(503).json({
-                        error: 'Der Zahlungsstatus ist nicht verfügbar. Bitte erneut versuchen.'
-                    });
-                }
-                const molliePayment = prefetchedAdditionalMolliePayment;
-                const mollieStatus = mapMolliePaymentStatus(molliePayment.status);
-
-                if (mollieStatus === 'paid') {
-                    await updateMollieSourcePaymentStatus(connection, {
-                        orderId,
-                        paymentId: openAdditionalPayment.mollie_payment_id,
-                        paymentType,
-                        paymentStatus: 'paid',
-                        paymentRecordId: openAdditionalPayment.id
-                    });
-                    await refundEligibleDepositsAfterPaymentsSettled(connection, orderId);
-                    await refreshReturnCaseStatus(connection, orderId);
-                    await connection.commit();
-                    return res.status(409).json({
-                        error: 'Diese Nachzahlung ist inzwischen online bezahlt worden und darf nicht zusätzlich bar verbucht werden.'
-                    });
-                }
-
-                if (isOpenPaymentStatus(mollieStatus)) {
-                    await enqueueMollieCancellationIntent(
-                        connection,
-                        openAdditionalPayment.mollie_payment_id
-                    );
+                } catch (rollbackError) {
+                    console.error('Rollback der manuellen Zahlung fehlgeschlagen:', rollbackError);
                 }
             }
+            console.error('Fehler beim Erfassen der Barzahlung:', error);
+            return sendTransactionFailure(res, error, 'Zahlung konnte nicht erfasst werden.');
+        } finally {
+            if (connection) await connection.end();
         }
-
-        let receiptPaymentRecordId = null;
-        if (['rental_adjustment', 'return_additional_charge'].includes(paymentType) && orderItemId) {
-            if (openAdditionalPayment.payment_method === 'cash') {
-                await connection.execute(
-                    `UPDATE rental_order_payments
-                     SET payment_status = 'paid', paid_at = NOW(),
-                         recorded_by_user_id = ?, note = COALESCE(?, note)
-                     WHERE id = ?`,
-                    [recordedByUserId, note || null, openAdditionalPayment.id]
-                );
-                receiptPaymentRecordId = openAdditionalPayment.id;
-            } else {
-                await connection.execute(
-                    `UPDATE rental_order_payments
-                     SET payment_status = 'replaced',
-                         note = CONCAT(COALESCE(note, ''),
-                            CASE WHEN note IS NULL OR note = '' THEN '' ELSE ' | ' END,
-                            'Online-Nachzahlung durch Barzahlung ersetzt')
-                     WHERE id = ?`,
-                    [openAdditionalPayment.id]
-                );
-                const [cashReplacement] = await connection.execute(
-                    `INSERT INTO rental_order_payments
-                     (order_id, order_item_id, payment_type, payment_method, payment_status,
-                      amount, paid_at, recorded_by_user_id, note)
-                     VALUES (?, ?, ?, 'cash', 'paid', ?, NOW(), ?, ?)`,
-                    [
-                        orderId,
-                        orderItemId,
-                        paymentType,
-                        Number(amount),
-                        recordedByUserId,
-                        note || 'Online-Nachzahlung bar vor Ort beglichen'
-                    ]
-                );
-                receiptPaymentRecordId = cashReplacement.insertId;
-            }
-
-        } else {
-            const [cashPayment] = await connection.execute(
-                `INSERT INTO rental_order_payments
-         (order_id, order_item_id, payment_type, payment_method, payment_status, amount, paid_at, recorded_by_user_id, note)
-         VALUES (?, ?, ?, 'cash', 'paid', ?, NOW(), ?, ?)`,
-                [
-                    orderId,
-                    orderItemId || null,
-                    paymentType,
-                    Number(amount),
-                    recordedByUserId,
-                    note || null
-                ]
-            );
-            receiptPaymentRecordId = cashPayment.insertId;
-        }
-
-        if (
-            ['rental_adjustment', 'return_additional_charge'].includes(paymentType) &&
-            orderItemId
-        ) {
-            await refundEligibleDepositsAfterPaymentsSettled(connection, orderId);
-            await refreshReturnCaseStatus(connection, orderId);
-        }
-
-        if (paymentType === 'rental') {
-            await connection.execute(
-                `UPDATE rental_orders
-                 SET payment_method = 'cash',
-                     payment_status = 'paid',
-                     paid_at = NOW()
-                 WHERE id = ?`,
-                [orderId]
-            );
-        }
-
-        await sendPaymentReceiptEmail(orders[0], {
-            id: receiptPaymentRecordId,
-            amount: Number(amount),
-            payment_type: paymentType,
-            payment_method: 'cash',
-            note
-        }, {
-            connection,
-            operationKey: `mail-payment-receipt-${receiptPaymentRecordId}`
-        });
-
-        await connection.commit();
-
-        res.json({ message: 'Barzahlung wurde erfasst.' });
-
-    } catch (error) {
-        if (connection) {
-            try {
-                await connection.rollback();
-            } catch (rollbackError) {
-                console.error('Rollback der manuellen Zahlung fehlgeschlagen:', rollbackError);
-            }
-        }
-        console.error('Fehler beim Erfassen der Barzahlung:', error);
-        return sendTransactionFailure(res, error, 'Zahlung konnte nicht erfasst werden.');
-    } finally {
-        if (connection) await connection.end();
     }
 });
 

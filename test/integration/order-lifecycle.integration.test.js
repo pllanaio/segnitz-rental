@@ -225,7 +225,7 @@ async function createOrder(client, paymentMethod, rentalStart, rentalEnd) {
 before(async () => {
     await resetOrderLifecycleDatabase();
 
-    serverProcess = spawn(process.execPath, ['server.js'], {
+    serverProcess = spawn(process.execPath, ['--require', './test/support/payment-race-preload.js', 'server.js'], {
         cwd: path.resolve(__dirname, '../..'),
         env: {
             ...process.env,
@@ -1884,6 +1884,21 @@ test('verhindert Doppelzahlung bei Bar-Fallback einer Online-Nachzahlung und inf
     );
     assert.equal(duplicateRefund.payment_status, 'paid');
     assert.equal(Number(duplicateRefund.amount), -160);
+    // Duplicate deliveries must not create another refund or cash booking.
+    for (let delivery = 0; delivery < 2; delivery += 1) {
+        const duplicate = await customer.request('/webhooks/mollie', {
+            method: 'POST', headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ id: latePaidAdjustmentId })
+        });
+        assert.equal(duplicate.status, 200, await duplicate.text());
+    }
+    const refunds = await queryRows("SELECT amount FROM rental_order_payments WHERE order_id = ? AND order_item_id = ? AND payment_type = 'duplicate_payment_refund'", [order.orderId, item.id]);
+    const cash = await queryRows("SELECT amount FROM rental_order_payments WHERE order_id = ? AND order_item_id = ? AND payment_type = 'rental_adjustment' AND payment_method = 'cash' AND payment_status = 'paid'", [order.orderId, item.id]);
+    assert.equal(refunds.length, 1);
+    assert.equal(Number(refunds[0].amount), -160);
+    assert.equal(cash.length, 1);
+    assert.equal(Number(cash[0].amount), 160);
+
 });
 
 test('erstattet eine zweite Initialzahlung nach Checkout-Retry, ohne den aktiven Auftrag zu verändern', async () => {
@@ -2674,3 +2689,49 @@ test('Widerruf nimmt keine Stornierungen an und bleibt nach Abholung unabhängig
     const withdrawal = await guest.request('/contract-declarations', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...data, id: require('node:crypto').randomUUID(), kind: 'withdrawal', contractReference: picked.orderNo }) });
     assert.equal(withdrawal.status, 201, await withdrawal.text());
 });
+
+for (const [scenario, expectedStatus] of [['publish', 200], ['paid', 409], ['amount', 400], ['churn', 409], ['double-cash', 200]]) {
+    test(`Bar-Fallback verarbeitet konkurrierende Änderung sicher: ${scenario}`, async () => {
+        const customer = new SessionClient();
+        await login(customer, TEST_CUSTOMER);
+        const offset = 500 + ['publish', 'paid', 'amount', 'churn', 'double-cash'].indexOf(scenario) * 10;
+        const order = await createOrder(customer, 'online', futureDate(offset), futureDate(offset + 1));
+        const paidId = `tr_test_paid_race_initial_${order.orderId}`;
+        await execute('UPDATE rental_orders SET mollie_payment_id = ? WHERE id = ?', [paidId, order.orderId]);
+        await execute('UPDATE rental_order_payments SET mollie_payment_id = ? WHERE order_id = ?', [paidId, order.orderId]);
+        const paid = await customer.request('/webhooks/mollie', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: paidId }) });
+        assert.equal(paid.status, 200);
+        const [item] = await queryRows('SELECT id FROM rental_order_items WHERE order_id = ? LIMIT 1', [order.orderId]);
+        const admin = new SessionClient();
+        await login(admin, TEST_ADMIN);
+        const pickup = await admin.request(`/admin/order-items/${item.id}/pickup`, { method: 'PUT' });
+        assert.equal(pickup.status, 200);
+        const extension = await admin.request(`/admin/order-items/${item.id}/rental-adjustment`, {
+            method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({
+                adjustedRentalStart: futureDate(offset), adjustedRentalEnd: futureDate(offset + 3), adjustedPricePerDay: TEST_PRODUCT.pricePerDay
+            })
+        });
+        assert.equal(extension.status, 200, await extension.text());
+        const payment = await waitForDatabaseRow(
+            "SELECT id, mollie_payment_id FROM rental_order_payments WHERE order_id = ? AND payment_type = 'rental_adjustment' AND payment_method = 'online'",
+            [order.orderId], row => Boolean(row.mollie_payment_id), 'Checkout für Race-Test'
+        );
+        if (scenario !== 'double-cash') {
+            await execute('UPDATE rental_order_payments SET note = ?, mollie_payment_id = ? WHERE id = ?',
+                [`audit-race:${scenario}`, scenario === 'publish' ? null : payment.mollie_payment_id, payment.id]);
+        }
+        const request = () => admin.request('/admin/order-payments/manual', { method: 'POST', headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ orderId: order.orderId, orderItemId: item.id, paymentType: 'rental_adjustment', amount: 160 }) });
+        const responses = await Promise.all(scenario === 'double-cash' ? [request(), request()] : [request()]);
+        if (scenario === 'double-cash') assert.deepEqual(responses.map(r => r.status).sort(), [200, 409]);
+        else assert.equal(responses[0].status, expectedStatus, await responses[0].text());
+        const cash = await queryRows("SELECT amount FROM rental_order_payments WHERE order_id = ? AND payment_type = 'rental_adjustment' AND payment_method = 'cash' AND payment_status = 'paid'", [order.orderId]);
+        assert.equal(cash.length, expectedStatus === 200 ? 1 : 0);
+        if (cash.length) assert.equal(Number(cash[0].amount), 160);
+        if (scenario === 'publish') {
+            const [source] = await queryRows('SELECT payment_status, mollie_payment_id FROM rental_order_payments WHERE id = ?', [payment.id]);
+            assert.equal(source.payment_status, 'replaced');
+            assert.equal(source.mollie_payment_id, `tr_test_open_race_${payment.id}`);
+        }
+    });
+}
