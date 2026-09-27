@@ -2779,6 +2779,9 @@ test('Übergabeprotokoll: Entwurf, Fotos, Unterschrift, dauerhafter PDF-Beleg un
     const itemId = detail.items[0].id;
     const endpoint = `/admin/orders/${order.orderId}/handover`;
     await execute("UPDATE rental_orders SET payment_status = 'paid' WHERE id = ?", [order.orderId]);
+    const customerPdf = `/my-orders/${order.orderId}/handover/pdf`;
+    assert.equal((await new SessionClient().request(customerPdf)).status, 401);
+    assert.equal((await customer.request(customerPdf)).status, 404);
     const missingPickup = await admin.request(`/admin/order-items/${itemId}/pickup`, { method: 'PUT' });
     assert.equal(missingPickup.status, 409); assert.match(await missingPickup.text(), /Übergabeprotokoll/);
     assert.equal((await queryRows('SELECT item_status FROM rental_order_items WHERE id = ?', [itemId]))[0].item_status, 'active');
@@ -2793,6 +2796,8 @@ test('Übergabeprotokoll: Entwurf, Fotos, Unterschrift, dauerhafter PDF-Beleg un
     let response = await save(payload); assert.equal(response.status, 200, await response.clone().text());
     const draft = await (await admin.request(endpoint)).json();
     assert.equal(draft.revision, 1); assert.equal(draft.document.entries[0].photos.length, 2);
+    assert.equal((await customer.request(customerPdf)).status, 404, 'Entwürfe bleiben intern');
+    assert.equal((await (await customer.request(`/my-orders/${order.orderId}`)).json()).handoverAvailable, false);
     assert.equal((await save(payload)).status, 409, 'veraltete Revision wird abgewiesen');
     assert.equal((await save({ ...payload, revision: 1, finalize: true })).status, 400, 'Unterschrift ist Pflicht');
     assert.equal((await save({ ...payload, revision: 1, entries: [{ ...payload.entries[0], itemId: 999999 }] })).status, 400);
@@ -2807,6 +2812,15 @@ test('Übergabeprotokoll: Entwurf, Fotos, Unterschrift, dauerhafter PDF-Beleg un
     assert.equal(report.status, 'signed'); assert.equal(report.document.entries[0].photos.length, 1);
     response = await admin.request(`${endpoint}/pdf`); assert.equal(response.status, 200);
     const pdf = Buffer.from(await response.arrayBuffer()); assert.equal(pdf.subarray(0, 5).toString(), '%PDF-');
+    const customerView = await customer.request(customerPdf);
+    assert.equal(customerView.status, 200);
+    assert.match(customerView.headers.get('content-disposition'), /^inline;/);
+    assert.match(customerView.headers.get('cache-control'), /no-store/);
+    assert.deepEqual(Buffer.from(await customerView.arrayBuffer()), pdf, 'Kunde und Admin erhalten dasselbe festgeschriebene PDF');
+    const download = await customer.request(`${customerPdf}?download=1`);
+    assert.match(download.headers.get('content-disposition'), /^attachment;/);
+    assert.equal((await admin.request(customerPdf)).status, 404, 'Ein anderer angemeldeter Nutzer darf das Kunden-PDF nicht abrufen');
+    assert.equal((await (await customer.request(`/my-orders/${order.orderId}`)).json()).handoverAvailable, true);
     assert.equal((await customer.request(`${endpoint}/pdf`)).status, 403);
     assert.equal((await save({ ...payload, revision: 2 })).status, 409);
     const mails = await execute('SELECT payload_json FROM external_effects_outbox WHERE operation_key = ?', [`mail-handover-${order.orderId}`]);

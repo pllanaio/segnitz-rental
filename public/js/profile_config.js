@@ -386,6 +386,19 @@ function renderMyOrderDetails(order) {
             </div>
 
             <div class="col-12">
+                <section class="border rounded p-3" aria-label="Übergabeprotokoll">
+                    <h5>Übergabeprotokoll</h5>
+                    ${order.handoverAvailable ? `
+                        <p>Hier finden Sie Ihr unterschriebenes und festgeschriebenes Übergabeprotokoll mit allen dokumentierten Bemerkungen und Fotos.</p>
+                        <div class="d-flex flex-wrap gap-2">
+                            <a class="btn btn-primary" href="/my-orders/${Number(order.id)}/handover/pdf" target="_blank" rel="noopener">Protokoll ansehen</a>
+                            <a class="btn btn-outline-primary" href="/my-orders/${Number(order.id)}/handover/pdf?download=1" download>PDF herunterladen</a>
+                        </div>
+                    ` : '<p class="mb-0 text-muted">Das Übergabeprotokoll steht hier bereit, sobald es unterschrieben und festgeschrieben wurde.</p>'}
+                </section>
+            </div>
+
+            <div class="col-12">
                 <h5>Artikel</h5>
                 ${itemsHtml || '<div class="alert alert-info">Keine Artikel vorhanden.</div>'}
             </div>

@@ -2366,8 +2366,13 @@ ORDER BY id DESC`,
             returnImages: imagesByItemId[Number(item.id)] || []
         }));
 
+        const [[handover]] = await connection.execute(
+            "SELECT signed_at FROM handover_reports WHERE order_id = ? AND status = 'signed' AND signed_at IS NOT NULL AND pdf_data IS NOT NULL",
+            [safeOrder.id]
+        );
         res.json({
             ...safeOrder,
+            handoverAvailable: Boolean(handover),
             items: finalItems,
             returnImages: images,
             payments

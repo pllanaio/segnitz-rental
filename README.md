@@ -254,6 +254,12 @@ in die vorhandene Mail-Outbox (Systemabsender und `ORDER_BCC` wie bei Bestellung
 unabhängig von der Outbox-Aufbewahrungsfrist über den PDF-Download verfügbar.
 Datenbank-Backups enthalten auch die Protokolle und ihre Fotos.
 
+Angemeldete Kunden finden das festgeschriebene Protokoll unter **Meine Bestellungen →
+Details → Übergabeprotokoll**. Ansicht und Download liefern dasselbe gespeicherte PDF
+wie im Admin Dashboard. Der Zugriff prüft die E-Mail-Zuordnung der Bestellung;
+Entwürfe und fremde Protokolle werden nicht ausgeliefert. Ohne festgeschriebenes
+Protokoll wird ein Verfügbarkeitshinweis angezeigt.
+
 Jede neue Abholung setzt ein unterschriebenes und festgeschriebenes Übergabeprotokoll
 voraus. Ohne Protokoll oder mit einem Entwurf bleibt die Abholung gesperrt. Bereits
 abgeholte Aufträge erhalten kein nachträglich als Übergabe ausgegebenes Protokoll.

@@ -1,6 +1,6 @@
 'use strict';
 const { test, expect } = require('@playwright/test');
-const { TEST_ADMIN, TEST_PRODUCT } = require('../support/test-database');
+const { TEST_ADMIN, TEST_PRODUCT, TEST_USER } = require('../support/test-database');
 const mysql = require('mysql2/promise');
 const sharp = require('sharp');
 
@@ -8,7 +8,7 @@ test('Übergabeprotokoll mobil: Fotos, Entwurf, erneute Unterschrift und PDF', a
     const connection = await mysql.createConnection(require('../../config/db'));
     let orderId;
     try {
-        const [order] = await connection.execute(`INSERT INTO rental_orders (order_no, customer_email, customer_first_name, customer_last_name, status, payment_method, payment_status) VALUES (?, 'handover@example.invalid', 'Test', 'Kunde', 'confirmed', 'cash', 'paid')`, [`HANDOVER-${Date.now()}`]);
+        const [order] = await connection.execute(`INSERT INTO rental_orders (order_no, customer_email, customer_first_name, customer_last_name, status, payment_method, payment_status) VALUES (?, ?, 'Test', 'Kunde', 'confirmed', 'cash', 'paid')`, [`HANDOVER-${Date.now()}`, TEST_USER.email]);
         orderId = order.insertId;
         await connection.execute(`INSERT INTO rental_order_items (order_id, product_id, rental_start, rental_end, item_status) VALUES (?, ?, '2029-06-01', '2029-06-03', 'active')`, [orderId, TEST_PRODUCT.id]);
     } finally { await connection.end(); }
@@ -61,5 +61,21 @@ test('Übergabeprotokoll mobil: Fotos, Entwurf, erneute Unterschrift und PDF', a
     await download.saveAs(testInfo.outputPath('handover.pdf'));
     await page.locator('#handoverModal .modal-header [data-bs-dismiss]').click();
     await expect(page.locator('[data-backend-action="mark-item-picked-up"]')).toBeEnabled();
+    await page.context().clearCookies();
+    await page.goto('/login.html');
+    await page.locator('#username').fill(TEST_USER.email); await page.locator('#password').fill(TEST_USER.password);
+    await page.getByRole('button', { name: 'Einloggen' }).click();
+    await page.waitForURL(/index.html/);
+    await page.goto('/profile.html');
+    await page.evaluate(id => openMyOrderDetails(id), orderId);
+    const section = page.getByRole('region', { name: 'Übergabeprotokoll', exact: true });
+    await expect(section.getByRole('link', { name: 'Protokoll ansehen' })).toHaveAttribute('href', `/my-orders/${orderId}/handover/pdf`);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await section.screenshot({ path: require('path').join(process.env.HANDOVER_SCREENSHOT_DIR || require('os').tmpdir(), 'customer-handover-mobile.png') });
+    const customerDownloadEvent = page.waitForEvent('download');
+    await section.getByRole('link', { name: 'PDF herunterladen' }).click();
+    const customerDownload = await customerDownloadEvent;
+    const fs = require('fs/promises');
+    expect(await fs.readFile(await customerDownload.path())).toEqual(await fs.readFile(testInfo.outputPath('handover.pdf')));
     expect(errors).toEqual([]);
 });

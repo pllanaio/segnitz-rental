@@ -14,6 +14,22 @@ function registerHandoverReports(app, { checkAdmin, createConnection, transact, 
         console.error('Ãœbergabeprotokoll:', err.message);
         return res.status(err.statusCode || 500).json({ error: err.statusCode ? err.message : 'Das Ãœbergabeprotokoll konnte nicht verarbeitet werden.' });
     };
+    app.get('/my-orders/:orderId/handover/pdf', async (req, res) => {
+        res.set('Cache-Control', 'private, no-store');
+        if (!req.session.user) return res.status(401).json({ error: 'Nicht angemeldet.' });
+        if (!/^\d+$/.test(req.params.orderId)) return res.status(404).json({ error: 'Übergabeprotokoll nicht gefunden.' });
+        let connection;
+        try {
+            connection = await createConnection();
+            const [[report]] = await connection.execute(`SELECT h.pdf_data, o.order_no
+                FROM rental_orders o JOIN handover_reports h ON h.order_id = o.id
+                WHERE o.id = ? AND o.customer_email = ? AND h.status = 'signed'
+                AND h.signed_at IS NOT NULL AND h.pdf_data IS NOT NULL`, [req.params.orderId, req.session.user]);
+            if (!report) return res.status(404).json({ error: 'Übergabeprotokoll nicht gefunden.' });
+            const disposition = req.query.download === '1' ? 'attachment' : 'inline';
+            res.type('pdf').set('Content-Disposition', `${disposition}; filename="Uebergabeprotokoll-${String(report.order_no).replace(/[^a-zA-Z0-9_-]/g, '_')}.pdf"`).send(report.pdf_data);
+        } catch (err) { failure(res, err); } finally { if (connection) await connection.end(); }
+    });
     async function getOrder(connection, id, lock = false) {
         if (!/^\d+$/.test(String(id))) throw error('Bestellung nicht gefunden.', 404);
         const [[order]] = await connection.execute(`SELECT * FROM rental_orders WHERE id = ?${lock ? ' FOR UPDATE' : ''}`, [id]);
