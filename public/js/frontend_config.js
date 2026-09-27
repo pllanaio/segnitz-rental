@@ -804,6 +804,37 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 
+function renderProductAttributes(card) {
+    const section = document.getElementById('modalProductAttributes');
+    const list = document.getElementById('modalProductAttributeList');
+    list.replaceChildren();
+    let attributes = {};
+    try { attributes = JSON.parse(card.dataset.attributes || '{}') || {}; } catch (_) { /* Older cards may have no attributes. */ }
+    const numberWithUnit = (value, unit) => {
+        if (value == null || String(value).trim() === '') return '';
+        const number = Number(value);
+        return Number.isFinite(number) && number >= 0
+            ? `${number.toLocaleString('de-DE', { maximumFractionDigits: 2 })} ${unit}` : '';
+    };
+    const rows = [
+        ['Farbe', String(attributes.color || '').trim()],
+        ['Leistung', numberWithUnit(attributes.power, attributes.powerUnit || 'kW')],
+        ['Betriebsstunden', numberWithUnit(attributes.operatingHours, 'h')],
+        ['Kilometerstand', numberWithUnit(attributes.mileageKm, 'km')]
+    ];
+    rows.forEach(([label, value]) => {
+        if (!value) return;
+        const term = document.createElement('dt');
+        term.className = 'col-6 fw-normal text-muted';
+        term.textContent = label;
+        const description = document.createElement('dd');
+        description.className = 'col-6 fw-semibold text-end text-break';
+        description.textContent = value;
+        list.append(term, description);
+    });
+    section.classList.toggle('d-none', list.children.length === 0);
+}
+
 async function showProductDetails(card) {
     selectedProductCard = card;
 
@@ -815,6 +846,7 @@ async function showProductDetails(card) {
     );
     loadProductReviews(card.dataset.productId);
     document.getElementById('modalProductDescription').textContent = card.dataset.description;
+    renderProductAttributes(card);
     document.getElementById('modalProductPrice').textContent = card.dataset.price;
     document.getElementById('modalProductDeposit').textContent = card.dataset.deposit;
 
@@ -1126,6 +1158,10 @@ function createRentalProductCard(product) {
     card.dataset.available = 'unknown';
     card.dataset.title = product.title;
     card.dataset.description = product.description || '';
+    card.dataset.attributes = JSON.stringify({
+        color: product.color, power: product.power_value, powerUnit: product.power_unit,
+        operatingHours: product.operating_hours, mileageKm: product.mileage_km
+    });
     card.dataset.price = `${Number(product.price_per_day).toFixed(2)} € / Tag`;
     card.dataset.deposit = `${Number(product.deposit).toFixed(2)} €`;
     card.dataset.image = firstImage || '';
