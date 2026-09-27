@@ -1009,6 +1009,11 @@ input[name="paymentMethod"] {
   -webkit-appearance: none !important;
 }
 
+.payment-pending-icon {
+  color: #092447;
+  background: #e8f1fb;
+}
+
 .payment-error-icon {
   background: #dc3545 !important;
 }

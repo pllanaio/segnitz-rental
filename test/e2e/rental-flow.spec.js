@@ -803,6 +803,40 @@ test('zeigt vor dem Mollie-Abgleich keine Erfolgsmeldung und vertraut keinem URL
 });
 
 
+for (const context of ['return', 'extension', 'return_charge']) {
+    test(`Mollie-Rückleitung wartet nach Abruffehler auf bestätigte Zahlung: ${context}`, async ({ page }) => {
+        let attempts = 0;
+        await page.route('**/orders/1/payment-status/sync**', async route => {
+            attempts++;
+            if (attempts === 1) return route.fulfill({ status: 503, json: { error: 'Temporärer Abgleichfehler' } });
+            return route.fulfill({ json: { id: 1, payment_status: attempts === 2 ? 'pending' : 'paid' } });
+        });
+        await page.goto(`/index.html?payment=${context}&orderId=1${context === 'return' ? '' : `&paymentType=${context === 'extension' ? 'rental_adjustment' : 'return_additional_charge'}&itemId=2`}`);
+        await expect(page.locator('#paymentResultTitle')).toHaveText('Zahlungsstatus wird geprüft');
+        await expect(page.locator('[data-frontend-action="retry-payment"]')).toHaveCount(0);
+        await expect(page.locator('#paymentResultIcon')).not.toHaveClass(/payment-error-icon/);
+        await expect(page.locator('#paymentResultTitle')).toContainText(/erfolgreich/, { timeout: 10000 });
+        expect(attempts).toBe(3);
+    });
+}
+
+test('Mollie-Prüfung bleibt bei Ausfall neutral und erlaubt nur erneute Statusprüfung', async ({ page }) => {
+    test.setTimeout(45000);
+    let attempts = 0;
+    await page.route('**/orders/1/payment-status/sync**', async route => {
+        attempts++;
+        await route.fulfill(attempts <= 6 ? { status: 503, json: { error: 'Nicht erreichbar' } } : { json: { id: 1, payment_status: 'paid' } });
+    });
+    await page.goto('/index.html?payment=return&orderId=1&status=paid');
+    await expect(page.locator('#paymentResultTitle')).toHaveText('Zahlungsstatus noch nicht bestätigt', { timeout: 30000 });
+    await expect(page.locator('#paymentResultIcon')).not.toHaveClass(/payment-error-icon/);
+    await expect(page.locator('[data-frontend-action="retry-payment"]')).toHaveCount(0);
+    await expect(page.locator('#paymentResultText')).toContainText('Bitte zahlen Sie nicht erneut');
+    await page.getByRole('button', { name: 'Zahlungsstatus erneut prüfen', exact: true }).click();
+    await expect(page.locator('#paymentResultTitle')).toHaveText('Mietvorgang erfolgreich bezahlt');
+    expect(attempts).toBe(7);
+});
+
 test('Kalender und Warenkorb-Datumswahl funktionieren ohne CDN', async ({ page }) => {
     await page.route('https://cdn.jsdelivr.net/**', route => route.abort());
     const errors = [];

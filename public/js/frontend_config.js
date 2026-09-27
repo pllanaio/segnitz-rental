@@ -120,7 +120,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (resultText) resultText.textContent = 'Bitte warten Sie einen Moment.';
     if (resultIcon) {
         resultIcon.innerHTML = '<i class="bi bi-hourglass-split"></i>';
-        resultIcon.className = 'success-icon';
+        resultIcon.className = 'success-icon payment-pending-icon';
     }
     if (finalDiv) finalDiv.replaceChildren();
 
@@ -277,12 +277,41 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     };
 
-    if (!orderId || !finalDiv) {
-        setPaymentErrorView('failed');
+    const setVerificationView = (waiting, message = '') => {
+        if (resultIcon) {
+            resultIcon.innerHTML = '<i class="bi bi-hourglass-split"></i>';
+            resultIcon.className = 'success-icon payment-pending-icon';
+        }
+        if (resultTitle) resultTitle.textContent = waiting ? 'Zahlungsstatus wird geprüft' : 'Zahlungsstatus noch nicht bestätigt';
+        if (resultText) resultText.textContent = message || (waiting
+            ? 'Wir gleichen Ihre Zahlung mit Mollie ab. Bitte zahlen Sie nicht erneut.'
+            : 'Die Prüfung dauert noch an. Dies bedeutet nicht, dass Ihre Zahlung fehlgeschlagen ist. Bitte zahlen Sie nicht erneut.');
+        if (finalDiv) {
+            finalDiv.replaceChildren();
+            if (!waiting) {
+                const button = document.createElement('button');
+                button.type = 'button'; button.className = 'btn btn-primary';
+                button.textContent = 'Zahlungsstatus erneut prüfen';
+                button.addEventListener('click', verifyPaymentStatus);
+                finalDiv.append(button);
+            }
+        }
+    };
+
+    if (!/^\d+$/.test(orderId || '') || !finalDiv) {
+        setVerificationView(false, 'Der Zahlungslink enthält keine gültige Bestellnummer. Bitte öffnen Sie Ihre Bestellung oder kontaktieren Sie uns.');
+        finalDiv?.replaceChildren();
         return;
     }
 
-    try {
+    let verificationRunning = false;
+    let pageClosed = false;
+    let activeRequest;
+    window.addEventListener('pagehide', () => { pageClosed = true; activeRequest?.abort(); }, { once: true });
+    async function verifyPaymentStatus() {
+        if (verificationRunning || pageClosed) return;
+        verificationRunning = true;
+        setVerificationView(true);
         const queryParams = new URLSearchParams();
 
         if (paymentType) {
@@ -297,35 +326,41 @@ document.addEventListener('DOMContentLoaded', async () => {
             ? `?${queryParams.toString()}`
             : '';
 
-        const response = await fetch(`/orders/${orderId}/payment-status/sync${query}`, {
-            method: 'POST',
-            headers: { Accept: 'application/json' }
-        });
-        const order = await response.json();
-
-        if (!response.ok) {
-            throw new Error(order.error || 'Status konnte nicht geladen werden.');
-        }
-
-        const status = order.payment_status || order.paymentStatus;
-
-        if (status === 'paid') {
-
-            const wizardButtons = document.getElementById('q-box__buttons');
-
-            if (wizardButtons) {
-                wizardButtons.style.display = 'none';
+        const delays = [0, 1000, 2000, 3000, 5000, 8000];
+        const definitiveStatuses = ['failed', 'cancelled', 'canceled', 'expired', 'refunded', 'refund_pending', 'refund_failed', 'charged_back'];
+        try {
+            for (const delay of delays) {
+                if (delay) await new Promise(resolve => window.setTimeout(resolve, delay));
+                if (pageClosed) return;
+                activeRequest = new AbortController();
+                const timeout = window.setTimeout(() => activeRequest.abort(), 10000);
+                try {
+                    const response = await fetch(`/orders/${orderId}/payment-status/sync${query}`, {
+                        method: 'POST', cache: 'no-store', signal: activeRequest.signal,
+                        headers: { Accept: 'application/json' }
+                    });
+                    if ([401, 403].includes(response.status)) {
+                        setVerificationView(false, 'Der Zahlungsstatus kann mit dieser Sitzung nicht eingesehen werden. Bitte melden Sie sich mit Ihrem Kundenkonto an oder kontaktieren Sie uns. Dies ist keine Bestätigung einer fehlgeschlagenen Zahlung.');
+                        return;
+                    }
+                    if ([400, 404].includes(response.status)) {
+                        setVerificationView(false, 'Die Zahlung konnte diesem Link nicht zugeordnet werden. Bitte prüfen Sie Ihre Bestellung oder kontaktieren Sie uns.');
+                        return;
+                    }
+                    if (!response.ok) continue;
+                    const order = await response.json();
+                    const status = order.payment_status || order.paymentStatus;
+                    if (status === 'paid') { setPaymentSuccessView(order); return; }
+                    if (definitiveStatuses.includes(status)) { setPaymentErrorView(status, order); return; }
+                    if (status === 'authorized') setVerificationView(true, 'Mollie hat die Zahlung autorisiert. Die endgültige Zahlungsbestätigung steht noch aus. Bitte zahlen Sie nicht erneut.');
+                } catch (_) {
+                    // Transport and temporary reconciliation errors say nothing about payment success.
+                } finally { window.clearTimeout(timeout); }
             }
-
-            setPaymentSuccessView(order);
-            return;
-        }
-
-        setPaymentErrorView(status, order);
-    } catch (error) {
-        console.error('Fehler beim Prüfen des Zahlungsstatus:', error);
-        setPaymentErrorView('pending');
+            if (!pageClosed) setVerificationView(false);
+        } finally { verificationRunning = false; }
     }
+    await verifyPaymentStatus();
 });
 
 async function retryMolliePayment(orderId) {
