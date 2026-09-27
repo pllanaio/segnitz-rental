@@ -422,20 +422,13 @@ function isSetupAssetPath(pathname) {
 }
 
 const PUBLIC_BRAND_ASSET_PATHS = new Set([
-    '/img/android-chrome-192x192.png',
-    '/img/android-chrome-512x512.png',
     '/img/apple-touch-icon.png',
-    '/img/browserconfig.xml',
-    '/img/favicon-16x16.png',
-    '/img/favicon-32x32.png',
     '/img/favicon.ico',
+    '/img/favicon.svg',
+    '/img/favicon-96x96.png',
+    '/img/web-app-manifest-192x192.png',
+    '/img/web-app-manifest-512x512.png',
     '/img/logo.png',
-    '/img/mstile-144x144.png',
-    '/img/mstile-150x150.png',
-    '/img/mstile-310x150.png',
-    '/img/mstile-310x310.png',
-    '/img/mstile-70x70.png',
-    '/img/safari-pinned-tab.svg',
     '/img/site.webmanifest'
 ]);
 
