@@ -1386,7 +1386,7 @@ app.post('/data', guestOrderLimiter, async (req, res) => {
             [
                 orderId,
                 orderSummary.totals.rentalTotal,
-                'Mietanteil bei Barzahlung'
+                'Mietanteil bei Zahlung vor Ort'
             ]
         );
 
@@ -1398,7 +1398,7 @@ app.post('/data', guestOrderLimiter, async (req, res) => {
                 [
                     orderId,
                     orderSummary.totals.depositTotal,
-                    'Kautionsanteil bei Barzahlung'
+                    'Kautionsanteil bei Zahlung vor Ort'
                 ]
             );
         }
@@ -1448,7 +1448,7 @@ app.post('/data', guestOrderLimiter, async (req, res) => {
         delete req.session.cartKey;
 
         return res.status(200).json({
-            message: 'Bestellung bestätigt. Miete und Kaution sind bei Abholung bar zu zahlen.',
+            message: 'Bestellung bestätigt. Miete und Kaution sind bei Abholung zu zahlen.',
             orderId,
             orderNo,
             reservedUntil: null,
@@ -2841,7 +2841,7 @@ async function createCancellationRefunds(connection, order, item = null) {
                     order.id,
                     itemId,
                     -Math.abs(cashRefundAmount),
-                    item ? 'Barauszahlung wegen Artikel-Storno vorgemerkt' : 'Barauszahlung wegen vollständigem Storno vorgemerkt'
+                    item ? 'Auszahlung vor Ort wegen Artikel-Storno vorgemerkt' : 'Auszahlung vor Ort wegen vollständigem Storno vorgemerkt'
                 ]
             );
         }
@@ -2874,7 +2874,7 @@ async function createCancellationRefunds(connection, order, item = null) {
 async function refundDuplicateOnlinePayment(
     connection,
     paymentContext,
-    note = 'Onlinezahlung ging nach bereits verbuchter Barzahlung ein und wurde automatisch erstattet'
+    note = 'Onlinezahlung ging nach bereits verbuchter Zahlung vor Ort ein und wurde automatisch erstattet'
 ) {
     const [existingRows] = await connection.execute(
         `SELECT id, payment_status FROM rental_order_payments
@@ -4957,7 +4957,7 @@ FOR UPDATE`,
                         item.order_id,
                         req.params.itemId,
                         -Math.abs(calculatedDepositRefundAmount),
-                        'Kaution zur Barauszahlung vorgemerkt'
+                        'Kaution zur Auszahlung vor Ort vorgemerkt'
                     ]
                 );
             } else {
@@ -5483,7 +5483,7 @@ app.post('/orders/:id/mollie-checkout', async (req, res) => {
         if (order.paymentMethod !== 'online') {
             await connection.rollback();
             return res.status(409).json({
-                error: 'Für eine Barzahlungs-Bestellung kann kein Online-Checkout erzeugt werden.'
+                error: 'Für eine Bestellung mit Zahlung bei Abholung kann kein Online-Checkout erzeugt werden.'
             });
         }
 
@@ -6190,7 +6190,7 @@ app.post('/orders/:id/payment-status/sync', async (req, res) => {
                         paymentType: paymentRows[0].payment_type,
                         paymentStatus: 'replaced',
                         paymentRecordId: paymentRows[0].paymentRecordId,
-                        noteSuffix: 'Online-Link nach Barzahlung geschlossen'
+                        noteSuffix: 'Online-Link nach Zahlung vor Ort geschlossen'
                     });
                 }
 
@@ -6441,7 +6441,7 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
                         );
                     } catch (providerError) {
                         console.error(
-                            'Mollie-Zahlungsstatus konnte vor der Barzahlung nicht geladen werden:',
+                            'Mollie-Zahlungsstatus konnte vor der Zahlung vor Ort nicht geladen werden:',
                             providerError
                         );
                         return res.status(503).json({
@@ -6479,7 +6479,7 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
 
             if (paymentType === 'initial_payment' && initialPaymentMethod !== 'cash') {
                 return res.status(409).json({
-                    error: 'Die Initialzahlung darf nur bei Barzahlungs-Bestellungen manuell erfasst werden.'
+                    error: 'Die Initialzahlung darf nur bei Bestellungen mit Zahlung bei Abholung manuell erfasst werden.'
                 });
             }
 
@@ -6504,7 +6504,7 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
 
                 if (openInitialPayments.length === 0) {
                     return res.status(409).json({
-                        error: 'Für diese Bestellung ist keine offene Bar-Initialzahlung vorhanden.'
+                        error: 'Für diese Bestellung ist keine offene Zahlung bei Abholung vorhanden.'
                     });
                 }
 
@@ -6515,7 +6515,7 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
 
                 if (Number(amount).toFixed(2) !== Number(expectedAmount).toFixed(2)) {
                     return res.status(400).json({
-                        error: `Der Barzahlungsbetrag muss exakt ${expectedAmount.toFixed(2)} € betragen.`
+                        error: `Der Zahlungsbetrag muss exakt ${expectedAmount.toFixed(2)} € betragen.`
                     });
                 }
 
@@ -6532,7 +6532,7 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
              AND payment_status IN ('pending', 'open')`,
                     [
                         recordedByUserId,
-                        note || 'Miete und Kaution bar bei Abholung kassiert',
+                        note || 'Miete und Kaution bei Abholung kassiert',
                         orderId
                     ]
                 );
@@ -6555,7 +6555,7 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
                         orderId,
                         Number(amount),
                         recordedByUserId,
-                        note || 'Gesamtzahlung aus Miete und Kaution bar kassiert'
+                        note || 'Gesamtzahlung aus Miete und Kaution vor Ort kassiert'
                     ]
                 );
 
@@ -6573,7 +6573,7 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
                     amount: Number(amount),
                     payment_type: 'initial_payment',
                     payment_method: 'cash',
-                    note: note || 'Miete und Kaution bar bei Abholung kassiert'
+                    note: note || 'Miete und Kaution bei Abholung kassiert'
                 }, {
                     connection,
                     operationKey: `mail-payment-receipt-${cashInitialPayment.insertId}`
@@ -6582,7 +6582,7 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
                 await connection.commit();
 
                 return res.json({
-                    message: 'Barzahlung für Miete und Kaution wurde erfasst.'
+                    message: 'Zahlung vor Ort für Miete und Kaution wurde erfasst.'
                 });
             }
 
@@ -6621,7 +6621,7 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
 
                 if (Number(amount).toFixed(2) !== expectedAmount.toFixed(2)) {
                     return res.status(400).json({
-                        error: `Der Barzahlungsbetrag muss exakt ${expectedAmount.toFixed(2)} € betragen.`
+                        error: `Der Zahlungsbetrag muss exakt ${expectedAmount.toFixed(2)} € betragen.`
                     });
                 }
 
@@ -6647,7 +6647,7 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
                         await refreshReturnCaseStatus(connection, orderId);
                         await connection.commit();
                         return res.status(409).json({
-                            error: 'Diese Nachzahlung ist inzwischen online bezahlt worden und darf nicht zusätzlich bar verbucht werden.'
+                            error: 'Diese Nachzahlung ist inzwischen online bezahlt worden und darf nicht zusätzlich vor Ort verbucht werden.'
                         });
                     }
 
@@ -6677,7 +6677,7 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
                          SET payment_status = 'replaced',
                              note = CONCAT(COALESCE(note, ''),
                                 CASE WHEN note IS NULL OR note = '' THEN '' ELSE ' | ' END,
-                                'Online-Nachzahlung durch Barzahlung ersetzt')
+                                'Online-Nachzahlung durch Zahlung vor Ort ersetzt')
                          WHERE id = ?`,
                         [openAdditionalPayment.id]
                     );
@@ -6692,7 +6692,7 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
                             paymentType,
                             Number(amount),
                             recordedByUserId,
-                            note || 'Online-Nachzahlung bar vor Ort beglichen'
+                            note || 'Online-Nachzahlung vor Ort beglichen'
                         ]
                     );
                     receiptPaymentRecordId = cashReplacement.insertId;
@@ -6747,7 +6747,7 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
 
             await connection.commit();
 
-            return res.json({ message: 'Barzahlung wurde erfasst.' });
+            return res.json({ message: 'Zahlung vor Ort wurde erfasst.' });
 
         } catch (error) {
             if (connection) {
@@ -6757,7 +6757,7 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
                     console.error('Rollback der manuellen Zahlung fehlgeschlagen:', rollbackError);
                 }
             }
-            console.error('Fehler beim Erfassen der Barzahlung:', error);
+            console.error('Fehler beim Erfassen der Zahlung vor Ort:', error);
             return sendTransactionFailure(res, error, 'Zahlung konnte nicht erfasst werden.');
         } finally {
             if (connection) await connection.end();
@@ -6960,7 +6960,7 @@ app.post('/admin/order-payments/manual-refund', checkAdmin, adminReturnMutationL
 
     if (!['deposit_refund', 'order_cancellation_refund'].includes(paymentType)) {
         return res.status(400).json({
-            error: 'Diese Zahlungsart ist keine Bar-Rückerstattung.'
+            error: 'Diese Zahlungsart ist keine Rückerstattung vor Ort.'
         });
     }
 
@@ -7004,7 +7004,7 @@ app.post('/admin/order-payments/manual-refund', checkAdmin, adminReturnMutationL
 
         if (alreadyRefunded.length > 0) {
             return res.status(409).json({
-                error: 'Diese Bar-Rückerstattung wurde bereits erfasst.'
+                error: 'Diese Rückerstattung vor Ort wurde bereits erfasst.'
             });
         }
 
@@ -7061,7 +7061,7 @@ app.post('/admin/order-payments/manual-refund', checkAdmin, adminReturnMutationL
                 amount: -Math.abs(Number(amount)),
                 payment_type: paymentType,
                 payment_method: 'cash',
-                note: note || 'Betrag bar an Kunden ausgezahlt'
+                note: note || 'Betrag vor Ort an Kunden ausgezahlt'
             }, {
                 connection,
                 operationKey: `mail-payment-receipt-${openRefunds[0].id}`
@@ -7069,12 +7069,12 @@ app.post('/admin/order-payments/manual-refund', checkAdmin, adminReturnMutationL
 
             await connection.commit();
 
-            return res.json({ message: 'Bar-Rückerstattung wurde erfasst.' });
+            return res.json({ message: 'Rückerstattung vor Ort wurde erfasst.' });
         }
 
         await connection.rollback();
         return res.status(409).json({
-            error: 'Für diese Bestellung ist keine offene Bar-Rückerstattung vorgemerkt.'
+            error: 'Für diese Bestellung ist keine offene Rückerstattung vor Ort vorgemerkt.'
         });
 
     } catch (error) {
@@ -7085,7 +7085,7 @@ app.post('/admin/order-payments/manual-refund', checkAdmin, adminReturnMutationL
                 console.error('Rollback der manuellen Rückerstattung fehlgeschlagen:', rollbackError);
             }
         }
-        console.error('Fehler beim Erfassen der Bar-Rückerstattung:', error);
+        console.error('Fehler beim Erfassen der Rückerstattung vor Ort:', error);
         return sendTransactionFailure(res, error, 'Rückerstattung konnte nicht erfasst werden.');
     } finally {
         if (connection) await connection.end();
@@ -7215,7 +7215,7 @@ async function refundEligibleDepositsAfterPaymentsSettled(connection, orderId) {
                     orderId,
                     item.id,
                     -Math.abs(refundAmount),
-                    'Kaution zur Barauszahlung vorgemerkt nach Zahlung aller Ausstände'
+                    'Kaution zur Auszahlung vor Ort vorgemerkt nach Zahlung aller Ausstände'
                 ]
             );
         } else {
@@ -7314,7 +7314,7 @@ async function reconcileMolliePayment(paymentId) {
                 paymentType: cashPaidRows[0].payment_type,
                 paymentStatus: 'replaced',
                 paymentRecordId: cashPaidRows[0].paymentRecordId,
-                noteSuffix: 'Online-Link nach Barzahlung ignoriert',
+                noteSuffix: 'Online-Link nach Zahlung vor Ort ignoriert',
                 preservePaid: true
             });
 

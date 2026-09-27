@@ -594,7 +594,7 @@ test('führt die Rückgabemaske mit Schadensdokumentation und wählbarem Zahlung
     expect(payload.additionalChargePaymentMethod).toBe('cash');
     const returnAction = page.locator('#orderDetailsBody .cash-action-row', { hasText: 'Rückgabe-Nachzahlung' });
     await expect(returnAction).toContainText('100.00 €');
-    await expect(returnAction.getByRole('button', { name: 'Nachzahlung bar kassieren' })).toBeVisible();
+    await expect(returnAction.getByRole('button', { name: 'Nachzahlung vor Ort kassieren' })).toBeVisible();
     await expect(page.locator('#orderDetailsBody').getByRole('button', { name: 'Foto löschen' })).toHaveCount(0);
     await expect(page.locator('#orderDetailsBody img[src="/img/returns/return-test.png"]').first()).toBeVisible();
 
@@ -605,14 +605,14 @@ test('führt die Rückgabemaske mit Schadensdokumentation und wählbarem Zahlung
         orderDetails.payments[0].paymentStatus = paymentStatus;
         orderDetails.payments[0].checkoutUrl = 'https://checkout.test.mollie.local/tr_return';
         await page.evaluate(order => renderOrderDetails(order), orderDetails);
-        await expect(returnAction.getByRole('button', { name: 'Nachzahlung bar kassieren' })).toBeVisible();
+        await expect(returnAction.getByRole('button', { name: 'Nachzahlung vor Ort kassieren' })).toBeVisible();
         await expect(returnAction.getByRole('link', { name: 'Zahlungslink öffnen' }))
             .toHaveCount(['pending', 'authorized'].includes(paymentStatus) ? 1 : 0);
     }
     orderDetails.payments[0].paymentStatus = 'pending';
     orderDetails.payments[0].checkoutUrl = null;
     await page.evaluate(order => renderOrderDetails(order), orderDetails);
-    await returnAction.getByRole('button', { name: 'Nachzahlung bar kassieren' }).click();
+    await returnAction.getByRole('button', { name: 'Nachzahlung vor Ort kassieren' }).click();
     await expect(page.locator('#manualPaymentModal')).toBeVisible();
     await page.locator('#manualPaymentModal [data-bs-dismiss="modal"]').first().click();
     for (const paymentStatus of ['paid', 'replaced', 'settled_with_deposit', 'refunded']) {
@@ -745,7 +745,7 @@ test('erklärt nach Bar-Fallback die automatisch erstattete Online-Doppelzahlung
     await page.goto('/index.html?payment=extension&orderId=1&paymentType=rental_adjustment&itemId=11');
     const syncRequest = await syncRequestPromise;
 
-    await expect(page.locator('#paymentResultTitle')).toHaveText('Nachzahlung bereits bar beglichen');
+    await expect(page.locator('#paymentResultTitle')).toHaveText('Nachzahlung bereits vor Ort beglichen');
     await expect(page.locator('#paymentResultText')).toContainText('automatisch zurückerstattet');
     await expect(page.locator('#final')).toContainText('doppelte Onlinezahlung wurde erstattet');
     expect(syncRequest.headers()['x-csrf-token']).toMatch(/^[a-f0-9]{64}$/);

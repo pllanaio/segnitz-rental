@@ -924,7 +924,7 @@ function renderOrderPaymentActionPanel(order) {
         actions.push(`
             <div class="cash-action-row">
                 <div>
-                    <div class="cash-action-title">Barzahlung bei Abholung</div>
+                    <div class="cash-action-title">Bei Abholung</div>
                     <div class="small text-muted">Miete und Kaution müssen vor Abholung vollständig kassiert werden.</div>
                 </div>
 
@@ -937,7 +937,7 @@ function renderOrderPaymentActionPanel(order) {
                         data-item-id=""
                         data-payment-type="initial_payment"
                         data-amount="${initialAmount}">
-                        Miete und Kaution bar kassieren
+                        Miete und Kaution vor Ort kassieren
                     </button>
                 </div>
             </div>
@@ -975,7 +975,7 @@ function renderOrderPaymentActionPanel(order) {
                         data-item-id="${payment.orderItemId || ''}"
                         data-payment-type="rental_adjustment"
                         data-amount="${Number(payment.amount || 0)}">
-                        Verlängerung bar kassieren
+                        Verlängerung vor Ort kassieren
                     </button>
                 </div>
             </div>
@@ -1013,7 +1013,7 @@ function renderOrderPaymentActionPanel(order) {
                         data-item-id="${payment.orderItemId || ''}"
                         data-payment-type="return_additional_charge"
                         data-amount="${Number(payment.amount || 0)}">
-                        Nachzahlung bar kassieren
+                        Nachzahlung vor Ort kassieren
                     </button>
                 </div>
             </div>
@@ -1031,7 +1031,7 @@ function renderOrderPaymentActionPanel(order) {
             <div class="cash-action-row">
                 <div>
                     <div class="cash-action-title">Kautionsrückerstattung</div>
-                    <div class="small text-muted">Kaution wurde zur Barauszahlung vorgemerkt.</div>
+                    <div class="small text-muted">Kaution wurde zur Auszahlung vor Ort vorgemerkt.</div>
                 </div>
 
                 <div class="cash-action-controls">
@@ -1043,7 +1043,7 @@ function renderOrderPaymentActionPanel(order) {
                         data-item-id="${payment.orderItemId || ''}"
                         data-payment-type="deposit_refund"
                         data-amount="${Math.abs(Number(payment.amount || 0))}">
-                        Kaution bar erstatten
+                        Kaution vor Ort erstatten
                     </button>
                 </div>
             </div>
@@ -1061,7 +1061,7 @@ function renderOrderPaymentActionPanel(order) {
             <div class="cash-action-row">
                 <div>
                     <div class="cash-action-title">Storno-Rückerstattung</div>
-                    <div class="small text-muted">Der bereits kassierte Betrag ist bar zurückzuzahlen.</div>
+                    <div class="small text-muted">Der bereits kassierte Betrag ist vor Ort zurückzuzahlen.</div>
                 </div>
 
                 <div class="cash-action-controls">
@@ -1073,7 +1073,7 @@ function renderOrderPaymentActionPanel(order) {
                         data-item-id="${payment.orderItemId || ''}"
                         data-payment-type="order_cancellation_refund"
                         data-amount="${Math.abs(Number(payment.amount || 0))}">
-                        Storno bar erstatten
+                        Storno vor Ort erstatten
                     </button>
                 </div>
             </div>
@@ -1888,7 +1888,7 @@ function renderItemPayments(order, item) {
 
     const rentalPaidLabel = String(order.payment_method || '').toLowerCase() === 'online'
         ? 'Online bezahlt'
-        : 'Bar bezahlt';
+        : 'Vor Ort bezahlt';
 
     return `
         <div class="mt-3 p-3 border rounded bg-white">
@@ -1927,7 +1927,7 @@ ${rentalPaid
 }
 
 function openManualPaymentModal(orderId, orderItemId, paymentType, amount) {
-    document.querySelector('#manualPaymentModal .modal-title').textContent = 'Barzahlung erfassen';
+    document.querySelector('#manualPaymentModal .modal-title').textContent = 'Zahlung vor Ort erfassen';
     const submitButton = document.getElementById('manualPaymentSubmitButton');
     submitButton.textContent = 'Zahlung erfassen';
     submitButton.dataset.operation = 'payment';
@@ -1946,9 +1946,9 @@ function openManualRefundModal(orderId, orderItemId, paymentType, amount) {
     document.getElementById('manualPaymentOrderItemId').value = orderItemId || '';
     document.getElementById('manualPaymentType').value = paymentType;
     document.getElementById('manualPaymentAmount').value = Number(amount || 0).toFixed(2);
-    document.getElementById('manualPaymentNote').value = 'Bar-Rückerstattung an Kunden ausgezahlt';
+    document.getElementById('manualPaymentNote').value = 'Rückerstattung vor Ort an Kunden ausgezahlt';
 
-    document.querySelector('#manualPaymentModal .modal-title').textContent = 'Bar-Rückerstattung erfassen';
+    document.querySelector('#manualPaymentModal .modal-title').textContent = 'Rückerstattung vor Ort erfassen';
     const submitButton = document.getElementById('manualPaymentSubmitButton');
     submitButton.textContent = 'Rückerstattung erfassen';
     submitButton.dataset.operation = 'refund';
@@ -2004,7 +2004,7 @@ async function submitManualPayment() {
         await loadOrders();
 
     } catch (error) {
-        console.error('Fehler beim Erfassen der Barzahlung:', error);
+        console.error('Fehler beim Erfassen der Zahlung vor Ort:', error);
         showAlert('Zahlung konnte nicht erfasst werden.', 'danger');
     }
 }
@@ -2143,7 +2143,7 @@ function formatPaymentStatusBadge(status) {
         failed: 'Fehlgeschlagen',
         cancelled: 'Abgebrochen',
         expired: 'Abgelaufen',
-        replaced: 'Durch Barzahlung ersetzt',
+        replaced: 'Durch Zahlung vor Ort ersetzt',
         offset: 'Mit Kaution verrechnet',
         refunded: 'Erstattet',
         refund_pending: 'Erstattung läuft',
@@ -2611,7 +2611,7 @@ function applyOrderItemReturnModalRules(triggerSource = 'auto') {
         ${customerAdditionalDue > 0 ? `
             <div class="small text-muted mt-2">
                 Zahlungsweg: ${document.getElementById('returnAdditionalChargePaymentMethod').value === 'cash'
-                    ? 'Barzahlung vor Ort'
+                    ? 'Zahlung vor Ort'
                     : 'Mollie-Zahlungslink'}
             </div>
         ` : ''}

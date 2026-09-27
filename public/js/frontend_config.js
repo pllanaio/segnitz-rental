@@ -183,7 +183,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             : paymentContext === 'return'
                 ? 'Sie können die Online-Zahlung erneut starten, sofern die Mietartikel noch verfügbar sind.'
             : ['extension', 'return_charge'].includes(paymentContext)
-                ? 'Bitte kontaktieren Sie Segnitz Rental für einen neuen Zahlungslink oder eine Barzahlung vor Ort.'
+                ? 'Bitte kontaktieren Sie Segnitz Rental für einen neuen Zahlungslink oder eine Zahlung vor Ort.'
                 : '';
 
         if (resultIcon) {
@@ -240,14 +240,14 @@ document.addEventListener('DOMContentLoaded', async () => {
                 body = 'Für diese Nachzahlung ist keine weitere Zahlung erforderlich.';
             }
         } else if (order.settled_by_cash) {
-            title = 'Nachzahlung bereits bar beglichen';
+            title = 'Nachzahlung bereits vor Ort beglichen';
 
             if (order.duplicate_refund_status === 'paid') {
                 text = 'Die zusätzliche Onlinezahlung wurde automatisch zurückerstattet.';
-                body = 'Die Nachzahlung war bereits bar beglichen; die doppelte Onlinezahlung wurde erstattet.';
+                body = 'Die Nachzahlung war bereits vor Ort beglichen; die doppelte Onlinezahlung wurde erstattet.';
             } else if (order.duplicate_refund_status) {
                 text = 'Die zusätzliche Onlinezahlung wird automatisch zurückerstattet.';
-                body = 'Die Nachzahlung war bereits bar beglichen; die Rückerstattung der doppelten Onlinezahlung läuft.';
+                body = 'Die Nachzahlung war bereits vor Ort beglichen; die Rückerstattung der doppelten Onlinezahlung läuft.';
             } else {
                 text = 'Die Nachzahlung wurde vor Ort erfasst; der Online-Link ist geschlossen.';
                 body = 'Für diese Nachzahlung ist keine weitere Zahlung erforderlich.';
@@ -667,7 +667,7 @@ submitBtn.addEventListener('click', async (event) => {
             }
         } else {
             if (resultTitle) {
-                resultTitle.textContent = 'Barzahlungs-Miete bestätigt';
+                resultTitle.textContent = 'Bestellung bestätigt – Zahlung bei Abholung';
                 if (Number(result.amountDue) === 0) resultTitle.textContent = 'Bestellung bestätigt';
             }
 

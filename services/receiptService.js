@@ -16,7 +16,7 @@ const LABELS = {
     return_additional_charge: 'Rückgabe-Nachzahlung', deposit_refund: 'Kautionsrückerstattung',
     order_cancellation_refund: 'Stornoerstattung', duplicate_payment_refund: 'Erstattung Doppelzahlung',
     chargeback: 'Rückbelastung', charged_back: 'Rückbelastet', refund_record: 'Mollie-Erstattung',
-    cash: 'Barzahlung', online: 'Onlinezahlung'
+    cash: 'Zahlung vor Ort', online: 'Onlinezahlung'
 };
 const label = value => LABELS[value] || value || '–';
 const iso = value => {

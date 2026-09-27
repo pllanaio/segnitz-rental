@@ -514,7 +514,7 @@ async function sendPaymentReceiptEmail(order, payment, deliveryOptions = {}) {
         ? 'Wir haben Ihnen den folgenden Betrag zu Ihrem Mietauftrag ausgezahlt.'
         : 'Wir haben Ihre Zahlung zu Ihrem Mietauftrag erhalten.';
     const methodLabel = payment.payment_method === 'cash'
-        ? (isRefund ? 'Barauszahlung vor Ort' : 'Barzahlung vor Ort')
+        ? (isRefund ? 'Auszahlung vor Ort' : 'Zahlung vor Ort')
         : (isRefund ? 'Online-Rückerstattung' : 'Onlinezahlung');
 
     await sendGraphMail({

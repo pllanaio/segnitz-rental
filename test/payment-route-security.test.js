@@ -47,13 +47,13 @@ test('führt Payment-Synchronisierung nur über den schreibenden Owner-Endpunkt 
     assert.match(syncRoute, /\.commit\(/);
 });
 
-test('behandelt vorgemerkte Online-Zahlungen nicht als Barzahlungs-Erfolg', () => {
+test('behandelt vorgemerkte Online-Zahlungen nicht als Zahlung vor Orts-Erfolg', () => {
     const pendingBranch = frontendSource.indexOf('if (paymentPending)');
-    const cashConfirmation = frontendSource.indexOf("resultTitle.textContent = 'Barzahlungs-Miete bestätigt'");
+    const cashConfirmation = frontendSource.indexOf("resultTitle.textContent = 'Bestellung bestätigt – Zahlung bei Abholung'");
 
     assert.notEqual(pendingBranch, -1, 'paymentPending-Zweig fehlt im Checkout-Frontend');
-    assert.notEqual(cashConfirmation, -1, 'Barzahlungs-Bestätigung fehlt');
-    assert.ok(pendingBranch < cashConfirmation, 'paymentPending muss vor der Barzahlungsansicht verzweigen');
+    assert.notEqual(cashConfirmation, -1, 'Zahlung vor Orts-Bestätigung fehlt');
+    assert.ok(pendingBranch < cashConfirmation, 'paymentPending muss vor der Zahlung vor Ortsansicht verzweigen');
     assert.match(frontendSource, /result\.paymentPending \|\| !result\.checkoutUrl/);
     assert.match(frontendSource, /data-frontend-action="retry-payment"/);
 });
@@ -95,7 +95,7 @@ test('lädt Mollie-Status vor manueller Bar-Ersetzung und revalidiert Zahlung un
     assert.notEqual(transactionPosition, -1, 'Transaktion für manuelle Zahlung fehlt');
     assert.ok(
         providerReadPosition < transactionPosition,
-        'Provider-Read darf nicht innerhalb der Barzahlungs-Transaktion erfolgen'
+        'Provider-Read darf nicht innerhalb der Zahlung vor Orts-Transaktion erfolgen'
     );
     assert.equal(
         manualRoute.lastIndexOf('getMolliePayment('),

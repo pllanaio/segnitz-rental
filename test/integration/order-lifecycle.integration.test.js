@@ -300,7 +300,7 @@ async function receiptMails(orderId) {
     return rows.map(row => (typeof row.payload_json === 'string' ? JSON.parse(row.payload_json) : row.payload_json).message);
 }
 
-test('schließt eine Barzahlungs-Bestellung ab und persistiert Miete sowie Kaution', async () => {
+test('schließt eine Bestellung mit Zahlung bei Abholung ab und persistiert Miete sowie Kaution', async () => {
     const customer = new SessionClient();
     await login(customer, TEST_CUSTOMER);
 
@@ -308,7 +308,7 @@ test('schließt eine Barzahlungs-Bestellung ab und persistiert Miete sowie Kauti
     const rentalEnd = futureDate(12);
     const order = await createOrder(customer, 'cash', rentalStart, rentalEnd);
 
-    assert.equal(order.message, 'Bestellung bestätigt. Miete und Kaution sind bei Abholung bar zu zahlen.');
+    assert.equal(order.message, 'Bestellung bestätigt. Miete und Kaution sind bei Abholung zu zahlen.');
     assert.ok(order.orderId > 0);
     assert.match(order.orderNo, /^R\d{9}$/);
 
@@ -895,7 +895,7 @@ test('Recheckout reaktiviert kein zwischenzeitlich deaktiviertes Produkt', async
     }
 });
 
-test('kassiert Barzahlung, blockiert vorzeitige Abholung und verarbeitet Rückgabe mit Kautionsauszahlung', async t => {
+test('kassiert Zahlung vor Ort, blockiert vorzeitige Abholung und verarbeitet Rückgabe mit Kautionsauszahlung', async t => {
     const customer = new SessionClient();
     await login(customer, TEST_CUSTOMER);
 
@@ -927,7 +927,7 @@ test('kassiert Barzahlung, blockiert vorzeitige Abholung und verarbeitet Rückga
             orderId: order.orderId,
             paymentType: 'initial_payment',
             amount: 460,
-            note: 'Automatischer CI-Barzahlungstest'
+            note: 'Automatischer CI-Zahlung vor Ortstest'
         })
     });
     assert.equal(paymentResponse.status, 200, await paymentResponse.text());
@@ -1308,7 +1308,7 @@ test('erfasst eine ausdrücklich bar gewählte Rückgabe-Nachzahlung auch bei On
     assert.equal(closedOrder.return_case_status, 'closed');
 });
 
-test('schließt einen gemischten Auftrag nach letzter Stornierung und wartet auf beide Barauszahlungen', async () => {
+test('schließt einen gemischten Auftrag nach letzter Stornierung und wartet auf beide Auszahlung vor Orten', async () => {
     const customer = new SessionClient();
     const admin = new SessionClient();
     await login(customer, TEST_CUSTOMER);
@@ -2846,7 +2846,7 @@ test('Gutscheine: Adminrechte, Ablauf, deaktivierte Codes und veränderte Vorsch
     const [order] = await queryRows('SELECT coupon_code, discount_amount, total_amount FROM rental_orders WHERE id = ?', [result.orderId]); assert.equal(Number(order.discount_amount), 32); assert.equal(Number(order.total_amount), 428);
 });
 
-test('Gutscheine: Barzahlung, Verlängerung und Rückgabe behalten die volle Kaution', async () => {
+test('Gutscheine: Zahlung vor Ort, Verlängerung und Rückgabe behalten die volle Kaution', async () => {
     const admin = new SessionClient(), customer = new SessionClient(); await login(admin, TEST_ADMIN); await login(customer, TEST_CUSTOMER);
     await createTestCoupon(admin, 'RENTAL10', 10);
     const start = futureDate(910), end = futureDate(911), extended = futureDate(912);
