@@ -424,7 +424,7 @@
     <!-- Javascript to handle Alerts -->
     <script type="text/javascript" src="js/alerts.js?v=e22b72864f7d"></script>
     <!-- General Functionalities -->
-    <script type="text/javascript" src="js/frontend_config.js?v=a7edc5474dc5"></script>
+    <script type="text/javascript" src="js/frontend_config.js?v=3d255197823a"></script>
     <!--Signature-->
     <script type="text/javascript" src="js/signature_pad.js"></script>
     <script type="text/javascript" src="js/signature_handler.js"></script>
@@ -466,17 +466,13 @@
                     <p><strong>Kaution:</strong> <span id="modalProductDeposit"></span></p>
                     <input type="hidden" id="modalProductId">
                     <div class="row g-3">
-                        <div class="col-12">
-                            <label class="form-label" for="modalRentalRange">Mietzeitraum auswählen</label>
-                            <input type="text" class="form-control" id="modalRentalRange"
-                                placeholder="Mietzeitraum auswählen" readonly>
-                        </div>
+                        <input type="text" id="modalRentalRange" class="d-none" hidden tabindex="-1" aria-hidden="true" readonly>
 
                         <input type="hidden" id="modalRentalStart">
                         <input type="hidden" id="modalRentalEnd">
 
                         <div class="col-12">
-                            <div id="modalCalendarContainer"></div>
+                            <div id="modalCalendarContainer" role="group" aria-label="Mietzeitraum im Kalender auswählen"></div>
                         </div>
 
                         <div class="col-12">

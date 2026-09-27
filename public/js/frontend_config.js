@@ -1740,6 +1740,7 @@ function initProductCalendar() {
     productCalendar = flatpickr(rangeInput, {
         mode: 'range',
         inline: true,
+        disableMobile: true,
         appendTo: calendarContainer,
         minDate: 'today',
         dateFormat: 'Y-m-d',
@@ -1752,6 +1753,8 @@ function initProductCalendar() {
             if (selectedDates.length !== 2) {
                 startInput.value = '';
                 endInput.value = '';
+                infoBox.classList.add('d-none');
+                infoBox.textContent = '';
                 return;
             }
 
