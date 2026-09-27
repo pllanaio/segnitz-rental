@@ -1422,9 +1422,14 @@ function logout() {
 
 
 async function cancelMyOrder(orderId, button) {
-    if (!window.confirm('Möchten Sie die gesamte Bestellung vor der Abholung kostenfrei stornieren? Bereits gezahlte Beträge werden zur Erstattung vorgemerkt.')) return;
+    if (button.disabled) return;
     button.disabled = true;
     try {
+        const confirmed = await showConfirm(
+            'Möchten Sie die gesamte Bestellung vor der Abholung kostenfrei stornieren? Bereits gezahlte Beträge werden zur Erstattung vorgemerkt.',
+            'Bestellung stornieren'
+        );
+        if (!confirmed) return;
         const response = await fetch(`/my-orders/${orderId}/cancel`, { method: 'POST' });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || 'Stornierung nicht möglich.');
