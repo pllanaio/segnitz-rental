@@ -882,7 +882,8 @@ function renderOrderDetails(order) {
             </div>
 
             <div class="col-12">
-                <div class="mb-3"><button type="button" class="btn btn-outline-primary" data-handover-order="${order.id}">Übergabeprotokoll öffnen / erstellen</button></div>
+                <div class="mb-3"><button type="button" class="btn btn-outline-primary" data-handover-order="${order.id}">Übergabeprotokoll öffnen / erstellen</button>
+                    <p class="small mt-2 mb-0">${order.handoverStatus === 'signed' ? 'Übergabeprotokoll unterschrieben und festgeschrieben.' : 'Vor der Abholung ist ein unterschriebenes und festgeschriebenes Übergabeprotokoll erforderlich.'}</p></div>
                 <h5>Artikel</h5>
                 ${renderOrderPaymentActionPanel(order)}
                 ${itemsHtml}
@@ -1162,7 +1163,7 @@ function renderOrderItemCard(order, item) {
     const canCancelItem = itemStatus === 'active' && !isExpired && !(
         String(order.payment_method || '').toLowerCase() === 'online' && !orderPaymentIsPaid
     );
-    const canPickUp = itemStatus === 'active' && !isExpired && orderPaymentIsPaid;
+    const canPickUp = itemStatus === 'active' && !isExpired && orderPaymentIsPaid && order.handoverStatus === 'signed';
     const isPickedUp = itemStatus === 'picked_up';
     const canReturn = itemStatus === 'picked_up' && !isCancelled && !isReturned && !isExpired;
 

@@ -3193,8 +3193,13 @@ ORDER BY id DESC`,
             returnImages: imagesByItemId[Number(item.id)] || []
         }));
 
+        const [[handover]] = await connection.execute(
+            "SELECT CASE WHEN status = 'signed' AND pdf_data IS NOT NULL AND signed_at IS NOT NULL THEN 'signed' ELSE 'draft' END AS status FROM handover_reports WHERE order_id = ?",
+            [req.params.id]
+        );
         res.json({
             ...orders[0],
+            handoverStatus: handover?.status || 'missing',
             items: finalItems,
             returnImages: images,
             payments
@@ -3264,18 +3269,20 @@ app.put('/admin/order-items/:itemId/pickup', checkAdmin, async (req, res) => {
 
         const item = items[0];
 
-        const [[handover]] = await connection.execute('SELECT status FROM handover_reports WHERE order_id = ?', [item.order_id]);
-        if (handover?.status === 'draft') {
-            await connection.rollback();
-            return res.status(409).json({ error: 'Bitte das angelegte Übergabeprotokoll vor der Abholung vom Kunden unterschreiben lassen und festschreiben.' });
-        }
-
-
         if (String(item.payment_status || '').toLowerCase() !== 'paid') {
             await connection.rollback();
             return res.status(409).json({
                 error: 'Der Artikel kann erst abgeholt werden, wenn Miete und Kaution vollständig bezahlt wurden.'
             });
+        }
+
+        const [[handover]] = await connection.execute(
+            "SELECT status FROM handover_reports WHERE order_id = ? AND pdf_data IS NOT NULL AND signed_at IS NOT NULL FOR UPDATE",
+            [item.order_id]
+        );
+        if (handover?.status !== 'signed') {
+            await connection.rollback();
+            return res.status(409).json({ error: 'Vor der Abholung muss ein vom Kunden unterschriebenes und festgeschriebenes Übergabeprotokoll vorliegen.' });
         }
 
         if (String(item.item_status || 'active') !== 'active') {

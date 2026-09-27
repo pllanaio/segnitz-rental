@@ -18,6 +18,7 @@ test('Übergabeprotokoll mobil: Fotos, Entwurf, erneute Unterschrift und PDF', a
     await page.locator('#username').fill(TEST_ADMIN.email); await page.locator('#password').fill(TEST_ADMIN.password);
     await Promise.all([page.waitForURL(/backend.html/), page.getByRole('button', { name: 'Einloggen' }).click()]);
     await page.evaluate(id => openOrderDetails(id), orderId);
+    await expect(page.locator('[data-backend-action="mark-item-picked-up"]')).toBeDisabled();
     await page.locator(`[data-handover-order="${orderId}"]`).click();
     await expect(page.locator('#handoverModal')).toBeVisible();
     await page.locator('#handoverAdd').click();
@@ -33,6 +34,7 @@ test('Übergabeprotokoll mobil: Fotos, Entwurf, erneute Unterschrift und PDF', a
     await page.locator('#handoverSave').click();
     await expect(page.locator('#handoverStatus')).toContainText('Gespeicherter Entwurf');
     await page.locator('#handoverModal .modal-header [data-bs-dismiss]').click();
+    await expect(page.locator('[data-backend-action="mark-item-picked-up"]')).toBeDisabled();
     await page.locator(`[data-handover-order="${orderId}"]`).click();
     await expect(page.locator('#handoverText0')).toHaveValue(/Kratzer vorne/); await expect(page.locator('.handover-photo')).toHaveCount(1);
     await expect(page.locator('#handoverModal')).toHaveCSS('opacity', '1');
@@ -57,5 +59,7 @@ test('Übergabeprotokoll mobil: Fotos, Entwurf, erneute Unterschrift und PDF', a
     const downloadEvent = page.waitForEvent('download'); await page.locator('#handoverPdf').click();
     const download = await downloadEvent; expect(download.suggestedFilename()).toMatch(/Uebergabeprotokoll.*\.pdf$/);
     await download.saveAs(testInfo.outputPath('handover.pdf'));
+    await page.locator('#handoverModal .modal-header [data-bs-dismiss]').click();
+    await expect(page.locator('[data-backend-action="mark-item-picked-up"]')).toBeEnabled();
     expect(errors).toEqual([]);
 });

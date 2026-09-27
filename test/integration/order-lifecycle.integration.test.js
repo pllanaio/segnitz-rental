@@ -222,6 +222,18 @@ async function createOrder(client, paymentMethod, rentalStart, rentalEnd) {
     return body;
 }
 
+async function signHandoverBeforePickup(admin, itemId) {
+    const [item] = await queryRows('SELECT order_id FROM rental_order_items WHERE id = ?', [itemId]);
+    const endpoint = `/admin/orders/${item.order_id}/handover`;
+    const current = await (await admin.request(endpoint)).json();
+    if (current.status === 'signed') return;
+    const png = await require('sharp')(Buffer.from('<svg width="400" height="120"><rect width="400" height="120" fill="white"/><path d="M20 80 L80 30 L140 90 L220 35 L350 70" fill="none" stroke="black" stroke-width="5"/></svg>')).png().toBuffer();
+    const form = new FormData();
+    form.append('payload', JSON.stringify({ revision: current.revision, noDamage: true, entries: [], finalize: true, confirmed: true, signer: 'Testkunde (Testunterschrift)', signature: `data:image/png;base64,${png.toString('base64')}` }));
+    const response = await admin.request(endpoint, { method: 'POST', body: form });
+    assert.equal(response.status, 200, await response.text());
+}
+
 before(async () => {
     await resetOrderLifecycleDatabase();
 
@@ -906,6 +918,7 @@ test('kassiert Barzahlung, blockiert vorzeitige Abholung und verarbeitet Rückga
     });
     assert.equal(paymentResponse.status, 200, await paymentResponse.text());
 
+    await signHandoverBeforePickup(admin, item.id);
     const pickupResponse = await admin.request(`/admin/order-items/${item.id}/pickup`, {
         method: 'PUT'
     });
@@ -1048,6 +1061,7 @@ test('validiert Schäden und nutzt für Rückgabe-Nachzahlungen den gewählten M
     });
     assert.equal(payment.status, 200, await payment.text());
 
+    await signHandoverBeforePickup(admin, item.id);
     const pickup = await admin.request(`/admin/order-items/${item.id}/pickup`, {
         method: 'PUT'
     });
@@ -1221,6 +1235,7 @@ test('erfasst eine ausdrücklich bar gewählte Rückgabe-Nachzahlung auch bei On
     });
     assert.equal(paidWebhook.status, 200, await paidWebhook.text());
 
+    await signHandoverBeforePickup(admin, item.id);
     const pickup = await admin.request(`/admin/order-items/${item.id}/pickup`, {
         method: 'PUT'
     });
@@ -1320,6 +1335,7 @@ test('schließt einen gemischten Auftrag nach letzter Stornierung und wartet auf
     });
     assert.equal(payment.status, 200, await payment.text());
 
+    await signHandoverBeforePickup(admin, items[0].id);
     const pickup = await admin.request(`/admin/order-items/${items[0].id}/pickup`, {
         method: 'PUT'
     });
@@ -1506,6 +1522,7 @@ test('verlängert eine bezahlte Bar-Miete atomar und verrechnet offene Verlänge
     });
     assert.equal(cashPayment.status, 200, await cashPayment.text());
 
+    await signHandoverBeforePickup(admin, item.id);
     const pickup = await admin.request(`/admin/order-items/${item.id}/pickup`, { method: 'PUT' });
     assert.equal(pickup.status, 200, await pickup.text());
 
@@ -1613,6 +1630,7 @@ test('erstattet eine Online-Kaution auch mit historischer Zahlung nur am Auftrag
 
     const admin = new SessionClient();
     await login(admin, TEST_ADMIN);
+    await signHandoverBeforePickup(admin, item.id);
     const pickup = await admin.request(`/admin/order-items/${item.id}/pickup`, { method: 'PUT' });
     assert.equal(pickup.status, 200, await pickup.text());
 
@@ -1727,6 +1745,7 @@ test('erstattet eine verspätete Online-Verlängerungszahlung, wenn sie bei Rüc
     );
     const admin = new SessionClient();
     await login(admin, TEST_ADMIN);
+    await signHandoverBeforePickup(admin, item.id);
     const pickup = await admin.request(`/admin/order-items/${item.id}/pickup`, { method: 'PUT' });
     assert.equal(pickup.status, 200, await pickup.text());
 
@@ -1824,6 +1843,7 @@ test('verhindert Doppelzahlung bei Bar-Fallback einer Online-Nachzahlung und inf
     const [item] = await queryRows('SELECT id FROM rental_order_items WHERE order_id = ? LIMIT 1', [order.orderId]);
     const admin = new SessionClient();
     await login(admin, TEST_ADMIN);
+    await signHandoverBeforePickup(admin, item.id);
     const pickup = await admin.request(`/admin/order-items/${item.id}/pickup`, { method: 'PUT' });
     assert.equal(pickup.status, 200, await pickup.text());
 
@@ -2704,6 +2724,7 @@ for (const [scenario, expectedStatus] of [['publish', 200], ['paid', 409], ['amo
         const [item] = await queryRows('SELECT id FROM rental_order_items WHERE order_id = ? LIMIT 1', [order.orderId]);
         const admin = new SessionClient();
         await login(admin, TEST_ADMIN);
+        await signHandoverBeforePickup(admin, item.id);
         const pickup = await admin.request(`/admin/order-items/${item.id}/pickup`, { method: 'PUT' });
         assert.equal(pickup.status, 200);
         const extension = await admin.request(`/admin/order-items/${item.id}/rental-adjustment`, {
@@ -2743,6 +2764,11 @@ test('Übergabeprotokoll: Entwurf, Fotos, Unterschrift, dauerhafter PDF-Beleg un
     const detail = await (await admin.request(`/admin/orders/${order.orderId}`)).json();
     const itemId = detail.items[0].id;
     const endpoint = `/admin/orders/${order.orderId}/handover`;
+    await execute("UPDATE rental_orders SET payment_status = 'paid' WHERE id = ?", [order.orderId]);
+    const missingPickup = await admin.request(`/admin/order-items/${itemId}/pickup`, { method: 'PUT' });
+    assert.equal(missingPickup.status, 409); assert.match(await missingPickup.text(), /Übergabeprotokoll/);
+    assert.equal((await queryRows('SELECT item_status FROM rental_order_items WHERE id = ?', [itemId]))[0].item_status, 'active');
+
     assert.equal((await customer.request(endpoint)).status, 403);
     assert.equal((await new SessionClient().request(endpoint)).status, 401);
     const sharp = require('sharp');
@@ -2778,4 +2804,10 @@ test('Übergabeprotokoll: Entwurf, Fotos, Unterschrift, dauerhafter PDF-Beleg un
     await execute('UPDATE rental_orders SET customer_first_name = ? WHERE id = ?', ['Später geändert', order.orderId]);
     const unchanged = Buffer.from(await (await admin.request(`${endpoint}/pdf`)).arrayBuffer());
     assert.deepEqual(unchanged, pdf);
+    const signedDetails = await (await admin.request(`/admin/orders/${order.orderId}`)).json();
+    assert.equal(signedDetails.handoverStatus, 'signed');
+    const allowedPickup = await admin.request(`/admin/order-items/${itemId}/pickup`, { method: 'PUT' });
+    assert.equal(allowedPickup.status, 200, await allowedPickup.text());
+    assert.equal((await queryRows('SELECT item_status FROM rental_order_items WHERE id = ?', [itemId]))[0].item_status, 'picked_up');
+
 });

@@ -1,6 +1,10 @@
 'use strict';
 (() => {
     let orderId, data, entries = [], signatureDrawn = false, busy = false, dirty = false;
+    const shownModals = new WeakSet();
+    document.addEventListener('shown.bs.modal', event => shownModals.add(event.target));
+    document.addEventListener('show.bs.modal', event => shownModals.delete(event.target));
+    document.addEventListener('hidden.bs.modal', event => shownModals.delete(event.target));
     const element = document.createElement('div');
     element.className = 'modal fade'; element.id = 'handoverModal'; element.tabIndex = -1;
     element.setAttribute('aria-labelledby', 'handoverTitle');
@@ -71,6 +75,9 @@
         try {
             await load();
             const current = document.querySelector('.modal.show');
+            if (current && !shownModals.has(current)) {
+                await new Promise(resolve => current.addEventListener('shown.bs.modal', resolve, { once: true }));
+            }
             if (current) { await new Promise(resolve => { current.addEventListener('hidden.bs.modal', resolve, { once: true }); bootstrap.Modal.getInstance(current).hide(); }); }
             modal.show();
         } catch (error) { showAlert(error.message, 'danger'); } finally { setBusy(false); }

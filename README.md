@@ -254,7 +254,7 @@ in die vorhandene Mail-Outbox (Systemabsender und `ORDER_BCC` wie bei Bestellung
 unabhängig von der Outbox-Aufbewahrungsfrist über den PDF-Download verfügbar.
 Datenbank-Backups enthalten auch die Protokolle und ihre Fotos.
 
-Ein angelegter Entwurf sperrt die Abholung bis zur unterschriebenen Festschreibung.
-Aufträge ohne angelegtes Protokoll behalten ihren bisherigen Abholablauf. Bereits
+Jede neue Abholung setzt ein unterschriebenes und festgeschriebenes Übergabeprotokoll
+voraus. Ohne Protokoll oder mit einem Entwurf bleibt die Abholung gesperrt. Bereits
 abgeholte Aufträge erhalten kein nachträglich als Übergabe ausgegebenes Protokoll.
 Neue Datenbanktabelle: `handover_reports`, automatische Migration `20260927_09_handover_reports`.
