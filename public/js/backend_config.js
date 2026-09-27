@@ -882,6 +882,7 @@ function renderOrderDetails(order) {
             </div>
 
             <div class="col-12">
+                <div class="mb-3"><button type="button" class="btn btn-outline-primary" data-handover-order="${order.id}">Übergabeprotokoll öffnen / erstellen</button></div>
                 <h5>Artikel</h5>
                 ${renderOrderPaymentActionPanel(order)}
                 ${itemsHtml}

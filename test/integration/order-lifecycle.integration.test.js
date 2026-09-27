@@ -2735,3 +2735,47 @@ for (const [scenario, expectedStatus] of [['publish', 200], ['paid', 409], ['amo
         }
     });
 }
+
+test('Übergabeprotokoll: Entwurf, Fotos, Unterschrift, dauerhafter PDF-Beleg und einmaliger Versand', async () => {
+    const admin = new SessionClient(), customer = new SessionClient();
+    await login(admin, TEST_ADMIN); await login(customer, TEST_CUSTOMER);
+    const order = await createOrder(customer, 'cash', futureDate(700), futureDate(701));
+    const detail = await (await admin.request(`/admin/orders/${order.orderId}`)).json();
+    const itemId = detail.items[0].id;
+    const endpoint = `/admin/orders/${order.orderId}/handover`;
+    assert.equal((await customer.request(endpoint)).status, 403);
+    assert.equal((await new SessionClient().request(endpoint)).status, 401);
+    const sharp = require('sharp');
+    const png = await sharp(Buffer.from('<svg width="400" height="120"><rect width="400" height="120" fill="white"/><path d="M20 80 L80 30 L140 90 L220 35 L350 70" fill="none" stroke="black" stroke-width="5"/></svg>')).png().toBuffer();
+    const photo = `data:image/png;base64,${png.toString('base64')}`;
+    const payload = { revision: 0, entries: [{ itemId, kind: 'scratch', text: 'Kratzer links am Gehäuse', photos: [photo, photo] }, { itemId, kind: 'note', text: 'Zubehör vollständig', photos: [] }], noDamage: false };
+    const save = async body => { const form = new FormData(); form.append('payload', JSON.stringify(body)); return admin.request(endpoint, { method: 'POST', body: form }); };
+    let response = await save(payload); assert.equal(response.status, 200, await response.clone().text());
+    const draft = await (await admin.request(endpoint)).json();
+    assert.equal(draft.revision, 1); assert.equal(draft.document.entries[0].photos.length, 2);
+    assert.equal((await save(payload)).status, 409, 'veraltete Revision wird abgewiesen');
+    assert.equal((await save({ ...payload, revision: 1, finalize: true })).status, 400, 'Unterschrift ist Pflicht');
+    assert.equal((await save({ ...payload, revision: 1, entries: [{ ...payload.entries[0], itemId: 999999 }] })).status, 400);
+    response = await admin.request(`/admin/order-items/${itemId}/pickup`, { method: 'PUT' });
+    assert.equal(response.status, 409); assert.match(await response.text(), /Übergabeprotokoll/);
+    // Removing a photo before signing is allowed and the signed PDF uses the final snapshot.
+    const finalPayload = { ...payload, revision: 1, finalize: true, confirmed: true, signer: 'Testkunde (Testunterschrift)', signature: photo,
+        entries: [{ ...payload.entries[0], photos: [photo] }, payload.entries[1]] };
+    const responses = await Promise.all([save(finalPayload), save(finalPayload)]);
+    assert.deepEqual(responses.map(r => r.status).sort(), [200, 409]);
+    const report = await (await admin.request(endpoint)).json();
+    assert.equal(report.status, 'signed'); assert.equal(report.document.entries[0].photos.length, 1);
+    response = await admin.request(`${endpoint}/pdf`); assert.equal(response.status, 200);
+    const pdf = Buffer.from(await response.arrayBuffer()); assert.equal(pdf.subarray(0, 5).toString(), '%PDF-');
+    assert.equal((await customer.request(`${endpoint}/pdf`)).status, 403);
+    assert.equal((await save({ ...payload, revision: 2 })).status, 409);
+    const mails = await execute('SELECT payload_json FROM external_effects_outbox WHERE operation_key = ?', [`mail-handover-${order.orderId}`]);
+    assert.equal(mails.length, 1);
+    const mail = typeof mails[0].payload_json === 'string' ? JSON.parse(mails[0].payload_json) : mails[0].payload_json;
+    assert.equal(mail.message.to, TEST_CUSTOMER.email);
+    assert.equal(mail.message.handoverPdf.contentBytes, pdf.toString('base64'));
+    // The persisted PDF does not depend on later order edits or outbox retention.
+    await execute('UPDATE rental_orders SET customer_first_name = ? WHERE id = ?', ['Später geändert', order.orderId]);
+    const unchanged = Buffer.from(await (await admin.request(`${endpoint}/pdf`)).arrayBuffer());
+    assert.deepEqual(unchanged, pdf);
+});

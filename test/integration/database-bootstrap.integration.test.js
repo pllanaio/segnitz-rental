@@ -457,7 +457,8 @@ test('repariert ein unvollständiges Bestandsschema beim nächsten Start automat
                 '20260813_05_external_effects_outbox',
                 '20260813_06_user_auth_version',
                 '20260927_07_contract_declarations',
-                '20260927_08_product_attributes'
+                '20260927_08_product_attributes',
+                '20260927_09_handover_reports'
             ]
         );
     } finally {

@@ -1,0 +1,6 @@
+.handover-signature { display: block; width: 100%; height: auto; max-height: 240px; border: 2px solid #60718a; border-radius: 8px; touch-action: none; background: white; }
+.handover-photo { width: 130px; height: 100px; object-fit: contain; border: 1px solid #dce3ed; border-radius: 6px; background: #f6f8fb; }
+#handoverModal .modal-header { background: #092447; color: white; }
+#handoverModal .modal-title { color: white; }
+#handoverModal .modal-footer { gap: 8px; }
+#handoverModal fieldset { min-width: 0; }

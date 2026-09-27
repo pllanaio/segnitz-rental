@@ -232,3 +232,29 @@ Mollie-Zahlungen; für vollständige Sandbox-Tests eine neue Bestellung anlegen.
 Neue Produkte erhalten serverseitig einen eindeutigen `SR-…`-Key. Manuell übergebene Keys werden ignoriert; vorhandene Keys bleiben beim Bearbeiten unverändert. Die Migration `20260927_08_product_attributes` ergänzt Hersteller, Modell, Art, Farbe, Leistung mit Einheit (kW/PS/W), Betriebsstunden und Kilometerstand ohne bestehende Produktdaten umzuschreiben.
 
 Hersteller und Modell unterstützen freie Eingaben und `n.V.`. Die lokale Marken-Startliste liegt in `config/productCatalog.json`; die Auswahl wird um gespeicherte Hersteller und Modelle des Bestands ergänzt und nach Art bzw. Marke gefiltert. Es handelt sich nicht um einen vollständigen Hersteller-/Modellkatalog. Es erfolgen keine externen API-Aufrufe. Optionale Zahlen werden bei leeren Feldern als NULL gespeichert; Nullwerte bleiben echte Messwerte. Einheiten werden nicht automatisch umgerechnet. Zusätzliche vorgeschlagene Merkmale wie Seriennummer, Baujahr oder Gewicht sind noch nicht Bestandteil des Schemas.
+
+### Übergabeprotokoll vor Abholung
+
+Im Admin Dashboard unter **Bestellungen → Details → Übergabeprotokoll öffnen / erstellen**
+wird ein Protokoll je Auftrag vor der ersten Abholung angelegt. Einträge sind einem
+Artikel zugeordnet und unterscheiden Beschädigung, Kratzer und sonstige Bemerkung.
+Bis zu 20 Einträge und insgesamt 20 Fotos sind möglich, höchstens sechs Fotos je
+Eintrag. Fotos werden in JPEG umgewandelt, verkleinert und ohne Original-Metadaten
+in der Datenbank gespeichert. Alternativ lässt sich ausdrücklich „Keine Auffälligkeiten“ bestätigen.
+
+Entwürfe lassen sich speichern und erneut öffnen. Die Unterschrift wird erst beim
+Festschreiben gespeichert; jede inhaltliche Änderung im Formular erfordert eine neue
+Unterschrift. Der Kunde bestätigt das vollständige Protokoll mit Namen und einer
+neu geleisteten Unterschrift auf dem Gerät. Die Bestellunterschrift wird nicht übernommen.
+
+**Unterschrieben festschreiben & versenden** speichert das unveränderliche PDF mit
+allen Einträgen, Fotos und der Unterschrift direkt am Auftrag und stellt dieselbe PDF-Datei
+in die vorhandene Mail-Outbox (Systemabsender und `ORDER_BCC` wie bei Bestellungen).
+„Zum Versand vorgemerkt“ bedeutet noch keine bestätigte Zustellung. Der Beleg bleibt
+unabhängig von der Outbox-Aufbewahrungsfrist über den PDF-Download verfügbar.
+Datenbank-Backups enthalten auch die Protokolle und ihre Fotos.
+
+Ein angelegter Entwurf sperrt die Abholung bis zur unterschriebenen Festschreibung.
+Aufträge ohne angelegtes Protokoll behalten ihren bisherigen Abholablauf. Bereits
+abgeholte Aufträge erhalten kein nachträglich als Übergabe ausgegebenes Protokoll.
+Neue Datenbanktabelle: `handover_reports`, automatische Migration `20260927_09_handover_reports`.

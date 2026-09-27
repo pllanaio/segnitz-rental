@@ -2915,6 +2915,11 @@ app.post('/my-orders/:orderId/items/:itemId/cancel', async (req, res) => {
     });
 });
 
+require('./routes/handoverReports').registerHandoverReports(app, {
+    createConnection: () => mysql.createConnection(dbConfig),
+    transact: runInTransactionWithRetry, checkAdmin, limiter: adminReturnMutationLimiter
+});
+
 app.get('/admin/orders', checkAdmin, async (req, res) => {
     let connection;
 
@@ -3258,6 +3263,13 @@ app.put('/admin/order-items/:itemId/pickup', checkAdmin, async (req, res) => {
         }
 
         const item = items[0];
+
+        const [[handover]] = await connection.execute('SELECT status FROM handover_reports WHERE order_id = ?', [item.order_id]);
+        if (handover?.status === 'draft') {
+            await connection.rollback();
+            return res.status(409).json({ error: 'Bitte das angelegte Übergabeprotokoll vor der Abholung vom Kunden unterschreiben lassen und festschreiben.' });
+        }
+
 
         if (String(item.payment_status || '').toLowerCase() !== 'paid') {
             await connection.rollback();

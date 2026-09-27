@@ -635,6 +635,17 @@ const migrations = [
             await ensureColumn(connection, 'rental_products', 'operating_hours', 'DECIMAL(10,2) NULL');
             await ensureColumn(connection, 'rental_products', 'mileage_km', 'DECIMAL(10,2) NULL');
         }
+    },
+    {
+        version: '20260927_09_handover_reports',
+        checksumVersion: 1,
+        checksumSource: fs.readFileSync(path.join(__dirname, '20260927_handover_reports.sql'), 'utf8'),
+        checksumDependencies: [readSqlStatements, removeSqlComments],
+        async up(connection) {
+            for (const statement of readSqlStatements(path.join(__dirname, '20260927_handover_reports.sql'))) {
+                await connection.query(removeSqlComments(statement).replace(/^CREATE TABLE /, 'CREATE TABLE IF NOT EXISTS '));
+            }
+        }
     }
 ];
 

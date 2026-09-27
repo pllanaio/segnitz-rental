@@ -1,0 +1,61 @@
+'use strict';
+const { test, expect } = require('@playwright/test');
+const { TEST_ADMIN, TEST_PRODUCT } = require('../support/test-database');
+const mysql = require('mysql2/promise');
+const sharp = require('sharp');
+
+test('Übergabeprotokoll mobil: Fotos, Entwurf, erneute Unterschrift und PDF', async ({ page }, testInfo) => {
+    const connection = await mysql.createConnection(require('../../config/db'));
+    let orderId;
+    try {
+        const [order] = await connection.execute(`INSERT INTO rental_orders (order_no, customer_email, customer_first_name, customer_last_name, status, payment_method, payment_status) VALUES (?, 'handover@example.invalid', 'Test', 'Kunde', 'confirmed', 'cash', 'paid')`, [`HANDOVER-${Date.now()}`]);
+        orderId = order.insertId;
+        await connection.execute(`INSERT INTO rental_order_items (order_id, product_id, rental_start, rental_end, item_status) VALUES (?, ?, '2029-06-01', '2029-06-03', 'active')`, [orderId, TEST_PRODUCT.id]);
+    } finally { await connection.end(); }
+    const errors = []; page.on('pageerror', e => errors.push(e.message));
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('/login.html');
+    await page.locator('#username').fill(TEST_ADMIN.email); await page.locator('#password').fill(TEST_ADMIN.password);
+    await Promise.all([page.waitForURL(/backend.html/), page.getByRole('button', { name: 'Einloggen' }).click()]);
+    await page.evaluate(id => openOrderDetails(id), orderId);
+    await page.locator(`[data-handover-order="${orderId}"]`).click();
+    await expect(page.locator('#handoverModal')).toBeVisible();
+    await page.locator('#handoverAdd').click();
+    await page.locator('#handoverKind0').selectOption('scratch');
+    await page.locator('#handoverText0').fill('Kratzer vorne links – bereits vor der Übergabe vorhanden.');
+    const buffer = await sharp({ create: { width: 500, height: 300, channels: 3, background: '#ccc' } }).jpeg().toBuffer();
+    await page.locator('#handoverPhotos0').setInputFiles([{ name: 'front.jpg', mimeType: 'image/jpeg', buffer }, { name: 'side.jpg', mimeType: 'image/jpeg', buffer }]);
+    await expect(page.locator('.handover-photo')).toHaveCount(2);
+    await page.locator('[data-remove-photo="0:1"]').click();
+    await expect(page.locator('.handover-photo')).toHaveCount(1);
+    await page.locator('#handoverAdd').click();
+    await page.locator('#handoverKind1').selectOption('note'); await page.locator('#handoverText1').fill('Zubehör gemeinsam geprüft.');
+    await page.locator('#handoverSave').click();
+    await expect(page.locator('#handoverStatus')).toContainText('Gespeicherter Entwurf');
+    await page.locator('#handoverModal .modal-header [data-bs-dismiss]').click();
+    await page.locator(`[data-handover-order="${orderId}"]`).click();
+    await expect(page.locator('#handoverText0')).toHaveValue(/Kratzer vorne/); await expect(page.locator('.handover-photo')).toHaveCount(1);
+    await expect(page.locator('#handoverModal')).toHaveCSS('opacity', '1');
+    await expect(page.locator('#orderDetailsModal')).toBeHidden();
+    await page.screenshot({ path: testInfo.outputPath('handover-mobile.png'), animations: 'disabled' });
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.screenshot({ path: testInfo.outputPath('handover-desktop.png'), animations: 'disabled' });
+    await page.locator('#handoverSigner').fill('Testkunde – Testunterschrift');
+    const draw = async () => {
+        await page.locator('#handoverSignature').scrollIntoViewIfNeeded();
+        const box = await page.locator('#handoverSignature').boundingBox();
+        await page.mouse.move(box.x + 30, box.y + 45); await page.mouse.down();
+        await page.mouse.move(box.x + 100, box.y + 95, { steps: 8 }); await page.mouse.move(box.x + 180, box.y + 40, { steps: 8 }); await page.mouse.up();
+    };
+    await draw(); await page.locator('#handoverConfirmed').check();
+    await page.locator('#handoverText1').fill('Zubehör vollständig und gemeinsam geprüft.');
+    await expect(page.locator('#handoverConfirmed')).not.toBeChecked();
+    await draw(); await page.locator('#handoverConfirmed').check();
+    await page.locator('#handoverFinalize').click();
+    await expect(page.locator('#handoverStatus')).toContainText('Festgeschrieben');
+    await expect(page.locator('#handoverFields')).toBeHidden();
+    const downloadEvent = page.waitForEvent('download'); await page.locator('#handoverPdf').click();
+    const download = await downloadEvent; expect(download.suggestedFilename()).toMatch(/Uebergabeprotokoll.*\.pdf$/);
+    await download.saveAs(testInfo.outputPath('handover.pdf'));
+    expect(errors).toEqual([]);
+});

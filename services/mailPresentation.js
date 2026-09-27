@@ -34,6 +34,9 @@ async function presentMail(message) {
         }
         attachments.push(attachment(receiptFilename(receipt, message.operationKey), 'application/pdf', await renderReceiptPdf(receipt, message.operationKey)));
     }
+    if (message.handoverPdf) {
+        attachments.push(attachment(message.handoverPdf.name, 'application/pdf', Buffer.from(message.handoverPdf.contentBytes, 'base64')));
+    }
     const issuer = message.receipt?.issuer || { name: process.env.RECEIPT_COMPANY_NAME || 'Segnitz Rental', address: process.env.RECEIPT_COMPANY_ADDRESS || '' };
     const html = `<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(message.subject)}</title></head>
 <body style="margin:0;padding:0;background:#edf2f8;font-family:Arial,Helvetica,sans-serif;color:#263c58">
