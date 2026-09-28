@@ -2091,6 +2091,7 @@ app.get('/my-orders', async (req, res) => {
                 ro.customer_email,
                 ro.customer_first_name,
                 ro.customer_last_name,
+                ro.customer_company,
                 ro.status,
                 ro.payment_method,
                 ro.payment_status,
@@ -2213,6 +2214,8 @@ app.get('/my-orders/:id', async (req, res) => {
                 status,
                 payment_method,
                 payment_status,
+                invoice_combined_payment,
+                DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
                 return_case_status,
                 DATE_FORMAT(reserved_until, '%Y-%m-%d %H:%i:%s') AS reserved_until,
                 DATE_FORMAT(returned_at, '%Y-%m-%d %H:%i:%s') AS returned_at,
@@ -2237,6 +2240,8 @@ app.get('/my-orders/:id', async (req, res) => {
                 roi.order_id AS orderId,
                 roi.product_id AS productId,
                 p.title,
+                COALESCE((SELECT pi.image_path FROM rental_product_images pi WHERE pi.product_id=p.id ORDER BY pi.sort_order,pi.id LIMIT 1),p.image_path) AS imagePath,
+                p.manufacturer, p.model, p.product_key AS productKey,
                 DATE_FORMAT(roi.rental_start, '%Y-%m-%d') AS rentalStart,
                 DATE_FORMAT(roi.rental_end, '%Y-%m-%d') AS rentalEnd,
                 roi.price_per_day AS pricePerDay,
@@ -2325,6 +2330,9 @@ ORDER BY id DESC`,
                 payment_type AS paymentType,
                 payment_method AS paymentMethod,
                 payment_status AS paymentStatus,
+                SHA2(mollie_payment_id,256) AS providerPaymentKey,
+                CASE WHEN payment_type='invoice_payment' THEN (SELECT due_at FROM rental_invoices WHERE order_id=rental_order_payments.order_id LIMIT 1)
+                ELSE (SELECT JSON_UNQUOTE(JSON_EXTRACT(snapshot_json,'$.dueAt')) FROM billing_documents WHERE id=rental_order_payments.billing_document_id) END AS invoiceDueAt,
                 amount,
                 checkout_url AS checkoutUrl,
                 note,
@@ -2380,6 +2388,7 @@ ORDER BY id DESC`,
         res.json({
             ...safeOrder,
             handoverAvailable: Boolean(handover),
+            handoverSignedAt: handover?.signed_at || null,
             items: finalItems,
             returnImages: images,
             payments
@@ -3205,6 +3214,8 @@ app.get('/admin/orders/:id', checkAdmin, async (req, res) => {
                 roi.cancel_reason AS cancelReason,
                 roi.cancelled_by_name AS cancelledByName,
                 p.title,
+                COALESCE((SELECT pi.image_path FROM rental_product_images pi WHERE pi.product_id=p.id ORDER BY pi.sort_order,pi.id LIMIT 1),p.image_path) AS imagePath,
+                p.manufacturer, p.model, p.product_key AS productKey,
                 DATE_FORMAT(roi.rental_start, '%Y-%m-%d') AS rentalStart,
                 DATE_FORMAT(roi.rental_end, '%Y-%m-%d') AS rentalEnd,
                 roi.price_per_day AS pricePerDay,
@@ -3271,6 +3282,9 @@ ORDER BY id DESC`,
         payment_type AS paymentType,
         payment_method AS paymentMethod,
         payment_status AS paymentStatus,
+                SHA2(mollie_payment_id,256) AS providerPaymentKey,
+                CASE WHEN payment_type='invoice_payment' THEN (SELECT due_at FROM rental_invoices WHERE order_id=rental_order_payments.order_id LIMIT 1)
+                ELSE (SELECT JSON_UNQUOTE(JSON_EXTRACT(snapshot_json,'$.dueAt')) FROM billing_documents WHERE id=rental_order_payments.billing_document_id) END AS invoiceDueAt,
         amount,
         mollie_payment_id AS molliePaymentId,
         pos_terminal_id AS posTerminalId,
@@ -3306,12 +3320,13 @@ ORDER BY id DESC`,
         }));
 
         const [[handover]] = await connection.execute(
-            "SELECT CASE WHEN status = 'signed' AND pdf_data IS NOT NULL AND signed_at IS NOT NULL THEN 'signed' ELSE 'draft' END AS status FROM handover_reports WHERE order_id = ?",
+            "SELECT CASE WHEN status = 'signed' AND pdf_data IS NOT NULL AND signed_at IS NOT NULL THEN 'signed' ELSE 'draft' END AS status, signed_at FROM handover_reports WHERE order_id = ?",
             [req.params.id]
         );
         res.json({
             ...orders[0],
             handoverStatus: handover?.status || 'missing',
+            handoverSignedAt: handover?.signed_at || null,
             pickupAllowed: await require('./services/salesInvoices').pickupAllowed(connection, orders[0]),
             items: finalItems,
             returnImages: images,
@@ -4049,6 +4064,8 @@ app.post('/admin/order-items/:itemId/send-return-summary', checkAdmin, async (re
                 roi.order_id AS orderId,
                 roi.product_id AS productId,
                 p.title,
+                COALESCE((SELECT pi.image_path FROM rental_product_images pi WHERE pi.product_id=p.id ORDER BY pi.sort_order,pi.id LIMIT 1),p.image_path) AS imagePath,
+                p.manufacturer, p.model, p.product_key AS productKey,
                 DATE_FORMAT(roi.rental_start, '%Y-%m-%d') AS rentalStart,
                 DATE_FORMAT(roi.rental_end, '%Y-%m-%d') AS rentalEnd,
                 DATE_FORMAT(roi.adjusted_rental_start, '%Y-%m-%d') AS adjustedRentalStart,
@@ -4099,6 +4116,7 @@ app.post('/admin/order-items/:itemId/send-return-summary', checkAdmin, async (re
                 payment_type AS paymentType,
                 payment_method AS paymentMethod,
                 payment_status AS paymentStatus,
+                SHA2(mollie_payment_id,256) AS providerPaymentKey,
                 amount,
                 note
              FROM rental_order_payments
@@ -4221,7 +4239,11 @@ FOR UPDATE`,
             });
         }
 
-        if (String(item.payment_status || '').toLowerCase() !== 'paid') {
+        const invoiceExtensionAllowed = item.payment_method === 'invoice' &&
+            await require('./services/salesInvoices').pickupAllowed(connection, {
+                id: item.order_id, payment_method: item.payment_method, payment_status: item.payment_status
+            });
+        if (String(item.payment_status || '').toLowerCase() !== 'paid' && !invoiceExtensionAllowed) {
             await connection.rollback();
             return res.status(409).json({
                 error: 'Eine Mietverlängerung ist erst nach vollständiger Bezahlung der ursprünglichen Miete möglich.'
@@ -4404,11 +4426,14 @@ FOR UPDATE`,
                 totalAmount: amountDue,
                 description: `Nachzahlung Mietzeitraum ${item.order_no} - ${item.title} (#${req.params.itemId})`,
                 type: 'rental_adjustment',
+                ...(item.payment_method==='invoice'?{method:'banktransfer',dueDate:require('./services/invoiceTransfer').transferDueDate(),billingAddress:{email:item.customer_email}}:{}),
                 itemId: req.params.itemId,
                 redirectUrl: `${baseUrl}/index.html?payment=extension&orderId=${encodeURIComponent(item.order_id)}&paymentType=rental_adjustment&itemId=${encodeURIComponent(req.params.itemId)}`
                 },
                 application: {
                     kind: 'payment_records',
+                    additionalInvoice: item.payment_method==='invoice',
+                    additionalInvoicePeriod: {start:new Date(Date.parse(String(currentEnd).slice(0,10)+'T12:00:00Z')+86400000).toISOString().slice(0,10),end:String(finalEnd).slice(0,10)},
                     paymentRecordIds: [paymentRecord.insertId],
                     successMail: {
                         operationKey: `mail-rental-adjustment-${paymentOperationKey}`,
@@ -5540,6 +5565,7 @@ app.post('/orders/:id/mollie-checkout', async (req, res) => {
                 ro.status,
                 ro.payment_method AS paymentMethod,
                 ro.payment_status AS paymentStatus,
+                SHA2(mollie_payment_id,256) AS providerPaymentKey,
                 ro.cart_id AS cartId,
                 ro.customer_email AS customerEmail,
                 ro.guest_access_token_hash AS guestAccessTokenHash,
@@ -5619,6 +5645,7 @@ app.post('/orders/:id/mollie-checkout', async (req, res) => {
                 ro.status,
                 ro.payment_method AS paymentMethod,
                 ro.payment_status AS paymentStatus,
+                SHA2(mollie_payment_id,256) AS providerPaymentKey,
                 ro.cart_id AS cartId,
                 ro.customer_email AS customerEmail,
                 ro.guest_access_token_hash AS guestAccessTokenHash,
@@ -6817,6 +6844,7 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
                             note || 'Online-Nachzahlung vor Ort beglichen'
                         ]
                     );
+                    await connection.execute('UPDATE rental_order_payments replacement JOIN rental_order_payments source ON source.id=? SET replacement.billing_document_id=source.billing_document_id WHERE replacement.id=?',[openAdditionalPayment.id,cashReplacement.insertId]);
                     receiptPaymentRecordId = cashReplacement.insertId;
                 }
 

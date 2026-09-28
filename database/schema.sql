@@ -363,6 +363,8 @@ CREATE TABLE rental_order_payments (
     sequence_type VARCHAR(50) NULL,
     external_operation_key VARCHAR(191) NULL,
     pos_terminal_id VARCHAR(80) NULL,
+    billing_document_id BIGINT UNSIGNED NULL,
+    KEY idx_payment_document (billing_document_id),
     paid_at DATETIME NULL,
     recorded_by_user_id INT NULL,
     note TEXT NULL,

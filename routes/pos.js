@@ -1,4 +1,6 @@
 'use strict';
+const { getMolliePayment, cancelMolliePayment } = require('../services/mollieService');
+const { transferDueDate } = require('../services/invoiceTransfer');
 const crypto = require('node:crypto');
 const rateLimit = require('express-rate-limit');
 const { posMode, listTerminals, getTerminal, validateTerminalSettings, getPosLimits } = require('../services/posService');
@@ -49,11 +51,67 @@ function registerPosRoutes(app, { checkAdmin, createConnection, transact, proces
             res.json({ message: 'Terminal-Einstellungen gespeichert.' });
         } catch (error) { failure(res, error); }
     });
+    async function syncAdditional(orderId, itemId, type) {
+        if (!['rental_adjustment','return_additional_charge'].includes(type)) return;
+        const c=await createConnection();
+        try {
+            const [[source]]=await c.execute('SELECT mollie_payment_id FROM rental_order_payments WHERE order_id=? AND order_item_id=? AND payment_type=? ORDER BY id DESC LIMIT 1',[orderId,itemId,type]);
+            if(source?.mollie_payment_id)await reconcile(source.mollie_payment_id);
+        } finally { await c.end(); }
+    }
+    async function releaseAdditional(connection, source) {
+        if (!source || !['pending','open','failed','cancelled','expired'].includes(source.payment_status)) throw fail('Keine offene Nachzahlung vorhanden. Bitte Status prüfen.');
+        if (source.payment_method === 'online') {
+            if (!source.mollie_payment_id) throw fail('Der Zahlungsauftrag wird noch verarbeitet. Bitte erneut prüfen.');
+            let remote = await getMolliePayment(source.mollie_payment_id);
+            if (remote.status === 'open' && remote.isCancelable !== false) {
+                remote = await cancelMolliePayment(source.mollie_payment_id);
+            }
+            if (!['failed','expired','canceled'].includes(remote.status)) throw fail('Die bisherige Zahlung ist bereits bezahlt oder noch aktiv. Bitte Status prüfen.');
+        }
+        await connection.execute("UPDATE rental_order_payments SET payment_status='replaced' WHERE id=?", [source.id]);
+    }
+    app.post('/admin/orders/:id/payments/sync', checkAdmin, syncLimiter, async (req,res) => {
+        let c;
+        try {
+            c=await createConnection();
+            const [rows]=await c.execute("SELECT DISTINCT mollie_payment_id FROM rental_order_payments WHERE order_id=? AND payment_method='online' AND mollie_payment_id IS NOT NULL AND payment_status IN ('pending','open','authorized','failed','cancelled','expired')",[req.params.id]);
+            for(const row of rows) await reconcile(row.mollie_payment_id);
+            res.json({message:'Zahlungsstatus mit Mollie abgeglichen.'});
+        }catch(error){failure(res,error);}finally{if(c)await c.end();}
+    });
+    app.post('/admin/orders/:id/additional-transfer', checkAdmin, limiter, async (req,res) => {
+        try {
+            const {orderItemId,paymentType}=req.body;
+            if(!/^\d+$/.test(req.params.id)||!/^\d+$/.test(String(orderItemId))||!['rental_adjustment','return_additional_charge'].includes(paymentType))throw fail('Ungültige Nachzahlung.',400);
+            await syncAdditional(req.params.id,orderItemId,paymentType);
+            const result=await transact(createConnection,async c=>{
+                const [[order]]=await c.execute('SELECT * FROM rental_orders WHERE id=? FOR UPDATE',[req.params.id]);
+                if(!order||['cancelled','expired'].includes(order.status))throw fail('Keine zahlbare Bestellung.');
+                const [[source]]=await c.execute('SELECT * FROM rental_order_payments WHERE order_id=? AND order_item_id=? AND payment_type=? ORDER BY id DESC LIMIT 1 FOR UPDATE',[order.id,orderItemId,paymentType]);
+                if(!(Number(source?.amount)>0))throw fail('Keine offene Nachzahlung.');
+                await require('../services/invoiceSettings').requireIssuer(c);
+                await releaseAdditional(c,source);
+                const key='additional-transfer-'+crypto.randomUUID();
+                const [row]=await c.execute("INSERT INTO rental_order_payments(order_id,order_item_id,payment_type,payment_method,payment_status,amount,external_operation_key,note) VALUES(?,?,?,'online','pending',?,?,'Überweisung über Mollie mit 14 Tagen Zahlungsziel')",[order.id,orderItemId,paymentType,source.amount,key]);
+                if(source.billing_document_id)await c.execute('UPDATE rental_order_payments SET billing_document_id=? WHERE id=?',[source.billing_document_id,row.insertId]);
+                await enqueueMolliePaymentCreation(c,{
+                    operationKey:key,
+                    payment:{id:order.id,itemId:orderItemId,type:paymentType,orderNo:order.order_no,totalAmount:Number(source.amount),method:'banktransfer',dueDate:transferDueDate(),locale:'de_DE',billingAddress:{email:order.customer_email},description:'Nachzahlung '+order.order_no,redirectUrl:process.env.BASE_URL.replace(/\/$/,'')+'/profile.html?view=orders'},
+                    application:{kind:'payment_records',paymentRecordIds:[row.insertId],additionalInvoice:true}
+                });
+                return {operationKey:key};
+            });
+            try{await processEffect(result.operationKey);}catch(error){if(error.code!=='EXTERNAL_EFFECT_PENDING')throw error;}
+            res.status(202).json({message:'Überweisung vorbereitet. Der Kunde erhält den Zahlungslink per E-Mail.'});
+        }catch(error){failure(res,error);}
+    });
     app.post('/admin/pos/payments', checkAdmin, limiter, async (req, res) => {
         try {
             const { orderId, orderItemId = null, paymentType, terminalId } = req.body;
             if (!/^\d+$/.test(String(orderId)) || !['initial_payment', 'rental_adjustment', 'return_additional_charge'].includes(paymentType) ||
                 (paymentType !== 'initial_payment' && !/^\d+$/.test(String(orderItemId))) || (paymentType === 'initial_payment' && orderItemId)) throw fail('Ungültige Zahlungsdaten.', 400);
+            await syncAdditional(orderId,orderItemId,paymentType);
             const terminal = await getTerminal(terminalId);
             if (terminal.status !== 'active' || terminal.currency !== 'EUR') throw fail('Dieses Terminal ist nicht für EUR-Zahlungen bereit.');
             const limits = await getPosLimits();
@@ -102,13 +160,14 @@ function registerPosRoutes(app, { checkAdmin, createConnection, transact, proces
                 } else {
                     const source = target.sort((a,b) => b.id-a.id)[0];
                     if (!source || !['pending', 'open', 'failed', 'cancelled', 'expired'].includes(source.payment_status) ||
-                        (source.payment_method !== 'cash' && !source.pos_terminal_id)) throw fail('Keine offene Vor-Ort-Zahlung vorhanden.');
+                        !['cash','online'].includes(source.payment_method)) throw fail('Keine offene Vor-Ort-Zahlung vorhanden.');
                     amount = Number(source.amount);
                     if (!(amount > 0)) throw fail('Kein offener Betrag vorhanden.');
                     validateAmount(amount);
-                    await connection.execute("UPDATE rental_order_payments SET payment_status = 'cancelled' WHERE id = ?", [source.id]);
+                    await releaseAdditional(connection, source);
                     const [insert] = await connection.execute(`INSERT INTO rental_order_payments (order_id, order_item_id, payment_type, payment_method, payment_status, amount, pos_terminal_id, external_operation_key, note)
                         VALUES (?, ?, ?, 'online', 'pending', ?, ?, ?, 'Kartenzahlung vor Ort über Mollie')`, [orderId, orderItemId, paymentType, amount, terminal.id, operationKey]);
+                    if(source.billing_document_id)await connection.execute('UPDATE rental_order_payments SET billing_document_id=? WHERE id=?',[source.billing_document_id,insert.insertId]);
                     recordIds = [insert.insertId];
                 }
                 await enqueueMolliePaymentCreation(connection, {

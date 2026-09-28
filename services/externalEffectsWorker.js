@@ -416,7 +416,8 @@ async function applyExternalEffectResult(connection, effect, result) {
             );
         }
 
-        if (application.successMail) {
+        if (application.additionalInvoice) await require('./salesInvoices').createAdditionalInvoice(connection,recordIds[0],result,application.additionalInvoicePeriod);
+        if (application.successMail && !application.additionalInvoice) {
             await enqueueDependentPaymentMail(
                 connection,
                 application.successMail,

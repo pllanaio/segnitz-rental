@@ -80,6 +80,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Install Chromium for lifecycle UI checks
+        run: npx playwright install --with-deps chromium
+
       - name: Run API and database integration tests
         run: npm run test:integration
 

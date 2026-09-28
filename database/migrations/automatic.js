@@ -722,6 +722,12 @@ const migrations = [
       if(!await columnExists(connection,'rental_orders','invoice_combined_payment'))await connection.query('ALTER TABLE rental_orders ADD COLUMN invoice_combined_payment TINYINT NOT NULL DEFAULT 0');
       if(!await columnExists(connection,'billing_documents','xml_data'))await connection.query('ALTER TABLE billing_documents ADD COLUMN xml_data LONGBLOB NULL, ADD COLUMN xml_sha256 CHAR(64) NULL');
      }
+    },
+    {
+        version:'20260928_17_additional_invoice_payments',checksumVersion:1,
+        checksumSource:'Bind additional payment attempts to their immutable invoice v1',
+        checksumDependencies:[readSqlStatements,removeSqlComments,quoteIdentifier,columnExists,ensureColumn,indexExists],
+        async up(connection){await ensureColumn(connection,'rental_order_payments','billing_document_id','BIGINT UNSIGNED NULL');if(!await indexExists(connection,'rental_order_payments','idx_payment_document'))await connection.query('ALTER TABLE rental_order_payments ADD INDEX idx_payment_document (billing_document_id)');}
     }
 ];
 module.exports = {

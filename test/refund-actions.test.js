@@ -13,6 +13,18 @@ const render = payments => context.renderOrderPaymentActionPanel({ id: 1, status
 const initial = { paymentType: 'initial_payment', paymentStatus: 'paid', amount: 460, paymentMethod: 'online', molliePaymentId: 'tr_original' };
 const refund = { paymentType: 'deposit_refund', paymentStatus: 'pending', amount: -300, paymentMethod: 'cash', orderItemId: 2 };
 
+test('bezahlte Ersatz-Nachzahlung blendet alte Zahlungsaktionen aus und zeigt den aktuellen Status', () => {
+    const payments=[{id:1,orderItemId:2,paymentType:'return_additional_charge',paymentStatus:'failed',paymentMethod:'online',amount:80},
+        {id:2,orderItemId:2,paymentType:'return_additional_charge',paymentStatus:'paid',paymentMethod:'online',amount:80}];
+    const html=context.renderOrderPaymentActionPanel({id:1,status:'returned',payment_status:'paid',payments});
+    assert.doesNotMatch(html,/open-manual-payment|data-pos-order|data-additional-transfer/);
+    context.formatPaymentStatusBadge=status=>`STATUS:${status}`;
+    vm.runInContext(source.slice(source.indexOf('function renderItemPayments('),source.indexOf('function openManualPaymentModal(')),context);
+    const item=context.renderItemPayments({payment_status:'paid',payments},{id:2});
+    assert.match(item,/STATUS:paid/);
+    assert.doesNotMatch(item,/STATUS:failed/);
+});
+
 test('versteckt Vor-Ort-Erstattung bei Online-Quelle trotz falscher Auftrags- und Erstattungsart', () => {
     assert.doesNotMatch(render([initial, refund]), /open-manual-refund/);
     assert.doesNotMatch(render([initial, { ...refund, paymentType: 'order_cancellation_refund' }]), /open-manual-refund/);

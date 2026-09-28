@@ -604,7 +604,7 @@ test('Verifikations- und Reset-Tokens werden scanner-sicher und ohne Query-Refer
 });
 
 test('Auth-Version-Prüfung überspringt nur explizit öffentliche statische Assets', () => {
-    const source = fs.readFileSync(path.join(__dirname, '..', 'segnitz_rental.js'), 'utf8');
+    const source = fs.readFileSync(path.join(__dirname, '..', 'segnitz_rental.js'), 'utf8').replace(/\r\n/g, '\n');
     const classifier = source.slice(
         source.indexOf('function isPublicStaticAssetPath'),
         source.indexOf('async function refreshSetupStateWhenRequired')

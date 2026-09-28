@@ -2949,6 +2949,11 @@ test('Übergabeprotokoll: Entwurf, Fotos, Unterschrift, dauerhafter PDF-Beleg un
     assert.equal((await admin.request(customerPdf)).status, 404, 'Ein anderer angemeldeter Nutzer darf das Kunden-PDF nicht abrufen');
     assert.equal((await (await customer.request(`/my-orders/${order.orderId}`)).json()).handoverAvailable, true);
     assert.equal((await customer.request(`${endpoint}/pdf`)).status, 403);
+    const customerJson='/my-orders/'+order.orderId+'/handover';
+    assert.equal((await new SessionClient().request(customerJson)).status,401);
+    assert.equal((await admin.request(customerJson)).status,404);
+    const readOnly=await customer.request(customerJson);assert.equal(readOnly.status,200);assert.equal((await readOnly.json()).editable,false);
+
     assert.equal((await save({ ...payload, revision: 2 })).status, 409);
     const mails = await execute('SELECT payload_json FROM external_effects_outbox WHERE operation_key = ?', [`mail-handover-${order.orderId}`]);
     assert.equal(mails.length, 1);
@@ -3098,6 +3103,7 @@ test('Lokale Rechnungseinstellungen sind adminexklusiv und verhindern verlorene 
             await page.setViewportSize({width,height:900});
             await page.goto(BASE_URL+'/backend.html');
             await page.locator('#nav-invoices').click();
+            await page.locator('.invoice-issuer-settings > summary').click();
             await page.locator('#invoiceSettingsSave:not([disabled])').waitFor();
             assert.equal(await page.locator('#issuer-email').inputValue(), 'info@example.de');
             await page.locator('#issuer-email').fill('changed@example.de');
@@ -3375,6 +3381,194 @@ test('Stornierte Überweisung gibt vor Rückgabe Bar, POS und neue Überweisung 
   await admin.request(base+'/sync',{method:'POST'});[saved]=await queryRows('SELECT payment_status,status FROM rental_orders WHERE id=?',[order.orderId]);assert.equal(saved.payment_status,'paid');assert.equal(saved.status,'picked_up');
   const documents=await queryRows("SELECT id,pdf_data FROM billing_documents WHERE order_id=? AND kind='invoice'",[order.orderId]);assert.equal(documents.length,2);assert.ok(documents.find(d=>d.id===doc.id).pdf_data.equals(doc.pdf_data));const credits=await queryRows("SELECT * FROM billing_documents WHERE original_document_id=? AND kind='credit'",[doc.id]);assert.equal(credits.length,1);assert.equal(Number(credits[0].gross_cents),-16000);const archive=await (await admin.request('/admin/invoices?q='+encodeURIComponent(order.orderNo||''))).json();assert.equal(archive.items.find(d=>d.id===doc.id).status,'cancelled');
  }
+});
+
+test('Nachzahlungen: Bar, POS und Überweisung für Verlängerung und Rückgabe synchronisieren paid',async()=>{
+ await seedBilling();
+ const customer=new SessionClient(),admin=new SessionClient();await login(customer,TEST_CUSTOMER);await login(admin,TEST_ADMIN);
+ let n=0;
+ for(const type of ['rental_adjustment','return_additional_charge'])for(const method of ['cash','pos','transfer']){
+  const order=await createOrder(customer,'cash',futureDate(3500+n*4),futureDate(3501+n*4));n++;
+  const [item]=await queryRows('SELECT id FROM rental_order_items WHERE order_id=?',[order.orderId]);
+  await execute("INSERT INTO rental_order_payments(order_id,order_item_id,payment_type,payment_method,payment_status,amount) VALUES(?,?,?,'cash','pending',80)",[order.orderId,item.id,type]);
+  const body={orderId:order.orderId,orderItemId:item.id,paymentType:type,amount:80,terminalId:'term_testone'};
+  const url=method==='cash'?'/admin/order-payments/manual':method==='pos'?'/admin/pos/payments':'/admin/orders/'+order.orderId+'/additional-transfer';
+  const result=await admin.request(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});assert.ok([200,202].includes(result.status),await result.clone().text());
+  if(method!=='cash'){
+   const latest=await waitForDatabaseRow('SELECT id,mollie_payment_id FROM rental_order_payments WHERE order_id=? AND payment_type=? ORDER BY id DESC LIMIT 1',[order.orderId,type],r=>!!r.mollie_payment_id,'Nachzahlung angelegt');
+   const paymentId='tr_test_paid_extra_'+latest.id;await execute('UPDATE rental_order_payments SET mollie_payment_id=? WHERE id=?',[paymentId,latest.id]);
+   const beforeSync=await admin.request(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});assert.equal(beforeSync.status,409,'Already paid at Mollie must block a new payment');
+   const sync=await admin.request('/admin/orders/'+order.orderId+'/payments/sync',{method:'POST'});assert.equal(sync.status,200,await sync.clone().text());
+   assert.equal((await admin.request('/admin/orders/'+order.orderId+'/payments/sync',{method:'POST'})).status,200);
+  }
+  const rows=await queryRows('SELECT payment_status FROM rental_order_payments WHERE order_id=? AND payment_type=? ORDER BY id DESC',[order.orderId,type]);assert.equal(rows[0].payment_status,'paid');assert.equal(rows.filter(r=>r.payment_status==='paid').length,1);
+  const duplicate=await admin.request(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});assert.equal(duplicate.status,409);
+ }
+});
+
+test('Zahlungsoberfläche: drei Nachzahlungswege und Checkout ohne Scrollsprung',async()=>{
+ const admin=new SessionClient(),customer=new SessionClient();await login(admin,TEST_ADMIN);await login(customer,TEST_CUSTOMER);
+ const order=await createOrder(customer,'cash',futureDate(3590),futureDate(3591));
+ const [item]=await queryRows('SELECT id FROM rental_order_items WHERE order_id=?',[order.orderId]);
+ await execute("INSERT INTO rental_order_payments(order_id,order_item_id,payment_type,payment_method,payment_status,amount) VALUES(?,?,'rental_adjustment','cash','pending',80)",[order.orderId,item.id]);
+ const browser=await require('playwright').chromium.launch();
+ try{
+  const page=await browser.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
+  await page.context().addCookies([{name:'segnitz.sid',value:admin.cookie.slice('segnitz.sid='.length),url:BASE_URL}]);
+  await page.goto(BASE_URL+'/backend.html');await page.locator('#nav-orders').click();
+  for(const width of [1280,390]){
+   await page.setViewportSize({width,height:900});await page.evaluate(id=>openOrderDetails(id),order.orderId);
+   await page.locator('[data-additional-transfer]').waitFor();
+   assert.equal(await page.locator('[data-pos-type="rental_adjustment"]').count(),1);
+   assert.equal(await page.locator('[data-payment-type="rental_adjustment"]').count(),1);
+   await page.waitForTimeout(350);await page.screenshot({path:path.join(require('os').tmpdir(),'segnitz-payments-'+width+'.png')});
+   await page.locator('#orderDetailsModal [data-bs-dismiss="modal"]').last().click();await page.waitForTimeout(350);
+   assert.equal(await page.locator('.modal-backdrop').count(),0);
+  }
+  await addCartItem(customer,futureDate(3600),futureDate(3601));
+  await page.context().clearCookies();await page.context().addCookies([{name:'segnitz.sid',value:customer.cookie.slice('segnitz.sid='.length),url:BASE_URL}]);
+  await page.goto(BASE_URL+'/index.html');
+  await page.locator('#next-btn').click();await page.locator('#next-btn').click();await page.locator('#next-btn').click();
+  await page.locator('#page3.d-block').waitFor();
+  for(const width of [1280,390]){
+   await page.setViewportSize({width,height:900});
+   await page.locator('#paymentMethodCash').scrollIntoViewIfNeeded();
+   const before=await page.evaluate(()=>scrollY);await page.locator('#paymentMethodCash').check();await page.waitForTimeout(200);
+   assert.ok(Math.abs(await page.evaluate(()=>scrollY)-before)<5,'Payment choice must not scroll');
+   await page.locator('#paymentMethodOnline').check();await page.waitForTimeout(250);
+   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
+   await page.screenshot({path:path.join(require('os').tmpdir(),'segnitz-checkout-'+width+'.png')});
+  }
+  assert.deepEqual(errors,[]);
+ }finally{await browser.close();}
+});
+
+
+test('Unabhängige Verlängerungsrechnung: offener Mietlink bleibt bestehen und Archiv gruppiert alle Belege',async()=>{
+ const customer=new SessionClient(),admin=new SessionClient(),stranger=new SessionClient();await login(customer,TEST_CUSTOMER);await login(admin,TEST_ADMIN);await login(stranger,TEST_OTHER_CUSTOMER);await seedBilling();
+ const start=futureDate(3800),end=futureDate(3801),extended=futureDate(3802),order=await createOrder(customer,'cash',start,end);
+ assert.equal((await offerInvoiceTransfer(admin,order.orderId)).status,200);
+ const [original]=await queryRows('SELECT id,invoice_number,pdf_data,due_at FROM rental_invoices WHERE order_id=?',[order.orderId]);
+ const [initial]=await queryRows("SELECT * FROM rental_order_payments WHERE order_id=? AND payment_type='invoice_payment'",[order.orderId]);
+ const [item]=await queryRows('SELECT id,product_id FROM rental_order_items WHERE order_id=?',[order.orderId]);
+ await execute('INSERT INTO rental_product_images(product_id,image_path,sort_order) VALUES(?,?,?)',[item.product_id,'img/logo.png',-10]);
+ const extension=await admin.request('/admin/order-items/'+item.id+'/rental-adjustment',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({adjustedRentalStart:start,adjustedRentalEnd:extended,adjustedPricePerDay:TEST_PRODUCT.pricePerDay})});assert.equal(extension.status,200,await extension.clone().text());
+ const extra=await waitForDatabaseRow("SELECT * FROM rental_order_payments WHERE order_id=? AND payment_type='rental_adjustment' ORDER BY id DESC LIMIT 1",[order.orderId],r=>!!r.billing_document_id,'separate Rechnung erstellt');
+ const [invoice]=await queryRows('SELECT * FROM billing_documents WHERE id=?',[extra.billing_document_id]);
+ const snapshot=typeof invoice.snapshot_json==='string'?JSON.parse(invoice.snapshot_json):invoice.snapshot_json;
+ assert.equal(snapshot.scope,'additional');assert.equal(snapshot.depositCents,0);assert.equal(invoice.gross_cents,8000);assert.ok(snapshot.bankTransfer.checkoutUrl);assert.notEqual(snapshot.bankTransfer.checkoutUrl,initial.checkout_url);
+ assert.equal(snapshot.dueAt.slice(0,10),require('../../services/invoiceTransfer').transferDueDate());
+ const [unchanged]=await queryRows('SELECT invoice_number,pdf_data,due_at FROM rental_invoices WHERE order_id=?',[order.orderId]);assert.equal(unchanged.invoice_number,original.invoice_number);assert.ok(unchanged.pdf_data.equals(original.pdf_data));assert.equal(String(unchanged.due_at),String(original.due_at));
+ assert.equal((await queryRows('SELECT payment_status FROM rental_order_payments WHERE id=?',[initial.id]))[0].payment_status,initial.payment_status);
+ const outbox=await queryRows("SELECT payload_json FROM external_effects_outbox WHERE operation_key=?",['mail-billing-document-'+invoice.id]);assert.equal(outbox.length,1);assert.match(JSON.stringify(outbox),/invoicePdf/);assert.match(JSON.stringify(outbox),/paymentUrl/);
+ const archive=await (await customer.request('/my-invoices?q='+invoice.document_number)).json();assert.equal(archive.total,1);assert.equal(archive.items.length,2);assert.equal((await (await stranger.request('/my-invoices?orderId='+order.orderId)).json()).items.length,0);
+ const paid='tr_test_paid_independent_'+extra.id;await execute('UPDATE rental_order_payments SET mollie_payment_id=? WHERE id=?',[paid,extra.id]);assert.equal((await admin.request('/admin/orders/'+order.orderId+'/payments/sync',{method:'POST'})).status,200);
+ const after=await (await customer.request('/my-invoices?orderId='+order.orderId)).json();assert.equal(after.items.find(d=>d.id===invoice.id).status,'paid');assert.equal(after.items.find(d=>d.id!==invoice.id).status,'issued');
+ assert.equal((await queryRows('SELECT payment_status FROM rental_orders WHERE id=?',[order.orderId]))[0].payment_status,'pending');
+ const browser=await require('playwright').chromium.launch();
+ try{for(const [role,client] of [['admin',admin],['customer',customer]]){
+  const page=await browser.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
+  await page.context().addCookies([{name:'segnitz.sid',value:client.cookie.slice('segnitz.sid='.length),url:BASE_URL}]);
+  await page.goto(BASE_URL+(role==='admin'?'/backend.html':'/profile.html?view=invoices'));
+  if(role==='admin')await page.locator('#nav-invoices').click();
+  await page.locator('[data-archive-search]').fill(invoice.document_number);await page.waitForTimeout(400);
+  assert.equal(await page.locator('.invoice-document').count(),2);
+  for(const width of [1280,390]){
+   await page.setViewportSize({width,height:900});await page.locator('[data-archive-search]').scrollIntoViewIfNeeded();await page.waitForTimeout(250);
+   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
+   await page.screenshot({path:path.join(require('os').tmpdir(),'segnitz-archive-'+role+'-'+width+'.png')});
+   await page.evaluate(({id,admin})=>admin?openOrderDetails(id):openMyOrderDetails(id),{id:order.orderId,admin:role==='admin'});
+   const modal=page.locator(role==='admin'?'#orderDetailsModal':'#myOrderDetailsModal');await modal.locator('.invoice-document').first().waitFor();await page.waitForTimeout(350);
+   assert.equal(await modal.locator('.order-sheet-product img').first().getAttribute('src'),'/img/logo.png');
+   assert.equal(await modal.locator('[data-invoice-action="sync"]').count(),0);
+   assert.equal(await page.locator('a[aria-label="Zur Startseite"]').getAttribute('href'),'/');
+   if(role==='admin')assert.ok(await modal.locator('.order-sheet-pickup').isDisabled());
+   const cancel=await modal.locator('.order-cancel-action').boundingBox(),handover=await modal.locator('.order-handover').boundingBox();assert.ok(cancel&&handover&&cancel.y<=handover.y);assert.ok(cancel.x+cancel.width<=handover.x+1 || cancel.y+cancel.height<=handover.y+1);
+   await page.screenshot({path:path.join(require('os').tmpdir(),'segnitz-details-'+role+'-'+width+'.png')});
+   await modal.locator('.order-sheet-documents').scrollIntoViewIfNeeded();await page.screenshot({path:path.join(require('os').tmpdir(),'segnitz-documents-'+role+'-'+width+'.png')});
+   assert.equal(await modal.locator('[data-sheet-toggle]').count(),0);
+   if(role!=='admin')assert.equal(await modal.locator('[data-backend-action]').count(),0);
+   const paymentDetails=modal.locator('.order-sheet-payment-actions').first();await paymentDetails.locator('summary').click();assert.ok(await paymentDetails.locator('.order-sheet-action-options').isVisible());await paymentDetails.locator('summary').click();
+   assert.ok(await modal.evaluate(el=>el.scrollWidth<=el.clientWidth+1));
+   assert.equal(await modal.locator('.order-sheet-calculation').count(),0);
+   await modal.locator('.order-settlement').scrollIntoViewIfNeeded();
+   assert.ok(await modal.locator('.settlement-result').isVisible());
+   assert.match(await modal.locator('.order-return-protocol').innerText(),/Noch kein Rückgabeprotokoll/);
+   await page.evaluate(({id,admin})=>{
+    const fixture={id,items:[{id:30,title:'Komatsu 485 Radlader',rentalStart:'2026-09-28',rentalEnd:'2026-10-02',pricePerDay:1500,deposit:20000,itemStatus:'returned_late_damaged',returnedAt:'2026-10-11 17:51:03',actualReturnDate:'2026-10-11',additionalChargeAmount:2500,additionalChargeReason:'Reparatur Hydraulik',damageDescription:'Hydraulikleitung beschädigt',depositDeductionAmount:16000,depositRefundAmount:4000,returnImages:[{id:1,imagePath:'img/logo.png'}]}],payments:[{id:1,paymentType:'initial_payment',paymentStatus:'paid',amount:27500}]};
+    const body=document.querySelector(admin?'#orderDetailsModal .modal-body':'#myOrderDetailsModal .modal-body');body.querySelector('.order-settlement').outerHTML=renderClearOrderCalculation(fixture);body.querySelector('.order-return-protocol').outerHTML=renderOrderReturnProtocol(fixture,admin);
+   },{id:order.orderId,admin:role==='admin'});
+   await modal.locator('.order-settlement').scrollIntoViewIfNeeded();
+   assert.match(await modal.locator('.settlement-result').innerText(),/4.000,00/);
+   assert.match(await modal.locator('.settlement-costs').innerText(),/Reparatur Hydraulik/);
+   await page.screenshot({path:path.join(require('os').tmpdir(),'segnitz-settlement-'+role+'-'+width+'.png')});
+   await modal.locator('.order-return-protocol').scrollIntoViewIfNeeded();
+   assert.ok(await modal.locator('.return-protocol-photos img').isVisible());
+   assert.match(await modal.locator('.order-return-protocol').innerText(),/Hydraulikleitung beschädigt/);
+   assert.ok(await modal.evaluate(el=>el.scrollWidth<=el.clientWidth+1));
+   await page.screenshot({path:path.join(require('os').tmpdir(),'segnitz-return-protocol-'+role+'-'+width+'.png')});
+   await modal.locator('[data-bs-dismiss="modal"]').last().click();await page.waitForTimeout(350);assert.equal(await page.locator('.modal-backdrop').count(),0);
+  }
+  if(role==='admin'){
+   const cashOrder=await createOrder(customer,'cash',futureDate(3810),futureDate(3811));
+   await page.evaluate(id=>openOrderDetails(id),cashOrder.orderId);
+   const cashModal=page.locator('#orderDetailsModal');await cashModal.locator('.order-sheet-payment-actions').first().waitFor();
+   await cashModal.locator('.order-sheet-payment-actions summary').first().click();
+   assert.ok(await cashModal.locator('[data-backend-action="open-manual-payment"]').isVisible());
+   assert.ok(await cashModal.locator('[data-pos-order]').isVisible());
+   assert.ok(await cashModal.locator('[data-transfer-order]').isVisible());
+   await cashModal.locator('[data-backend-action="open-manual-payment"]').click();
+   const cashPaymentModal=page.locator('#manualPaymentModal');await cashPaymentModal.waitFor({state:'visible'});
+   assert.ok(Number(await page.locator('#manualPaymentAmount').inputValue())>0);
+   await cashPaymentModal.locator('[data-bs-dismiss="modal"]').last().click();await page.waitForTimeout(350);
+
+   assert.ok(await cashModal.evaluate(el=>el.scrollWidth<=el.clientWidth+1));
+   assert.equal((await offerInvoiceTransfer(admin,cashOrder.orderId)).status,200);
+   await cashModal.locator('.order-handover').click();
+   const protocol=page.locator('#handoverModal');await protocol.waitFor({state:'visible'});await page.waitForTimeout(350);
+   assert.ok(await protocol.locator('#handoverFields').isVisible());
+   await protocol.locator('#handoverAdd').click();await protocol.locator('textarea').fill('Kratzer am Gehäuse');
+   assert.ok(await protocol.locator('[data-entry]').isVisible());
+   await protocol.locator('[data-remove]').click();await protocol.locator('#handoverNoDamage').check();
+   await protocol.locator('#handoverSave').click();await page.waitForTimeout(400);
+   await page.screenshot({path:path.join(require('os').tmpdir(),'segnitz-handover-form-mobile.png')});
+   await protocol.locator('[data-bs-dismiss="modal"]').last().click();await cashModal.waitFor({state:'visible'});await page.waitForTimeout(350);
+   const [pickupItem]=await queryRows('SELECT id FROM rental_order_items WHERE order_id=?',[cashOrder.orderId]);await signHandoverBeforePickup(admin,pickupItem.id);
+   await page.evaluate(id=>openOrderDetails(id),cashOrder.orderId);await page.waitForTimeout(350);
+   assert.ok(await cashModal.locator('.order-sheet-pickup').isEnabled());
+   const pickupResponse=page.waitForResponse(r=>r.url().endsWith('/admin/order-items/'+pickupItem.id+'/pickup')&&r.request().method()==='PUT');await cashModal.locator('.order-sheet-pickup').click();assert.equal((await pickupResponse).status(),200);
+   assert.equal((await queryRows('SELECT item_status FROM rental_order_items WHERE id=?',[pickupItem.id]))[0].item_status,'picked_up');
+   await page.waitForTimeout(350);
+   assert.ok(await cashModal.locator('.order-sheet-actions [data-backend-action="open-rental-period"]').isVisible());
+   assert.ok(await cashModal.locator('.order-sheet-actions [data-backend-action="open-return-item"]').isVisible());
+   assert.ok(await cashModal.locator('.order-sheet-status>span').first().evaluate(el=>el.classList.contains('is-paid')));
+   assert.equal(await cashModal.locator('.order-sheet-pickup').count(),0);
+   await cashModal.locator('.order-handover').click();await protocol.waitFor({state:'visible'});await page.waitForTimeout(350);
+   assert.ok(await protocol.locator('#handoverReadOnly').isVisible());assert.match(await protocol.locator('#handoverReadOnly').innerText(),/Bestätigung & Unterschrift/);assert.ok(await protocol.locator('#handoverPdf').isVisible());
+   await page.screenshot({path:path.join(require('os').tmpdir(),'segnitz-handover-readonly-mobile.png')});
+   await page.setViewportSize({width:1280,height:900});await page.screenshot({path:path.join(require('os').tmpdir(),'segnitz-handover-readonly-desktop.png')});await page.setViewportSize({width:390,height:900});
+   const customerPage=await browser.newPage();await customerPage.context().addCookies([{name:'segnitz.sid',value:customer.cookie.slice('segnitz.sid='.length),url:BASE_URL}]);
+   await customerPage.goto(BASE_URL+'/profile.html');await customerPage.evaluate(id=>openMyOrderDetails(id),cashOrder.orderId);await customerPage.locator('#myOrderDetailsModal .order-handover').click();
+   await customerPage.locator('#handoverReadOnly .protocol-signature-preview img').waitFor({state:'visible'});assert.equal(await customerPage.locator('#handoverFields').isVisible(),false);await customerPage.locator('#handoverModal [data-bs-dismiss="modal"]').last().click();await customerPage.locator('#myOrderDetailsModal').waitFor({state:'visible'});await customerPage.close();
+
+   await protocol.locator('[data-bs-dismiss="modal"]').last().click();await cashModal.waitFor({state:'visible'});await page.waitForTimeout(350);
+   await cashModal.locator('.order-sheet-actions [data-backend-action="open-return-item"]').click();
+   const returnModal=page.locator('#orderItemReturnModal');await returnModal.waitFor({state:'visible'});await page.waitForTimeout(350);
+   assert.ok(await returnModal.locator('#returnActualDate').isVisible());await returnModal.locator('#returnIsDamaged').check();assert.ok(await returnModal.locator('#returnDamageDescription').isVisible());
+   await page.screenshot({path:path.join(require('os').tmpdir(),'segnitz-return-form-mobile.png')});
+   await page.setViewportSize({width:1280,height:900});await page.screenshot({path:path.join(require('os').tmpdir(),'segnitz-return-form-desktop.png')});await page.setViewportSize({width:390,height:900});
+   assert.ok(await returnModal.evaluate(el=>el.scrollWidth<=el.clientWidth+1));
+   await returnModal.locator('[data-bs-dismiss="modal"]').last().click();await page.waitForTimeout(350);
+
+
+   await cashModal.locator('[data-bs-dismiss="modal"]').last().click();await page.waitForTimeout(350);assert.equal(await page.locator('.modal-backdrop').count(),0);
+  }
+  assert.deepEqual(errors,[]);await page.close();
+ }}finally{await browser.close();}
+
+ const cancelled=await admin.request('/admin/orders/'+order.orderId+'/cancel',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({})});assert.equal(cancelled.status,200,await cancelled.clone().text());
+ const credits=await queryRows("SELECT * FROM billing_documents WHERE original_document_id=? AND kind='credit'",[invoice.id]);assert.equal(credits.length,1);assert.equal(credits[0].gross_cents,-8000);
+ const finalArchive=await (await customer.request('/my-invoices?orderId='+order.orderId)).json();assert.equal(finalArchive.items.length,4);assert.equal(finalArchive.items.find(d=>d.id===invoice.id).status,'cancelled');
 });
 
 test('E-Mail-Wechsel verlangt Passwort und Code, erhält Bestellungen und sperrt alte Sitzungen', async () => {

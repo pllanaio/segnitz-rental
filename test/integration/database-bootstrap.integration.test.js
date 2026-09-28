@@ -460,7 +460,7 @@ test('repariert ein unvollständiges Bestandsschema beim nächsten Start automat
                 '20260927_08_product_attributes',
                 '20260927_09_handover_reports',
                 '20260927_10_discount_codes',
-                '20260928_11_pos_terminals', '20260928_12_email_change', '20260928_13_invoice_settings', '20260928_14_rental_invoices', '20260928_15_local_accounting', '20260928_16_combined_invoices'
+                '20260928_11_pos_terminals', '20260928_12_email_change', '20260928_13_invoice_settings', '20260928_14_rental_invoices', '20260928_15_local_accounting', '20260928_16_combined_invoices', '20260928_17_additional_invoice_payments'
             ]
         );
     } finally {

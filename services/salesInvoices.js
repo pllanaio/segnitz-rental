@@ -23,11 +23,11 @@ async function storeDocument(c,invoice,order,snapshot,key,original=null,itemId=n
 async function orderLines(c,orderId){const [items]=await c.execute(`SELECT i.*,p.title FROM rental_order_items i JOIN rental_products p ON p.id=i.product_id WHERE i.order_id=? AND i.item_status<>'cancelled' ORDER BY i.id`,[orderId]);return items.map(i=>{const start=iso(i.rental_start).slice(0,10),end=iso(i.rental_end).slice(0,10),days=Math.round((Date.parse(end)-Date.parse(start))/86400000)+1;return {itemId:i.id,description:i.title,period:start+' bis '+end,quantity:days,vatRate:19,grossCents:Math.max(0,days*cents(i.price_per_day)-cents(i.discount_amount||0)),discountCents:cents(i.discount_amount||0)};});}
 async function invoiceBalance(c,orderId){
  const [[r]]=await c.execute(`SELECT
- COALESCE((SELECT SUM(gross_cents) FROM billing_documents WHERE order_id=? AND kind IN ('invoice','credit')),0) due,
+ COALESCE((SELECT SUM(gross_cents) FROM billing_documents WHERE order_id=? AND kind IN ('invoice','credit') AND JSON_EXTRACT(snapshot_json,'$.scope') IS NULL),0) due,
  COALESCE((SELECT SUM(amount) FROM rental_order_payments WHERE order_id=? AND payment_type IN ('invoice_payment','initial_payment') AND payment_status='paid'),0) received`,[orderId,orderId]);
  const [[order]]=await c.execute('SELECT invoice_combined_payment FROM rental_orders WHERE id=?',[orderId]);
  const [[deposit]]=await c.execute("SELECT COALESCE(SUM(deposit),0) amount FROM rental_order_items WHERE order_id=? AND item_status<>'cancelled'",[orderId]);
- const [[documents]]=await c.execute('SELECT COUNT(*) n FROM billing_documents WHERE order_id=?',[orderId]);
+ const [[documents]]=await c.execute("SELECT COUNT(*) n FROM billing_documents WHERE order_id=? AND JSON_EXTRACT(snapshot_json,'$.scope') IS NULL",[orderId]);
  const [[currentInvoice]]=await c.execute('SELECT pdf_data IS NOT NULL ready FROM rental_invoices WHERE order_id=?',[orderId]);
  const rent=Number(documents.n)&&currentInvoice?.ready?Number(r.due):(await orderLines(c,orderId)).reduce((sum,line)=>sum+line.grossCents,0);
  const due=rent+(order?.invoice_combined_payment?cents(deposit.amount):0);
@@ -40,7 +40,7 @@ async function projectInvoicePaymentStatus(c,orderId){
  const [[latest]]=await c.execute("SELECT payment_status,mollie_payment_id,amount FROM rental_order_payments WHERE order_id=? AND payment_type='invoice_payment' ORDER BY id DESC LIMIT 1",[orderId]);
  if(latest?.payment_status==='cancelled'&&latest.mollie_payment_id&&balance.paidCents===0&&balance.openCents>0&&cents(latest.amount)===balance.openCents){
   const [[returned]]=await c.execute("SELECT id FROM rental_order_items WHERE order_id=? AND (item_status LIKE 'returned_%' OR actual_return_date IS NOT NULL) LIMIT 1",[orderId]);
-  const [[other]]=await c.execute("SELECT id FROM rental_order_payments WHERE order_id=? AND payment_method='online' AND payment_status IN ('pending','open','authorized','paid') LIMIT 1",[orderId]);
+  const [[other]]=await c.execute("SELECT id FROM rental_order_payments WHERE order_id=? AND payment_method='online' AND payment_status IN ('pending','open','authorized','paid') AND payment_type IN ('initial_payment','rental','deposit','invoice_payment') LIMIT 1",[orderId]);
   if(!returned&&!other&&(await require('./mollieService').getMolliePayment(latest.mollie_payment_id)).status==='canceled'){
    await cancelInvoice(c,orderId,null,'Stornierung der unbezahlten Rechnung nach Abbruch der Mollie-Überweisung.');
    await c.execute("UPDATE rental_invoices SET pdf_data=NULL,invoice_number=NULL,request_json=NULL,status='queued',next_attempt_at=NULL,due_at=NULL WHERE order_id=?",[orderId]);
@@ -66,7 +66,7 @@ async function syncInvoice(createConnection,id){
    const bankTransfer=order.payment_method==='invoice'&&order.invoice_combined_payment?await transferInstructions(c,order.id):null;
    if(order.payment_method==='invoice'&&order.invoice_combined_payment&&!bankTransfer){await c.commit();return;}
    const snapshot={bankTransfer,buyer:{name:order.customer_company||order.customer_first_name+' '+order.customer_last_name,address:order.customer_address,postalCode:order.customer_zip,city:order.customer_city},depositCents:cents(deposit.amount),combinedPayment:!!order.invoice_combined_payment,kind:'invoice',issuer,orderNo:order.order_no,issuedAt,dueAt,paidAt:order.payment_method!=='invoice'?issuedAt:null,customer:[order.customer_company,order.customer_first_name+' '+order.customer_last_name,order.customer_address,order.customer_zip+' '+order.customer_city].filter(Boolean),signature:order.signature_data_url,lines};
-   const [[generation]]=await c.execute("SELECT COUNT(*) n FROM billing_documents WHERE order_id=? AND kind='invoice'",[order.id]);
+   const [[generation]]=await c.execute("SELECT COUNT(*) n FROM billing_documents WHERE order_id=? AND kind='invoice' AND JSON_EXTRACT(snapshot_json,'$.scope') IS NULL",[order.id]);
    const document=await storeDocument(c,row,order,snapshot,'invoice-order-'+order.id+(Number(generation.n)?'-'+generation.n:''));
    await c.execute('UPDATE rental_invoices SET mode=\'local\',invoice_number=?,pdf_data=?,request_json=?,amount=?,due_at=?,last_error=NULL WHERE id=?',[document.document_number,document.pdf_data,JSON.stringify(snapshot),document.gross_cents/100,new Date(dueAt),id]);row.pdf_data=document.pdf_data;
   }
@@ -79,7 +79,7 @@ async function syncInvoice(createConnection,id){
   await c.execute('UPDATE rental_invoices SET status=?,last_error=NULL,next_attempt_at=DATE_ADD(NOW(),INTERVAL 60 SECOND) WHERE id=?',[status,id]);
   if(order.payment_method==='invoice'&&!['cancelled','expired'].includes(order.status)&&order.payment_status!=='charged_back')await c.execute('UPDATE rental_orders SET payment_status=? WHERE id=?',[paid&&await depositPaid(c,order.id)?'paid':'pending',order.id]);
   await projectInvoicePaymentStatus(c,order.id);
-  const [[structured]]=await c.execute("SELECT xml_data FROM billing_documents WHERE invoice_id=? AND kind='invoice' LIMIT 1",[id]);
+  const [[structured]]=await c.execute("SELECT xml_data FROM billing_documents WHERE invoice_id=? AND kind='invoice' AND JSON_EXTRACT(snapshot_json,'$.scope') IS NULL LIMIT 1",[id]);
   if(paid&&(order.payment_method==='invoice'||order.invoice_combined_payment)&&row.pdf_data&&balance.dueCents>0){await sendGraphMail({to:order.customer_email,subject:'Rechnung bezahlt – '+order.order_no,text:'Vielen Dank. Der Zahlungseingang wurde bestätigt.',...(structured?.xml_data?{invoiceXml:{name:(row.invoice_number||order.order_no)+'.xml',contentBytes:structured.xml_data.toString('base64')}}:{}),invoicePdf:{name:(row.invoice_number||order.order_no)+'.pdf',contentBytes:row.pdf_data.toString('base64')},receipt:await captureReceipt(c,order.id,'order')},{connection:c,operationKey:'mail-local-invoice-paid-'+id});}
   await c.commit();
  }catch(e){await c.rollback();await c.execute('UPDATE rental_invoices SET last_error=?,next_attempt_at=DATE_ADD(NOW(),INTERVAL 5 MINUTE) WHERE id=?',[String(e.message).slice(0,500),id]);throw e;}finally{await c.end();}
@@ -93,7 +93,16 @@ async function cancelInvoice(c,orderId,item,reason=null){
   await c.execute("UPDATE rental_order_payments SET amount=GREATEST(amount-?,0) WHERE order_id=? AND payment_type='deposit' AND payment_method='cash' AND payment_status='pending' AND mollie_payment_id IS NULL",[item.deposit,orderId]);
  }
  if(row.provider_id)throw Object.assign(new Error('Dieser historische externe Beleg muss vor einer Korrektur in die lokale Buchhaltung übernommen werden.'),{statusCode:409});
- const [[original]]=await c.execute("SELECT * FROM billing_documents WHERE invoice_id=? AND kind='invoice' ORDER BY id DESC LIMIT 1",[row.id]);
+ const [[creditOrder]]=await c.execute('SELECT * FROM rental_orders WHERE id=?',[orderId]);
+ const [extras]=await c.execute("SELECT * FROM billing_documents WHERE order_id=? AND kind='invoice' AND JSON_UNQUOTE(JSON_EXTRACT(snapshot_json,'$.scope'))='additional'",[orderId]);
+ if(!reason)for(const extra of extras){
+  if(item&&Number(extra.order_item_id)!==Number(item.id))continue;
+  const [[exists]]=await c.execute("SELECT id FROM billing_documents WHERE original_document_id=? AND kind='credit' LIMIT 1",[extra.id]);if(exists)continue;
+  const source=parse(extra.snapshot_json);
+  const correction={...source,kind:'credit',number:null,originalNumber:source.number,originalDate:source.issuedAt,issuedAt:new Date().toISOString(),description:'Stornierung – '+(source.description||'Nachrechnung'),reason:'Stornierung der Nachrechnung zur stornierten Mietposition.',lines:source.lines.map(line=>({...line,grossCents:-Math.abs(line.grossCents)}))};
+  await storeDocument(c,row,creditOrder,correction,'credit-additional-'+extra.id,extra.id,extra.order_item_id);
+ }
+ const [[original]]=await c.execute("SELECT * FROM billing_documents WHERE invoice_id=? AND kind='invoice' AND JSON_EXTRACT(snapshot_json,'$.scope') IS NULL ORDER BY id DESC LIMIT 1",[row.id]);
  if(!original){const lines=await orderLines(c,orderId);await c.execute('UPDATE rental_invoices SET amount=? WHERE id=?',[lines.reduce((n,l)=>n+l.grossCents,0)/100,row.id]);return;}
  const [[order]]=await c.execute('SELECT * FROM rental_orders WHERE id=?',[orderId]);
  const source=parse(original.snapshot_json),[credits]=await c.execute("SELECT snapshot_json FROM billing_documents WHERE original_document_id=? AND kind='credit'",[original.id]);
@@ -104,5 +113,26 @@ async function cancelInvoice(c,orderId,item,reason=null){
  await storeDocument(c,row,order,snapshot,'credit-cancellation-'+orderId+'-'+original.id+'-'+(item?.id||'all'),original.id,item?.id||null);
  await c.execute('UPDATE rental_invoices SET next_attempt_at=NULL WHERE id=?',[row.id]);
 }
+async function createAdditionalInvoice(c,paymentId,result,period=null){
+ const [[payment]]=await c.execute('SELECT * FROM rental_order_payments WHERE id=? FOR UPDATE',[paymentId]);
+ const [[order]]=await c.execute('SELECT * FROM rental_orders WHERE id=? FOR UPDATE',[payment.order_id]);
+ if(payment.billing_document_id){
+  const [[doc]]=await c.execute('SELECT * FROM billing_documents WHERE id=?',[payment.billing_document_id]);
+  await sendGraphMail({to:order.customer_email,subject:'Aktualisierter Zahlungslink – '+doc.document_number,paymentUrl:result.checkoutUrl,text:'Für diese Rechnung steht ein neuer Mollie-Zahlungslink bereit. Das ursprüngliche Zahlungsziel bleibt bestehen.',invoicePdf:{name:doc.document_number+'.pdf',contentBytes:doc.pdf_data.toString('base64')}},{connection:c,operationKey:'mail-invoice-link-'+payment.id});return;
+ }
+ const issuer=await requireIssuer(c);
+ await queueInvoice(c,order.id,0);
+ const [[invoice]]=await c.execute('SELECT * FROM rental_invoices WHERE order_id=? FOR UPDATE',[order.id]);
+ const [[item]]=await c.execute('SELECT i.*,p.title FROM rental_order_items i JOIN rental_products p ON p.id=i.product_id WHERE i.id=? AND i.order_id=?',[payment.order_item_id,order.id]);
+ const issuedAt=new Date().toISOString(),dueAt=transferDueDate()+'T12:00:00Z';
+ const label=payment.payment_type==='rental_adjustment'?'Mietzeitraum-Verlängerung':'Nachzahlung zur Rückgabe';
+ const snapshot={scope:'additional',description:label+' – '+item.title,paymentRecordId:payment.id,kind:'invoice',issuer,orderNo:order.order_no,issuedAt,dueAt,paidAt:null,depositCents:0,signature:order.signature_data_url,
+  bankTransfer:{...result.details,checkoutUrl:require('./invoiceTransfer').safeMolliePaymentLink(result.links?.payOnline?.href)||require('./invoiceTransfer').safeMolliePaymentLink(result.checkoutUrl)},
+  buyer:{name:order.customer_company||order.customer_first_name+' '+order.customer_last_name,address:order.customer_address,postalCode:order.customer_zip,city:order.customer_city},
+  customer:[order.customer_company,order.customer_first_name+' '+order.customer_last_name,order.customer_address,order.customer_zip+' '+order.customer_city].filter(Boolean),
+  lines:[{itemId:item.id,description:label+' – '+item.title,period:period?period.start+' bis '+period.end:iso(item.adjusted_rental_start||item.rental_start).slice(0,10)+' bis '+iso(item.adjusted_rental_end||item.rental_end).slice(0,10),quantity:1,vatRate:19,grossCents:cents(payment.amount)}]};
+ const doc=await storeDocument(c,invoice,order,snapshot,'invoice-additional-'+payment.id,null,item.id);
+ await c.execute('UPDATE rental_order_payments SET billing_document_id=? WHERE id=?',[doc.id,payment.id]);
+}
 function startInvoiceWorker(createConnection){if(process.env.DISABLE_PERIODIC_CLEANUP==='1')return {stop(){}};let busy=false;const timer=setInterval(async()=>{if(busy)return;busy=true;let c;try{c=await createConnection();const [rows]=await c.execute("SELECT i.id FROM rental_invoices i JOIN rental_orders o ON o.id=i.order_id WHERE i.provider_id IS NULL AND i.status<>'cancelled' AND o.status NOT IN ('cancelled','expired') AND ((i.pdf_data IS NULL AND (o.payment_method='invoice' OR o.payment_status='paid')) OR (i.pdf_data IS NOT NULL AND (o.payment_method='invoice' OR o.invoice_combined_payment=1) AND (i.status IN ('issued','overdue','pending-payment') OR o.payment_status='pending'))) AND (i.next_attempt_at IS NULL OR i.next_attempt_at<=NOW()) ORDER BY COALESCE(i.next_attempt_at,i.created_at) LIMIT 10");await c.end();c=null;for(const row of rows)try{await syncInvoice(createConnection,row.id);}catch(e){console.error('Rechnungserstellung:',e.message);}}catch(e){console.error('Rechnungsworker:',e.message);}finally{if(c)await c.end();busy=false;}},15000);timer.unref();return {stop(){clearInterval(timer);}};}
-module.exports={projectInvoicePaymentStatus,queueInvoice,depositPaid,pickupAllowed,syncInvoice,startInvoiceWorker,cancelInvoice,invoiceBalance,orderLines};
+module.exports={createAdditionalInvoice,projectInvoicePaymentStatus,queueInvoice,depositPaid,pickupAllowed,syncInvoice,startInvoiceWorker,cancelInvoice,invoiceBalance,orderLines};

@@ -7,7 +7,7 @@
     <title>Segnitz Rental - Backend</title>
     <!-- CSS -->
     <link rel="stylesheet" href="css/bootstrap.min.css?v=5cba8daeac92">
-    <link rel="stylesheet" href="css/style.css?v=de11a88e5692">
+    <link rel="stylesheet" href="css/style.css?v=ff3b4eb8ece4">
     <link rel="stylesheet" href="css/bootstrap-icons-1.11.3/font/bootstrap-icons.min.css?v=f643d6fe7e67">
     <!-- FONT -->
     <link rel="stylesheet" href="css/fonts.css?v=4c58b1928a08">
@@ -30,7 +30,7 @@
     <link rel="apple-touch-icon" sizes="180x180" href="/img/apple-touch-icon.png?v=20260927">
     <link rel="manifest" href="/img/site.webmanifest?v=20260927">
     <meta name="theme-color" content="#041C40">
-    <link rel="stylesheet" href="css/handover.css?v=d63de248441c">
+    <link rel="stylesheet" href="css/handover.css?v=b71de8edc26b">
 </head>
 
 <body class="backend-page">
@@ -43,7 +43,7 @@
 
             <aside class="col-12 col-md-3 col-xl-2 bg-primary text-white p-4">
                 <div class="sidebar-brand text-center mb-3">
-                    <img src="img/logo.png" alt="Segnitz Rental Logo" class="img-fluid sidebar-logo">
+                    <a href="/" aria-label="Zur Startseite"><img src="img/logo.png" alt="Segnitz Rental Logo" class="img-fluid sidebar-logo"></a>
                 </div>
 
                 <p id="backend-login-status" class="mt-4 small"></p>
@@ -91,6 +91,8 @@
 
                     <section id="invoicesView" class="d-none">
                         <h2>Rechnungen</h2>
+                        <div id="adminInvoiceList" aria-live="polite"></div>
+                        <details class="invoice-issuer-settings mt-4"><summary>Rechnungssteller &amp; Einstellungen</summary>
                         <form id="invoiceSettingsForm" class="card p-4 mb-4">
                             <h3 class="h5">Rechnungssteller</h3>
                             <p>Rechnungen und Rechnungskorrekturen werden von Segnitz Rental erstellt. Nummern werden automatisch fortlaufend vergeben. Bereits ausgestellte Dokumente bleiben unverändert.</p>
@@ -99,7 +101,7 @@
                             <div class="d-flex flex-wrap gap-2"><button id="invoiceSettingsSave" type="submit" class="btn btn-primary" disabled>Einstellungen speichern</button><button id="invoiceSettingsReload" type="button" class="btn btn-outline-primary">Neu laden</button></div>
                             <p id="invoiceSettingsStatus" class="mt-3 mb-0" role="status" aria-live="polite"></p>
                         </form>
-                    <h3 class="h5">Rechnungsübersicht</h3><div id="adminInvoiceList" aria-live="polite"></div>
+                    </details>
                     </section>
                     <section id="posView" class="d-none">
                         <h2>POS &amp; Terminals</h2>
@@ -381,12 +383,12 @@
         </div>
     </div>
 
-    <div class="modal fade" id="orderItemReturnModal" tabindex="-1" aria-hidden="true" style="z-index: 3060;">
+    <div class="modal fade lifecycle-modal" id="orderItemReturnModal" tabindex="-1" aria-hidden="true" style="z-index: 3060;">
         <div class="modal-dialog modal-lg modal-dialog-scrollable">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">Rückgabe abwickeln</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    <h2 class="modal-title h5">Rückgabe dokumentieren</h2>
+                    <button type="button" class="btn-close btn-close-white" aria-label="Schließen" data-bs-dismiss="modal"></button>
                 </div>
 
                 <div class="modal-body">
@@ -400,7 +402,7 @@
                     <input type="hidden" id="returnDepositRefundAmount">
                     <input type="hidden" id="returnDepositDeductionReason">
 
-                    <div class="row g-3">
+                    <p class="protocol-intro">Rückgabe prüfen, Zustand dokumentieren und die Abrechnung kontrollieren.</p><div class="row g-3 return-form-grid"><div class="col-12"><h3 class="protocol-step">1. Mietzeitraum & Rückgabe</h3></div>
                         <div class="col-12 col-md-4">
                             <label class="form-label">Rückgabedatum</label>
                             <input type="date" class="form-control" id="returnActualDate">
@@ -416,7 +418,7 @@
                             <input type="date" class="form-control" id="returnAdjustedEnd">
                         </div>
 
-                        <div class="col-12 col-md-6">
+                        <div class="col-12"><h3 class="protocol-step">2. Zustand bei Rückgabe</h3></div><div class="col-12 col-md-6">
                             <div class="form-check">
                                 <input class="form-check-input" type="checkbox" id="returnIsDamaged">
                                 <label class="form-check-label">Beschädigt</label>
@@ -437,7 +439,7 @@
                                 placeholder="Festgestellten Schaden konkret dokumentieren"></textarea>
                         </div>
 
-                        <div class="col-12 col-md-8">
+                        <div class="col-12"><h3 class="protocol-step">3. Mehrkosten & Dokumentation</h3></div><div class="col-12 col-md-8">
                             <label class="form-label">Zusätzliche Reparaturkosten / Forderung</label>
                             <input type="text" class="form-control" id="returnAdditionalChargeReason"
                                 placeholder="z.B. Reparatur Lüftermotor, Ersatzteil, Reinigung">
@@ -473,7 +475,7 @@
                         </div>
 
                         <div class="col-12">
-                            <div class="alert alert-secondary mb-0" id="returnPricePreview">
+                            <h3 class="protocol-step">4. Abrechnung prüfen</h3><div class="return-settlement-preview" id="returnPricePreview">
                                 Preisübersicht erscheint nach Eingabe.
                             </div>
                         </div>
@@ -482,7 +484,7 @@
 
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Abbrechen</button>
-                    <button type="button" class="btn btn-success" id="submitOrderItemReturnButton">
+                    <button type="button" class="btn btn-primary" id="submitOrderItemReturnButton">
                         Rückgabe speichern
                     </button>
                 </div>
@@ -538,7 +540,7 @@
     <script type="text/javascript" src="js/alerts.js?v=e22b72864f7d"></script>
     <!-- General Functionalities -->
     <script src="js/product_attributes.js?v=5d14035a154b"></script>
-    <script type="text/javascript" src="js/backend_config.js?v=f43f5a1bb609"></script>
+    <script type="text/javascript" src="js/backend_config.js?v=b31470fea7f0"></script>
 
 <script src="js/admin_declarations.js?v=284acccba691"></script>
 <script src="js/admin_coupons.js?v=84fc4200ed95"></script>
@@ -553,10 +555,12 @@
         <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Schließen</button><button type="button" class="btn btn-primary" id="posPaymentStart">Zahlung starten</button><button type="button" class="btn btn-outline-primary d-none" id="posPaymentCheck">Status prüfen</button></div>
     </div></div>
 </div>
-<script src="js/invoice_archive.js?v=48654ea2f10d"></script>
+<script src="js/order_settlement.js?v=605b70c5d2c4"></script>
+<script src="js/order_details.js?v=c18c3a0f5b71"></script>
+<script src="js/invoice_archive.js?v=3e7b17ed13f8"></script>
 <script src="js/admin_invoices.js?v=77acf9e9b45d"></script>
 <script src="js/admin_pos.js?v=158555a049b7"></script>
-<script src="js/handover.js?v=51d14d0ba472"></script>
+<script src="js/handover.js?v=c79f2d2f45d9"></script>
 </body>
 
 </html>

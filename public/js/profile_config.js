@@ -238,29 +238,7 @@ function renderMyOrders() {
     const totalPages = Math.max(Number(myOrderPagination.totalPages || 1), 1);
     currentMyOrderPage = Math.min(currentMyOrderPage, totalPages);
 
-    container.innerHTML = visibleOrders.map(order => `
-        <div class="card mb-2">
-            <div class="card-body d-flex justify-content-between align-items-center gap-3">
-                <div>
-                    <strong>${escapeHtml(order.order_no)}</strong><br>
-                    ${getStatusBadge(order.status)}
-                    ${getPaymentBadge(order.payment_status)}
-                    ${getReturnBadge(deriveMyOrderReturnStatus(order), order.status)}
-                    ${getReturnCaseBadge(order.return_case_status, order.status)}
-                </div>
-
-                <div class="d-flex gap-2 flex-wrap justify-content-end">
-                    ${order.hasInvoice?`<a class="btn btn-outline-primary btn-sm" href="/my-orders/${Number(order.id)}/invoice/pdf">Rechnung</a>`:''}
-                    <button type="button" class="btn btn-outline-primary btn-sm"
-                        data-profile-action="open-order-details" data-order-id="${order.id}">
-                        Details anzeigen
-                    </button>
-                    ${['reserved', 'pending_payment', 'payment_failed', 'confirmed'].includes(order.status) && !(order.items || []).some(item => item.pickedUpAt || item.itemStatus === 'picked_up') ? `
-                    <button type="button" class="btn btn-outline-danger btn-sm" data-profile-action="cancel-order" data-order-id="${order.id}">Bestellung stornieren</button>` : ''}
-                </div>
-            </div>
-        </div>
-    `).join('');
+    container.innerHTML = visibleOrders.map(order=>'<div class="card mb-3">'+renderOrderOverview(order,false)+'</div>').join('');
 
     const pagination = document.createElement('div');
     pagination.className = 'd-flex justify-content-between align-items-center mt-3 flex-wrap gap-2';
@@ -306,7 +284,7 @@ async function openMyOrderDetails(orderId) {
 
         renderMyOrderDetails(order);
 
-        const modal = new bootstrap.Modal(document.getElementById('myOrderDetailsModal'));
+        const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('myOrderDetailsModal'));
         modal.show();
     } catch (error) {
         console.error('Fehler beim Laden der Bestellung:', error);
@@ -354,69 +332,10 @@ function renderMyOrderDetails(order) {
         ? uniqueReviewItems.map(item => renderReviewCard(item, order.id)).join('')
         : '';
 
-    body.innerHTML = `
-        <div class="row g-4">
-            <div class="col-12 col-lg-6">
-                <h5>Bestellung</h5>
-                <p>
-                    <strong>Bestellnummer:</strong> ${escapeHtml(order.order_no)}<br>
-                    <strong>Status:</strong> ${getStatusBadge(order.status)}<br>
-
-                    ${order.status === 'cancelled' ? `
-                        <strong>Storniert am:</strong> ${escapeHtml(order.cancelled_at || '-')}<br>
-                        ${order.cancel_reason ? `
-                            <strong>Stornogrund:</strong><br>
-                            <span class="text-danger">${formatTextValue(order.cancel_reason)}</span><br>
-                        ` : ''}
-                    ` : ''}
-
-                    <strong>Zahlung:</strong> ${getPaymentBadge(order.payment_status)}<br>
-                    <strong>Rückgabeabwicklung:</strong>
-                    ${getReturnCaseBadge(order.return_case_status, order.status) || '-'}
-                </p>
-            </div>
-
-            <div class="col-12 col-lg-6">
-                <h5>Kunde</h5>
-                <p>
-                    <strong>${escapeHtml(order.customer_first_name || '')} ${escapeHtml(order.customer_last_name || '')}</strong><br>
-                    ${escapeHtml(order.customer_email || '')}<br>
-                    ${escapeHtml(order.customer_phone || '')}<br>
-                    ${escapeHtml(order.customer_address || '')}<br>
-                    ${escapeHtml(order.customer_zip || '')} ${escapeHtml(order.customer_city || '')}
-                </p>
-            </div>
-
-            <div class="col-12">
-                <section class="border rounded p-3" aria-label="Übergabeprotokoll">
-                    <h5>Übergabeprotokoll</h5>
-                    ${order.handoverAvailable ? `
-                        <p>Hier finden Sie Ihr unterschriebenes und festgeschriebenes Übergabeprotokoll mit allen dokumentierten Bemerkungen und Fotos.</p>
-                        <div class="d-flex flex-wrap gap-2">
-                            <a class="btn btn-primary" href="/my-orders/${Number(order.id)}/handover/pdf" target="_blank" rel="noopener">Protokoll ansehen</a>
-                            <a class="btn btn-outline-primary" href="/my-orders/${Number(order.id)}/handover/pdf?download=1" download>PDF herunterladen</a>
-                        </div>
-                    ` : '<p class="mb-0 text-muted">Das Übergabeprotokoll steht hier bereit, sobald es unterschrieben und festgeschrieben wurde.</p>'}
-                </section>
-            </div>
-
-            <div class="col-12">
-                <h5>Artikel</h5>
-                ${itemsHtml || '<div class="alert alert-info">Keine Artikel vorhanden.</div>'}
-            </div>
-
-            <div class="col-12">
-                ${renderMyOrderFinancialSummary(order)}
-            </div>
-
-            ${canReview ? `
-                <div class="col-12">
-                    <h5>Produkte bewerten</h5>
-                    ${reviewButtonsHtml}
-                </div>
-            ` : ''}
-        </div>
-    `;
+    const cancel=['reserved','pending_payment','payment_failed','confirmed'].includes(order.status)&&!(order.items||[]).some(item=>item.pickedUpAt||item.itemStatus==='picked_up')?'<div class="order-cancel-action"><button type="button" class="btn btn-outline-danger" data-profile-action="cancel-order" data-order-id="'+order.id+'"><i class="bi bi-trash"></i> Bestellung stornieren</button></div>':'';
+    renderOrderDetailSheet(body,order,{admin:false,status:getStatusBadge(order.status),cancel,
+        itemCards:(order.items||[]).map(item=>renderMyOrderItemCard(item,order)),
+        financials:renderMyOrderFinancialSummary(order),reviews:canReview?'<section class="order-sheet-section"><h3>Produkte bewerten</h3>'+reviewButtonsHtml+'</section>':''});
 }
 
 function renderReviewCard(item, orderId) {
@@ -987,7 +906,7 @@ function getStatusBadge(status) {
         active: 'success',
         returned: 'success',
         cancelled: 'dark',
-        picked_up: 'info',
+        picked_up: 'success',
         pending_payment: 'warning',
         payment_failed: 'danger',
         payment_dispute: 'danger'
@@ -1011,39 +930,9 @@ function getStatusBadge(status) {
 }
 
 function getPaymentBadge(status) {
-    const map = {
-        paid: 'success',
-        unpaid: 'warning',
-        pending: 'warning',
-        open: 'warning',
-        authorized: 'info',
-        failed: 'danger',
-        cancelled: 'dark',
-        expired: 'dark',
-        refunded: 'secondary',
-        refund_pending: 'warning',
-        refund_failed: 'danger',
-        charged_back: 'danger'
-    };
-
-    const labels = {
-        paid: 'Bezahlt',
-        unpaid: 'Unbezahlt',
-        pending: 'Ausstehend',
-        open: 'Ausstehend',
-        authorized: 'Autorisiert',
-        failed: 'Fehlgeschlagen',
-        cancelled: 'Storniert',
-        expired: 'Abgelaufen',
-        refunded: 'Erstattet',
-        refund_pending: 'Erstattung ausstehend',
-        refund_failed: 'Erstattung fehlgeschlagen',
-        charged_back: 'Rückbelastet'
-    };
-
-    return `<span class="badge bg-${map[status] || 'secondary'} me-1">
-        Zahlung: ${labels[status] || status || '-'}
-    </span>`;
+ const tone=orderStateTone(status);
+ const color=tone==='is-paid'?'success':tone==='is-failed'||tone==='is-cancelled'?'danger':'warning';
+ return `<span class="badge bg-${color} me-1">Zahlung: ${paymentStatusLabel(status)}</span>`;
 }
 
 function deriveMyOrderReturnStatus(order) {

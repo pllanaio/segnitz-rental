@@ -8,14 +8,14 @@ const fail = (message, statusCode = 409) => Object.assign(new Error(message), { 
 function registerSalesInvoiceRoutes(app, { checkAdmin, limiter, createConnection, transact, processEffect, reconcile, refreshCancelled, refundDeposits, refreshReturns }) {
     const errorResponse = (res, error) => res.status(error.statusCode || 503).json({ error: error.statusCode ? error.message : 'Der Vorgang konnte noch nicht abgeschlossen werden. Bitte erneut prüfen.' });
     const loggedIn = (req,res,next) => req.session?.user ? next() : res.status(401).json({error:'Bitte anmelden.'});
-    app.get('/admin/invoices',checkAdmin,async(req,res)=>{let c;try{c=await createConnection();res.set('Cache-Control','no-store').json(await require('../services/invoiceArchive').searchArchive(c,{q:req.query.q,page:req.query.page}));}catch(e){errorResponse(res,e);}finally{if(c)await c.end();}});
+    app.get('/admin/invoices',checkAdmin,async(req,res)=>{let c;try{c=await createConnection();res.set('Cache-Control','no-store').json(await require('../services/invoiceArchive').searchArchive(c,{q:req.query.q,page:req.query.page,orderId:req.query.orderId}));}catch(e){errorResponse(res,e);}finally{if(c)await c.end();}});
     async function owned(connection, req, id, admin) {
         if (!/^\d+$/.test(String(id))) throw fail('Bestellung nicht gefunden.',404);
         const [[order]] = await connection.execute('SELECT * FROM rental_orders WHERE id = ?'+(admin ? '' : ' AND user_id = (SELECT id FROM users WHERE username = ?)'), admin ? [id] : [id,req.session.user]);
         if (!order) throw fail('Bestellung nicht gefunden.',404);
         return order;
     }
-    app.get('/my-invoices',loggedIn,async(req,res)=>{let c;try{c=await createConnection();res.set('Cache-Control','no-store').json(await require('../services/invoiceArchive').searchArchive(c,{username:req.session.user,q:req.query.q,page:req.query.page}));}catch(e){errorResponse(res,e);}finally{if(c)await c.end();}});
+    app.get('/my-invoices',loggedIn,async(req,res)=>{let c;try{c=await createConnection();res.set('Cache-Control','no-store').json(await require('../services/invoiceArchive').searchArchive(c,{username:req.session.user,q:req.query.q,page:req.query.page,orderId:req.query.orderId}));}catch(e){errorResponse(res,e);}finally{if(c)await c.end();}});
     app.post('/admin/orders/:id/invoice/offer-transfer',checkAdmin,limiter,async(req,res)=>{
         try {
             const transfer=await transact(createConnection,async c=>{

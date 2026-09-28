@@ -216,7 +216,7 @@ function renderBackendProductList() {
 
 function createProductCard(product) {
     const card = document.createElement('div');
-    card.className = 'card mb-3';
+    card.className = 'card mb-3 order-overview-card';
 
     card.innerHTML = `
         <div class="card-body">
@@ -737,27 +737,7 @@ function renderOrders() {
         const card = document.createElement('div');
         card.className = 'card mb-3';
 
-        card.innerHTML = `
-            <div class="card-body">
-                <div class="d-flex justify-content-between align-items-center gap-3">
-                    <div>
-                        <h5 class="mb-1">${escapeHtml(order.order_no)}</h5>
-                        <div>${escapeHtml(order.customer_first_name || '')} ${escapeHtml(order.customer_last_name || '')}</div>
-                        ${order.customer_company ? `<div class="small text-muted">${escapeHtml(order.customer_company)}</div>` : ''}
-                        <small>${escapeHtml(order.customer_email || '')}</small><br>
-                        ${getOrderDisplayBadge(order)}
-                        ${getPaymentBadge(order.payment_status)}
-                        ${getReturnBadge(order.return_status, order.status)}
-                        ${getReturnCaseBadge(order.return_case_status, order.status)}
-                    </div>
-
-                    <div class="d-flex flex-wrap gap-2">${order.hasInvoice?`<a class="btn btn-outline-primary btn-sm" href="/admin/orders/${Number(order.id)}/invoice/pdf">Rechnung</a>`:''}<button class="btn btn-primary btn-sm"
-                        data-backend-action="open-order-details" data-order-id="${order.id}">
-                        Details
-                    </button></div>
-                </div>
-            </div>
-        `;
+        card.innerHTML = renderOrderOverview(order, true);
 
         container.appendChild(card);
     });
@@ -801,6 +781,9 @@ function changeOrderPage(direction) {
 
 async function openOrderDetails(orderId) {
     try {
+        const sync = await fetch('/admin/orders/'+orderId+'/payments/sync', {method:'POST'});
+        if(!sync.ok) showAlert('Mollie konnte gerade nicht abgefragt werden. Angezeigt wird der zuletzt bestätigte Zahlungsstand.','warning');
+        else await loadOrders();
         const response = await fetch(`/admin/orders/${orderId}`);
         const order = await response.json();
 
@@ -821,7 +804,7 @@ async function openOrderDetails(orderId) {
 }
 
 function renderOrderDetails(order) {
-    setTimeout(() => renderAdminInvoice(order), 0);
+
     const body = document.getElementById('orderDetailsBody');
     currentOrderItems = order.items || [];
     currentOrderPayments = order.payments || [];
@@ -834,85 +817,24 @@ function renderOrderDetails(order) {
 
     const canMarkPickedUp = ['reserved', 'confirmed', 'paid', 'active'].includes(status);
 
-    const cancelHtml = canCancelOrder(order) ? `
-        <div class="col-12">
-            <hr>
-            <h5>Bestellung vollständig stornieren</h5>
-            <p class="text-muted">
-                Storniert die komplette Bestellung inklusive aller noch aktiven Artikel.
-            </p>
+    const cancelHtml = canCancelOrder(order) ? '<div class="col-12 order-cancel-action"><button type="button" class="btn btn-outline-danger" data-backend-action="cancel-order" data-order-id="'+order.id+'"><i class="bi bi-trash" aria-hidden="true"></i> Bestellung stornieren</button></div>' : '';
 
-            <button type="button" class="btn btn-danger"
-                data-backend-action="cancel-order" data-order-id="${order.id}">
-                Bestellung stornieren
-            </button>
-        </div>
-    ` : `
-        <div class="col-12">
-            <hr>
-            <h5>Storno</h5>
-            <p class="text-muted">
-                Diese Bestellung kann nicht mehr vollständig storniert werden.
-            </p>
-        </div>
-    `;
-
-    body.innerHTML = `
-        <div class="row g-4">
-            <div class="col-12 col-lg-6">
-                <h5>Bestellung</h5>
-                <p>
-                    <strong>Bestellnummer:</strong> ${escapeHtml(order.order_no)}<br>
-                    <strong>Status:</strong> ${getOrderDisplayBadge(order)}<br>
-
-                    ${status === 'cancelled' ? `
-                        <strong>Storniert am:</strong> ${escapeHtml(order.cancelled_at || '-')}<br>
-                        <strong>Storniert von:</strong> ${escapeHtml(order.cancelled_by_username || '-')}<br>
-                        ${order.cancel_reason ? `
-                                <strong>Stornogrund:</strong><br>
-                                <span class="text-danger">${formatTextValue(order.cancel_reason)}</span><br>
-                        ` : ''}
-                    ` : ''}
-
-                    <strong>Zahlungsstatus:</strong> ${escapeHtml(order.payment_status || '-')}<br>
-                    <strong>Zahlungsmethode:</strong> ${escapeHtml(order.payment_method === 'invoice' ? 'Überweisung (14 Tage)' : order.payment_method || '-')}<br>
-                    <strong>Rückgabeabwicklung:</strong>
-                    ${getReturnCaseBadge(order.return_case_status, order.status) || '-'}
-                </p>
-            </div>
-
-            <div class="col-12 col-lg-6">
-                <h5>Kunde</h5>
-                <p>
-                    <strong>${escapeHtml(order.customer_first_name || '')} ${escapeHtml(order.customer_last_name || '')}</strong><br>
-                    ${order.customer_company ? `${escapeHtml(order.customer_company)}<br>` : ''}
-                    ${escapeHtml(order.customer_email || '')}<br>
-                    ${escapeHtml(order.customer_phone || '')}<br>
-                    ${escapeHtml(order.customer_address || '')}<br>
-                    ${escapeHtml(order.customer_zip || '')} ${escapeHtml(order.customer_city || '')}
-                </p>
-            </div>
-
-            <div class="col-12">
-                <div class="mb-3"><button type="button" class="btn btn-outline-primary" data-handover-order="${order.id}">Übergabeprotokoll öffnen / erstellen</button>
-                    <p class="small mt-2 mb-0">${order.handoverStatus === 'signed' ? 'Übergabeprotokoll unterschrieben und festgeschrieben.' : 'Vor der Abholung ist ein unterschriebenes und festgeschriebenes Übergabeprotokoll erforderlich.'}</p></div>
-                <h5>Artikel</h5>
-                ${renderOrderPaymentActionPanel(order)}
-                ${itemsHtml}
-                ${renderOrderFinancialSummary(order)}
-            </div>
-            ${cancelHtml}
-        </div>
-    `;
+    renderOrderDetailSheet(body,order,{admin:true,status:getOrderDisplayBadge(order),cancel:cancelHtml,
+        itemCards:currentOrderItems.map(item=>renderOrderItemCard(order,item)),
+        paymentActions:renderOrderPaymentActionPanel(order),financials:renderOrderFinancialSummary(order)});
 }
 
 function renderOrderPaymentActionPanel(order) {
-    const payments = order.payments || [];
+    const latestPayments = new Map();
+    for (const payment of [...(order.payments || [])].sort((a,b)=>Number(a.id)-Number(b.id))) latestPayments.set(payment.paymentType+':'+(payment.orderItemId||''),payment);
+    const payments = (order.payments || []).filter(payment =>
+        !['initial_payment','rental','deposit','rental_adjustment','return_additional_charge'].includes(payment.paymentType) ||
+        latestPayments.get(payment.paymentType+':'+(payment.orderItemId||'')) === payment);
     const hasOriginalCashPayment = refund => {
         const sourceTypes = refund.paymentType === 'deposit_refund'
             ? (payments.some(p=>p.paymentType==='deposit'&&p.paymentStatus==='paid') ? ['deposit'] : ['initial_payment'])
             : (order.payment_method === 'invoice' ? ['initial_payment','deposit','rental_adjustment'] : ['initial_payment', 'rental_adjustment']);
-        const sources = payments.filter(source =>
+        const sources = (order.payments || []).filter(source =>
             sourceTypes.includes(source.paymentType) && source.paymentStatus === 'paid' &&
             Number(source.amount) > 0 &&
             (!refund.orderItemId || !source.orderItemId || Number(source.orderItemId) === Number(refund.orderItemId))
@@ -953,7 +875,7 @@ function renderOrderPaymentActionPanel(order) {
     if (!orderIsClosed && initialAmount > 0 && !initialPaid) posTargets.set('initial_payment:', { paymentType: 'initial_payment', orderItemId: null });
     payments.filter(payment => ['initial_payment', 'rental_adjustment', 'return_additional_charge'].includes(payment.paymentType))
         .sort((a,b) => Number(a.id) - Number(b.id)).forEach(payment => {
-            if ((payment.paymentMethod === 'cash' || payment.posTerminalId) && !orderIsClosed &&
+            if ((payment.paymentMethod === 'cash' || payment.paymentMethod === 'online') && !orderIsClosed &&
                 ['pending', 'open', 'failed', 'cancelled', 'expired', 'authorized'].includes(payment.paymentStatus)) {
                 posTargets.set(`${payment.paymentType}:${payment.orderItemId || ''}`, payment);
             } else posTargets.delete(`${payment.paymentType}:${payment.orderItemId || ''}`);
@@ -1027,7 +949,7 @@ function renderOrderPaymentActionPanel(order) {
                         data-amount="${Number(payment.amount || 0)}">
                         Barzahlung erfassen
                     </button>
-                    ${posButton('rental_adjustment', payment.orderItemId)}
+                    ${posButton('rental_adjustment', payment.orderItemId)}<button type="button" class="btn btn-outline-primary btn-sm" data-additional-transfer="${order.id}" data-item="${payment.orderItemId}" data-type="rental_adjustment">Überweisung · 14 Tage</button>
                 </div>
             </div>
         `);
@@ -1066,7 +988,7 @@ function renderOrderPaymentActionPanel(order) {
                         data-amount="${Number(payment.amount || 0)}">
                         Barzahlung erfassen
                     </button>
-                    ${posButton('return_additional_charge', payment.orderItemId)}
+                    ${posButton('return_additional_charge', payment.orderItemId)}<button type="button" class="btn btn-outline-primary btn-sm" data-additional-transfer="${order.id}" data-item="${payment.orderItemId}" data-type="return_additional_charge">Überweisung · 14 Tage</button>
                 </div>
             </div>
         `);
@@ -1196,7 +1118,7 @@ function renderOrderPaymentActionPanel(order) {
         <div class="col-12">
             <div class="card checkout-summary mb-3">
                 <div class="card-body">
-                    <h5 class="mb-3">Offene Zahlungs- und Erstattungsvorgänge</h5>
+                    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3"><h5 class="mb-0">Zahlungen &amp; Erstattungen</h5><button type="button" class="btn btn-outline-primary btn-sm" data-backend-action="open-order-details" data-order-id="${order.id}">Mit Mollie abgleichen</button></div>
                     ${actions.join('')}
                 </div>
             </div>
@@ -1539,7 +1461,7 @@ function getStatusBadge(status) {
         active: 'success',
         returned: 'success',
         cancelled: 'dark',
-        picked_up: 'info',
+        picked_up: 'success',
     };
 
     const labels = {
@@ -1610,7 +1532,7 @@ function getOrderDisplayBadge(order) {
         partially_cancelled: 'warning',
         completed_with_issues: 'danger',
         cancelled: 'dark',
-        picked_up: 'info'
+        picked_up: 'success'
     };
 
     const labels = {
@@ -1640,7 +1562,7 @@ function getOrderItemStatusBadge(item) {
         returned_late: 'warning',
         returned_damaged: 'danger',
         returned_late_damaged: 'danger',
-        picked_up: 'info',
+        picked_up: 'success',
         pending_payment: 'warning',
         payment_failed: 'danger',
         payment_dispute: 'danger'
@@ -1674,39 +1596,9 @@ function formatDepositDecision(value) {
 }
 
 function getPaymentBadge(status) {
-    const map = {
-        paid: 'success',
-        unpaid: 'warning',
-        pending: 'warning',
-        open: 'warning',
-        authorized: 'info',
-        failed: 'danger',
-        cancelled: 'dark',
-        expired: 'dark',
-        refunded: 'secondary',
-        refund_pending: 'warning',
-        refund_failed: 'danger',
-        charged_back: 'danger'
-    };
-
-    const labels = {
-        paid: 'Bezahlt',
-        unpaid: 'Unbezahlt',
-        pending: 'Ausstehend',
-        open: 'Ausstehend',
-        authorized: 'Autorisiert',
-        failed: 'Fehlgeschlagen',
-        cancelled: 'Storniert',
-        expired: 'Abgelaufen',
-        refunded: 'Erstattet',
-        refund_pending: 'Erstattung ausstehend',
-        refund_failed: 'Erstattung fehlgeschlagen',
-        charged_back: 'Rückbelastet'
-    };
-
-    return `<span class="badge bg-${map[status] || 'secondary'} me-1">
-        Zahlung: ${labels[status] || status || '-'}
-    </span>`;
+ const tone=orderStateTone(status);
+ const color=tone==='is-paid'?'success':tone==='is-failed'||tone==='is-cancelled'?'danger':'warning';
+ return `<span class="badge bg-${color} me-1">Zahlung: ${paymentStatusLabel(status)}</span>`;
 }
 
 function getReturnBadge(status, orderStatus = null) {
@@ -1928,7 +1820,7 @@ function renderItemPayments(order, item) {
         .filter(payment => payment.paymentType === 'rental_adjustment')
         .sort((a, b) => Number(b.id || 0) - Number(a.id || 0))[0];
 
-    const returnCharge = itemPayments.find(payment =>
+    const returnCharge = [...itemPayments].sort((a,b)=>Number(b.id)-Number(a.id)).find(payment =>
         payment.paymentType === 'return_additional_charge'
     );
 

@@ -14,6 +14,19 @@ function registerHandoverReports(app, { checkAdmin, createConnection, transact, 
         console.error('Übergabeprotokoll:', err.message);
         return res.status(err.statusCode || 500).json({ error: err.statusCode ? err.message : 'Das Übergabeprotokoll konnte nicht verarbeitet werden.' });
     };
+    app.get('/my-orders/:orderId/handover', async (req, res) => {
+        res.set('Cache-Control', 'private, no-store');
+        if (!req.session.user) return res.status(401).json({error:'Nicht angemeldet.'});
+        if (!/^\d+$/.test(req.params.orderId)) return res.status(404).json({error:'Übergabeprotokoll nicht gefunden.'});
+        let connection;
+        try {
+            connection=await createConnection();
+            const [[row]]=await connection.execute(`SELECT h.document_json,o.order_no FROM rental_orders o JOIN handover_reports h ON h.order_id=o.id WHERE o.id=? AND o.customer_email=? AND h.status='signed' AND h.signed_at IS NOT NULL AND h.pdf_data IS NOT NULL`,[req.params.orderId,req.session.user]);
+            if(!row)return res.status(404).json({error:'Übergabeprotokoll nicht gefunden.'});
+            const document=parseDocument(row.document_json);
+            res.json({orderNo:row.order_no,status:'signed',editable:false,document,items:document.items||[],confirmation:CONFIRMATION});
+        } catch(err){failure(res,err);}finally{if(connection)await connection.end();}
+    });
     app.get('/my-orders/:orderId/handover/pdf', async (req, res) => {
         res.set('Cache-Control', 'private, no-store');
         if (!req.session.user) return res.status(401).json({ error: 'Nicht angemeldet.' });
