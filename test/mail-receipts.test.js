@@ -167,3 +167,8 @@ test('Graph erhält PDF und Inline-Signatur; der Test versendet keine Netzwerk-A
         for (const name of names) { if (original[name] === undefined) delete process.env[name]; else process.env[name] = original[name]; }
     }
 });
+
+test('Rechnungsmail zeigt einen sicheren Mollie-Zahlungsbutton und verwirft fremde URLs',async()=>{
+ const mail=await presentMail({subject:'Rechnung',text:'Ihre Rechnung',paymentUrl:'https://www.mollie.com/checkout/test?x=1&y=2'});assert.ok(mail.html.includes('Jetzt über Mollie bezahlen'));assert.ok(mail.html.includes('x=1&amp;y=2'));
+ for(const paymentUrl of ['javascript:alert(1)','https://mollie.com.evil.invalid/pay','https://mollie.com@evil.invalid/pay'])assert.ok(!(await presentMail({subject:'Rechnung',text:'Test',paymentUrl})).html.includes('Jetzt über Mollie bezahlen'));
+});

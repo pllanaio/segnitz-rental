@@ -859,9 +859,7 @@ textarea:focus {
 }
 
 aside {
-  background: linear-gradient(180deg,
-      #041c40 0%,
-      #123d7c 100%) !important;
+  background: var(--color-primary) !important;
 }
 
 .cart-item-actions {
@@ -1338,3 +1336,25 @@ aside :where(a, button):focus-visible,
 .form-switch .form-check-input:checked {
   background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='%23041c40'/%3e%3c/svg%3e");
 }
+
+/* Stable navigation across all content views. */
+aside { min-width: 0; overflow-wrap: anywhere; }
+aside .btn { white-space: normal; }
+aside nav .btn { display: flex; align-items: center; gap: .5rem; }
+aside nav .btn .bi { flex: 0 0 1.1em; }
+aside .btn-warning, aside .btn:hover, aside .btn:focus-visible, aside .btn.active,
+aside .btn:active, aside .btn.show {
+  background-color: #fcdc31 !important;
+  border-color: #fcdc31 !important;
+  color: #041c40 !important;
+}
+main { min-width: 0; }
+@media (min-width: 768px) {
+  .container-fluid > .row > aside { flex: 0 0 280px; width: 280px; max-width: 280px; }
+  .container-fluid > .row > main { flex: 1 1 0%; width: 0; max-width: calc(100% - 280px); }
+}
+
+#productSearchInput { flex: 1 1 180px; width: auto; min-width: 0; }
+
+.profile-page #qbox-container_form { padding: 0; width: 100%; min-width: 0; }
+@media (max-width: 767.98px) { .profile-page main { padding: 1rem !important; } }

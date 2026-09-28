@@ -286,3 +286,46 @@ Belege und Stornoerstattungen berücksichtigen die gespeicherten Rabatte. Eine
 Bestellung ohne verbleibenden Zahlbetrag wird ohne Zahlungsanbieter bestätigt.
 Die automatische Migration `20260927_10_discount_codes` legt die Verwaltungstabelle
 und zusätzliche Bestellfelder an; vorhandene Bestellungen erhalten keinen Rabatt.
+
+## Mollie Tap / POS
+
+Unter **POS & Terminals** zeigt das Admin-Dashboard alle Geräte des mit
+`MOLLIE_API_KEY` verbundenen Mollie-Profils an (inklusive weiterer API-Seiten).
+Lokale Namen, Standortangaben und Freigaben werden je Terminal und Test-/Live-Modus
+gespeichert. Eine lokale Sperre deaktiviert das Gerät nicht bei Mollie. Kopplung,
+Entkopplung und Kontozuordnung erfolgen weiterhin im Mollie-Dashboard.
+
+Bei offenen Vor-Ort-Zahlungen erscheint **Mit Karte / Tap bezahlen**. Das Gerät
+wird ausdrücklich ausgewählt, der Betrag serverseitig aus den Zahlungsbelegen
+ermittelt. Initialzahlung, Verlängerungen und Rückgabe-Nachzahlungen werden
+unterstützt; ein bestehender Online-Checkout muss zunächst abgeschlossen werden.
+Pro Gerät ist ein offener Vorgang möglich; andere Geräte können parallel kassieren.
+Der Auftrag wird erst nach bestätigtem Mollie-Status bezahlt. Die Zahlungs-ID bleibt
+für Rückerstattungen erhalten; Kartenzahlungen werden nicht als Bargeld verbucht.
+Die manuelle Zahlungsbuchung dient ausschließlich Bargeldzahlungen.
+
+Für echte Mollie-Sandbox-Tests einen `test_`-API-Schlüssel verwenden und
+`MOLLIE_TEST_MODE=0` setzen. `MOLLIE_TEST_MODE=1` ist nur das lokale Offline-Testdouble.
+Bei virtuellen Terminals erscheint ein Link zur Mollie-Statussimulation. Ein aktives
+Testterminal sowie die POS-Freischaltung des Profils sind Voraussetzung. Für Live
+wird der entsprechende `live_`-Profil-Schlüssel und ein gekoppeltes Tap-Gerät benötigt.
+`BASE_URL` und gegebenenfalls `MOLLIE_WEBHOOK_URL` müssen öffentlich korrekt gesetzt
+sein. Zusätzlich zu Webhooks kann der Admin den Status prüfen. Das Schließen des
+Dialogs storniert keine Zahlung; Abbruch erfolgt am Gerät bzw. im Testsimulator.
+
+Die Migration `20260928_11_pos_terminals` ergänzt die Geräteverwaltung und die
+Terminalreferenz an Zahlungsbelegen. Bestehende Zahlungen werden nicht umgebucht.
+
+### Lokales Rechnungswesen
+
+Segnitz Rental erstellt Rechnungen und Rechnungskorrekturen selbst. Die frühere externe Rechnungserstellung und die Testempfänger-Konfiguration sind entfernt. Mollie verarbeitet nur noch Zahlungen und Erstattungen.
+
+Unter **Admin → Rechnungen** müssen vor der ersten Ausstellung die vollständigen Rechnungssteller-Daten hinterlegt werden. Leere Pflichtdaten blockieren die Ausstellung; es werden keine Unternehmensdaten erfunden. Die derzeitige Besteuerung verwendet 19 % Umsatzsteuer. Der Checkout bietet ausschließlich Onlinezahlung und Zahlung bei Abholung. Nur der Admin kann in der jeweiligen offenen Bestellung Überweisung vereinbaren; dafür muss Banküberweisung im Mollie-Profil aktiviert sein. Laufende oder ungeklärte Onlinezahlungen blockieren die Umstellung. Überweisung hat 14 Tage Zahlungsziel ab Rechnungsdatum; Miete und Kaution werden gemeinsam bezahlt. Bei Kauf auf Rechnung ist die Abholung vor Zahlung beider Beträge erlaubt. Die rückzahlbare Sicherheitsleistung wird ohne Umsatzsteuer getrennt vom steuerpflichtigen Mietbetrag ausgewiesen. Zusätzlich ist das unterschriebene, festgeschriebene Übergabeprotokoll erforderlich.
+
+Rechnungsnummern (RE-JJJJ-NNNNNN) und Korrekturbelege (RK-JJJJ-NNNNNN) werden transaktional fortlaufend vergeben. Ausgestellte PDFs und ihre Datenschnappschüsse bleiben unverändert, einschließlich ursprünglicher Rechnungssteller-Daten und Bestellunterschrift. Korrekturen referenzieren die ursprüngliche Rechnung. PDF- und XML-Prüfsummen werden gespeichert. Ein vollständiges Datenbankbackup ist deshalb auch für das Rechnungsarchiv erforderlich.
+
+Teilstornierungen und vollständige Stornierungen erzeugen Rechnungskorrekturen. Rabattierte Mietkosten und Kaution bleiben getrennt. Erstattungen gehen ausschließlich an das ursprüngliche Zahlungsmittel; bei einer Teilstornierung wird der bisherige Überweisungsauftrag beendet und erst nach bestätigtem Endstatus bei Mollie mit dem reduzierten Betrag neu erstellt. Eine noch nicht vereinnahmte Kaution wird nicht ausgezahlt; nach späterem Zahlungseingang wird eine berechtigte Rückerstattung vorgemerkt. Überweisungen werden ausschließlich über Mollie erstellt und per Webhook bzw. Statusabgleich bestätigt. Mollie versendet die Überweisungsdaten an die Account-E-Mail; PDF und XML enthalten Mollies unveränderten Verwendungszweck. Manuelle Bankbuchungen sind gesperrt. Rückzahlungen erfolgen über die ursprüngliche Mollie-Transaktion. Barzahlung bleibt als ausdrücklich erlaubte Ausnahme bestehen. Historische Bankbuchungen ohne Mollie-Transaktion können nicht nachträglich über Mollie erstattet werden.
+
+**Meine Rechnungen** und das Adminarchiv bieten eine paginierte Volltextsuche nach Nummer, Datum, Betrag, Kunde, E-Mail, Status und Artikeln. Kunden können ausschließlich eigene Belege herunterladen. Die Bestellübersicht verlinkt verfügbare Rechnungen links neben Details. Das System versendet Dokumente über den eingerichteten Systemabsender an den Kunden. Es gibt keinen separaten Testempfänger für Rechnungen mehr. Der Hintergrundworker wiederholt vorübergehend fehlgeschlagene Ausstellungen. Änderungen an Stammdaten verändern keine alten PDFs.
+
+Die automatische ursprüngliche Mietrechnung wird bei Überweisung nach Freigabe durch den Admin und bei anderen Zahlungsarten nach Zahlungseingang ausgestellt. Bestehende Aufträge ohne Rechnungsvormerkung werden nicht rückwirkend fakturiert. Historische externe Rechnungs-PDFs bleiben zur Vermeidung von Doppelrechnungen archiviert und werden nicht mehr extern synchronisiert. Erweiterungen und Rückgabeforderungen behalten ihre bisherigen Belege. Neue Rechnungen und Rechnungskorrekturen werden als strukturierte UBL-2.1-XML nach EN 16931 sowie als PDF-Lesefassung erstellt und gemeinsam per E-Mail versandt. XML und PDF weisen dieselbe Miete mit 19 % Umsatzsteuer aus. Die Kaution ist keine steuerpflichtige Mietleistung; die gemeinsame Zahlungsanforderung steht gesondert im PDF und im XML-Hinweis. Das Format ist kein ZUGFeRD-Container und keine XRechnung-CIUS. Historische Originale bleiben unverändert.

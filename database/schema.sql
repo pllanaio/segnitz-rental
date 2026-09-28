@@ -33,6 +33,10 @@ CREATE TABLE users (
     customer_no VARCHAR(30) NULL,
     email_verified TINYINT(1) NOT NULL DEFAULT 0,
     auth_version INT UNSIGNED NOT NULL DEFAULT 1,
+    pending_email VARCHAR(255) NULL,
+    email_change_hash CHAR(64) NULL,
+    email_change_expires DATETIME NULL,
+    email_change_attempts INT NOT NULL DEFAULT 0,
     verification_token VARCHAR(128) NULL,
     verification_expires DATETIME NULL,
     reset_token VARCHAR(255) NULL,
@@ -174,6 +178,7 @@ CREATE TABLE rental_cart_items (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE rental_orders (
+    invoice_combined_payment TINYINT NOT NULL DEFAULT 0,
     id INT NOT NULL AUTO_INCREMENT,
     order_no VARCHAR(50) NULL,
     cart_id INT NULL,
@@ -357,6 +362,7 @@ CREATE TABLE rental_order_payments (
     mollie_mandate_id VARCHAR(255) NULL,
     sequence_type VARCHAR(50) NULL,
     external_operation_key VARCHAR(191) NULL,
+    pos_terminal_id VARCHAR(80) NULL,
     paid_at DATETIME NULL,
     recorded_by_user_id INT NULL,
     note TEXT NULL,
@@ -377,7 +383,7 @@ CREATE TABLE rental_order_payments (
         REFERENCES users (id) ON DELETE SET NULL,
     CONSTRAINT chk_rental_order_payments_lifecycle CHECK (
         payment_type IN (
-            'initial_payment', 'rental', 'deposit', 'rental_adjustment',
+            'invoice_payment', 'initial_payment', 'rental', 'deposit', 'rental_adjustment',
             'return_additional_charge', 'deposit_refund',
             'order_cancellation_refund', 'duplicate_payment_refund',
             'chargeback', 'refund_record'
@@ -543,3 +549,61 @@ CREATE TABLE discount_codes (
     CONSTRAINT chk_discount_percent CHECK (percent > 0 AND percent <= 100),
     CONSTRAINT chk_discount_dates CHECK (valid_from IS NULL OR valid_until IS NULL OR valid_until >= valid_from)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE pos_terminals (
+    terminal_id VARCHAR(80) NOT NULL,
+    mode VARCHAR(8) NOT NULL,
+    label VARCHAR(120) NOT NULL DEFAULT '',
+    location VARCHAR(160) NOT NULL DEFAULT '',
+    enabled TINYINT(1) NOT NULL DEFAULT 1,
+    revision INT UNSIGNED NOT NULL DEFAULT 1,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (terminal_id, mode)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE rental_invoices (
+ id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+ order_id INT NOT NULL,
+ mode VARCHAR(8) NOT NULL,
+ operation_key CHAR(36) NOT NULL,
+ provider_id VARCHAR(100) NULL,
+ invoice_number VARCHAR(100) NULL,
+ status VARCHAR(40) NOT NULL DEFAULT 'queued',
+ amount DECIMAL(12,2) NOT NULL,
+ request_json JSON NULL,
+ provider_json JSON NULL,
+ pdf_data LONGBLOB NULL,
+ due_at DATETIME NULL,
+ last_error VARCHAR(500) NULL,
+ next_attempt_at DATETIME NULL,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ UNIQUE KEY uq_invoice_order (order_id),
+ UNIQUE KEY uq_invoice_provider (provider_id),
+ FOREIGN KEY (order_id) REFERENCES rental_orders(id)
+);
+
+CREATE TABLE billing_settings (
+ id TINYINT PRIMARY KEY, settings_json JSON NOT NULL, revision INT NOT NULL DEFAULT 1
+);
+CREATE TABLE billing_sequences (
+ series VARCHAR(30) PRIMARY KEY, next_number BIGINT UNSIGNED NOT NULL
+);
+CREATE TABLE billing_documents (
+ xml_data LONGBLOB NULL, xml_sha256 CHAR(64) NULL,
+ id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+ order_id INT NOT NULL,
+ invoice_id BIGINT UNSIGNED NOT NULL,
+ kind VARCHAR(30) NOT NULL,
+ operation_key VARCHAR(160) NOT NULL UNIQUE,
+ document_number VARCHAR(80) NOT NULL UNIQUE,
+ original_document_id BIGINT UNSIGNED NULL,
+ order_item_id INT NULL,
+ gross_cents BIGINT NOT NULL,
+ snapshot_json JSON NOT NULL,
+ pdf_data LONGBLOB NOT NULL,
+ pdf_sha256 CHAR(64) NOT NULL,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ FOREIGN KEY (order_id) REFERENCES rental_orders(id),
+ FOREIGN KEY (invoice_id) REFERENCES rental_invoices(id),
+ FOREIGN KEY (original_document_id) REFERENCES billing_documents(id)
+);

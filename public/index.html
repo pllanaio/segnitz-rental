@@ -5,12 +5,12 @@
     <meta content="width=device-width, initial-scale=1" name="viewport">
     <title>Segnitz Rental</title>
     <!-- CSS -->
-    <link rel="stylesheet" href="css/bootstrap.min.css">
-    <link rel="stylesheet" href="css/style.css?v=2f69bf2df939">
-    <link rel="stylesheet" href="css/bootstrap-icons-1.11.3/font/bootstrap-icons.min.css">
-    <link rel="stylesheet" href="/vendor/flatpickr/4.6.13/flatpickr.min.css">
+    <link rel="stylesheet" href="css/bootstrap.min.css?v=5cba8daeac92">
+    <link rel="stylesheet" href="css/style.css?v=de11a88e5692">
+    <link rel="stylesheet" href="css/bootstrap-icons-1.11.3/font/bootstrap-icons.min.css?v=f643d6fe7e67">
+    <link rel="stylesheet" href="/vendor/flatpickr/4.6.13/flatpickr.min.css?v=1b34a42552c9">
     <!-- FONT -->
-    <link rel="stylesheet" href="css/fonts.css">
+    <link rel="stylesheet" href="css/fonts.css?v=4c58b1928a08">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
@@ -97,9 +97,10 @@
                         <div id="steps-container">
                             <div class="step d-block">
                                 <div class="d-flex justify-content-end align-items-center mb-3 flex-wrap gap-3">
-                                    <div class="d-flex align-items-center gap-2 ms-auto">
+                                    <div class="d-flex align-items-center flex-wrap gap-2 ms-auto">
+                                        <select id="productKindFilter" class="form-select w-auto" aria-label="Artikelart filtern" form="productSearchForm"><option value="">Alle Artikelarten</option></select>
                                         <input type="search" id="productSearchInput" class="form-control"
-                                            placeholder="Produkt suchen..." form="productSearchForm">
+                                            aria-label="Produkte und Artikelmerkmale suchen" placeholder="Produkt, Marke, Farbe, Leistung …" form="productSearchForm">
 
                                         <button type="button" class="btn btn-outline-primary position-relative"
                                             data-bs-toggle="modal" data-bs-target="#cartModal"
@@ -367,7 +368,7 @@
                                                         </div>
                                                     </div>
                                                 </label>
-                                            </div>
+                                                </div>
 
                                         </div>
                                     </div>
@@ -416,22 +417,22 @@
         <div class="preloader-section section-right"></div>
     </div>
     <!-- Flatpickr -->
-    <script src="/vendor/flatpickr/4.6.13/flatpickr.min.js"></script>
-    <script src="/vendor/flatpickr/4.6.13/de.js"></script>
+    <script src="/vendor/flatpickr/4.6.13/flatpickr.min.js?v=1eeab1cb7794"></script>
+    <script src="/vendor/flatpickr/4.6.13/de.js?v=8bcf8bfb7d68"></script>
     <!--Bootstrap-->
-    <script type="text/javascript" src="js/bootstrap.bundle.min.js"></script>
-    <script type="text/javascript" src="js/csrf.js"></script>
-    <script type="text/javascript" src="js/safe_html.js"></script>
-    <script type="text/javascript" src="js/date_utils.js"></script>
+    <script type="text/javascript" src="js/bootstrap.bundle.min.js?v=8dbd5da92392"></script>
+    <script type="text/javascript" src="js/csrf.js?v=bc722e406510"></script>
+    <script type="text/javascript" src="js/safe_html.js?v=cdeeb1a19545"></script>
+    <script type="text/javascript" src="js/date_utils.js?v=dddc33b378d5"></script>
     <!-- Javascript to handle Alerts -->
     <script type="text/javascript" src="js/alerts.js?v=e22b72864f7d"></script>
     <!-- General Functionalities -->
-    <script type="text/javascript" src="js/frontend_config.js?v=5b729f93bfee"></script>
+    <script type="text/javascript" src="js/frontend_config.js?v=1308391a722f"></script>
     <!--Signature-->
-    <script type="text/javascript" src="js/signature_pad.js"></script>
-    <script type="text/javascript" src="js/signature_handler.js"></script>
+    <script type="text/javascript" src="js/signature_pad.js?v=c479b113bbd3"></script>
+    <script type="text/javascript" src="js/signature_handler.js?v=2eb07a0bc2ef"></script>
     <!--HTML2json-->
-    <script type="text/javascript" src="js/html2json.js"></script>
+    <script type="text/javascript" src="js/html2json.js?v=23702db4e52c"></script>
 
     <!-- 👉 HIER DAS MODAL EINFÜGEN -->
     <div class="modal fade" id="productDetailsModal" tabindex="-1" aria-hidden="true">

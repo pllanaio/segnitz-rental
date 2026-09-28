@@ -661,9 +661,69 @@ const migrations = [
             await ensureColumn(connection, 'rental_orders', 'discount_amount', 'DECIMAL(10,2) NOT NULL DEFAULT 0.00');
             await ensureColumn(connection, 'rental_order_items', 'discount_amount', 'DECIMAL(10,2) NOT NULL DEFAULT 0.00');
         }
+    },
+    {
+        version: '20260928_11_pos_terminals',
+        checksumVersion: 1,
+        checksumSource: fs.readFileSync(path.join(__dirname, '20260928_pos_terminals.sql'), 'utf8') + ' payment terminal reference v1',
+        checksumDependencies: [readSqlStatements, removeSqlComments, quoteIdentifier, columnExists, ensureColumn],
+        async up(connection) {
+            for (const statement of readSqlStatements(path.join(__dirname, '20260928_pos_terminals.sql'))) {
+                await connection.query(removeSqlComments(statement).replace(/^CREATE TABLE /, 'CREATE TABLE IF NOT EXISTS '));
+            }
+            await ensureColumn(connection, 'rental_order_payments', 'pos_terminal_id', 'VARCHAR(80) NULL');
+        }
+    },
+    {
+        version: '20260928_12_email_change', checksumVersion: 1,
+        checksumSource: 'verified email change v1',
+        checksumDependencies: [readSqlStatements, removeSqlComments, quoteIdentifier, columnExists, ensureColumn],
+        async up(connection) {
+            await ensureColumn(connection, 'users', 'pending_email', 'VARCHAR(255) NULL');
+            await ensureColumn(connection, 'users', 'email_change_hash', 'CHAR(64) NULL');
+            await ensureColumn(connection, 'users', 'email_change_expires', 'DATETIME NULL');
+            await ensureColumn(connection, 'users', 'email_change_attempts', 'INT NOT NULL DEFAULT 0');
+        }
+    },
+    {
+        version: '20260928_13_invoice_settings', checksumVersion: 1,
+        checksumSource: fs.readFileSync(path.join(__dirname, '20260928_invoice_settings.sql'), 'utf8'),
+        checksumDependencies: [readSqlStatements, removeSqlComments],
+        async up(connection) {
+            for (const statement of readSqlStatements(path.join(__dirname, '20260928_invoice_settings.sql'))) {
+                await connection.query(removeSqlComments(statement));
+            }
+        }
+    },
+    {
+        version: '20260928_14_rental_invoices', checksumVersion: 1,
+        checksumSource: fs.readFileSync(path.join(__dirname, '20260928_rental_invoices.sql'), 'utf8'),
+        checksumDependencies: [readSqlStatements, removeSqlComments],
+        async up(connection) {
+            for (const statement of readSqlStatements(path.join(__dirname, '20260928_rental_invoices.sql'))) {
+                await connection.query(removeSqlComments(statement).replace(/^CREATE TABLE /, 'CREATE TABLE IF NOT EXISTS '));
+            }
+        }
+    },
+    {
+        version: '20260928_15_local_accounting', checksumVersion: 1,
+        checksumSource: fs.readFileSync(path.join(__dirname, '20260928_local_accounting.sql'), 'utf8'),
+        checksumDependencies: [readSqlStatements, removeSqlComments],
+        async up(connection) {
+            for (const statement of readSqlStatements(path.join(__dirname, '20260928_local_accounting.sql'))) await connection.query(removeSqlComments(statement));
+            if(await constraintExists(connection,'rental_order_payments','chk_rental_order_payments_lifecycle'))await connection.query('ALTER TABLE rental_order_payments DROP CHECK chk_rental_order_payments_lifecycle');
+            await connection.query(`ALTER TABLE rental_order_payments ADD CONSTRAINT chk_rental_order_payments_lifecycle CHECK (payment_type IN ('invoice_payment','initial_payment','rental','deposit','rental_adjustment','return_additional_charge','deposit_refund','order_cancellation_refund','duplicate_payment_refund','chargeback','refund_record') AND payment_status IN ('pending','open','authorized','paid','failed','cancelled','expired','charged_back','offset','replaced','refunded'))`);
+
+        }
+    },
+    {version:'20260928_16_combined_invoices',checksumVersion:1,checksumDependencies:[readSqlStatements,removeSqlComments,columnExists],
+     checksumSource:fs.readFileSync(path.join(__dirname,'20260928_combined_invoices.sql'),'utf8'),
+     async up(connection){
+      if(!await columnExists(connection,'rental_orders','invoice_combined_payment'))await connection.query('ALTER TABLE rental_orders ADD COLUMN invoice_combined_payment TINYINT NOT NULL DEFAULT 0');
+      if(!await columnExists(connection,'billing_documents','xml_data'))await connection.query('ALTER TABLE billing_documents ADD COLUMN xml_data LONGBLOB NULL, ADD COLUMN xml_sha256 CHAR(64) NULL');
+     }
     }
 ];
-
 module.exports = {
     columnExists,
     constraintExists,

@@ -7,10 +7,10 @@
     <title>Segnitz Rental - Mein Bereich</title>
 
     <!-- CSS -->
-    <link rel="stylesheet" href="css/bootstrap.min.css">
-    <link rel="stylesheet" href="css/style.css?v=2f69bf2df939">
-    <link rel="stylesheet" href="css/bootstrap-icons-1.11.3/font/bootstrap-icons.min.css">
-    <link rel="stylesheet" href="css/fonts.css">
+    <link rel="stylesheet" href="css/bootstrap.min.css?v=5cba8daeac92">
+    <link rel="stylesheet" href="css/style.css?v=de11a88e5692">
+    <link rel="stylesheet" href="css/bootstrap-icons-1.11.3/font/bootstrap-icons.min.css?v=f643d6fe7e67">
+    <link rel="stylesheet" href="css/fonts.css?v=4c58b1928a08">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
@@ -24,7 +24,7 @@
     <meta name="theme-color" content="#041C40">
 </head>
 
-<body>
+<body class="profile-page">
 
     <div id="globalAlertContainer" class="position-fixed top-0 start-50 translate-middle-x mt-3"
         style="z-index: 3000; width: 90%; max-width: 520px;"></div>
@@ -50,6 +50,7 @@
                         <i class="bi bi-receipt"></i>
                         Meine Bestellungen
                     </button>
+                    <button class="btn btn-outline-light text-start mb-2" id="nav-invoices" data-profile-view="invoices"><i class="bi bi-file-earmark-pdf"></i> Meine Rechnungen</button>
                 </nav>
 
                 <a href="/index.html">
@@ -68,11 +69,11 @@
 
             <!-- CONTENT -->
             <main class="col-12 col-md-9 col-xl-10 p-4 p-lg-5">
-                <div id="qbox-container_form">
+                <div id="qbox-container_form" class="w-100">
 
                     <!-- MEINE DATEN -->
                     <div id="profileView">
-                        <h4 class="mb-4">Meine Daten</h4>
+                        <h2 class="mb-4">Meine Daten</h2>
 
                         <div id="profileError" class="alert alert-danger d-none"></div>
 
@@ -141,6 +142,20 @@
 
                                 <hr class="my-4">
 
+                                <h5>E-Mail-Adresse ändern</h5>
+                                <p>Die neue Adresse gilt erst nach Bestätigung. Sie wird danach auch zur Anmeldung und für Ihre Bestellungen verwendet.</p>
+                                <form id="emailChangeForm" class="row g-3">
+                                    <div class="col-12 col-lg-6"><label for="newEmail" class="form-label">Neue E-Mail-Adresse</label><input id="newEmail" type="email" autocomplete="email" maxlength="255" class="form-control" required></div>
+                                    <div class="col-12 col-lg-6"><label for="emailChangePassword" class="form-label">Aktuelles Passwort</label><input id="emailChangePassword" type="password" autocomplete="current-password" class="form-control" required></div>
+                                    <div class="col-12"><button class="btn btn-primary" type="submit">Bestätigungscode anfordern</button></div>
+                                </form>
+                                <form id="emailConfirmForm" class="mt-3 d-none">
+                                    <label for="emailChangeCode" class="form-label">Bestätigungscode aus der neuen Mail</label>
+                                    <input id="emailChangeCode" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" class="form-control mb-3" required>
+                                    <button class="btn btn-primary" type="submit">E-Mail-Adresse bestätigen</button>
+                                </form>
+                                <div id="emailChangeMessage" class="mt-3" role="status"></div>
+                                <hr class="my-4">
                                 <h5>Passwort ändern</h5>
 
                                 <form id="passwordForm">
@@ -174,8 +189,9 @@
                     </div>
 
                     <!-- BESTELLUNGEN -->
+                    <div id="invoicesView" class="d-none"><h2>Meine Rechnungen</h2><p>Ihre Rechnungen und Rechnungskorrekturen als PDF und E-Rechnung.</p><div id="customerInvoices" aria-live="polite"></div></div>
                     <div id="ordersView" class="d-none">
-                        <h4 class="mb-4">Meine Bestellungen</h4>
+                        <h2 class="mb-4">Meine Bestellungen</h2>
                         <div class="card mb-3">
                             <div class="card-body">
                                 <div class="row g-2">
@@ -267,11 +283,12 @@
         </div>
     </div>
 
-    <script src="js/bootstrap.bundle.min.js"></script>
-    <script src="js/csrf.js"></script>
-    <script src="js/safe_html.js"></script>
+    <script src="js/bootstrap.bundle.min.js?v=8dbd5da92392"></script>
+    <script src="js/csrf.js?v=bc722e406510"></script>
+    <script src="js/safe_html.js?v=cdeeb1a19545"></script>
     <script src="js/alerts.js?v=e22b72864f7d"></script>
-    <script src="js/profile_config.js?v=ece53fe1a7bc"></script>
+    <script src="js/invoice_archive.js?v=48654ea2f10d"></script>
+    <script src="js/profile_config.js?v=0302be4e2e84"></script>
 
 </body>
 

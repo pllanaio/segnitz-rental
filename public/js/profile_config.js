@@ -171,6 +171,7 @@ function populateMyOrderFilters() {
         returned_late_damaged: 'Verspätet und beschädigt', not_required: 'Nicht erforderlich'
     });
     setMyOrderSelectOptions('myOrderPaymentStatusFilter', myOrderFilterOptions.paymentStatuses || [], {
+        refund_pending: 'Erstattung ausstehend',
         unpaid: 'Unbezahlt', pending: 'Ausstehend', open: 'Offen', authorized: 'Autorisiert',
         paid: 'Bezahlt', failed: 'Fehlgeschlagen', refunded: 'Erstattet',
         cancelled: 'Abgebrochen', expired: 'Abgelaufen'
@@ -249,6 +250,7 @@ function renderMyOrders() {
                 </div>
 
                 <div class="d-flex gap-2 flex-wrap justify-content-end">
+                    ${order.hasInvoice?`<a class="btn btn-outline-primary btn-sm" href="/my-orders/${Number(order.id)}/invoice/pdf">Rechnung</a>`:''}
                     <button type="button" class="btn btn-outline-primary btn-sm"
                         data-profile-action="open-order-details" data-order-id="${order.id}">
                         Details anzeigen
@@ -1034,7 +1036,7 @@ function getPaymentBadge(status) {
         cancelled: 'Storniert',
         expired: 'Abgelaufen',
         refunded: 'Erstattet',
-        refund_pending: 'Erstattung läuft',
+        refund_pending: 'Erstattung ausstehend',
         refund_failed: 'Erstattung fehlgeschlagen',
         charged_back: 'Rückbelastet'
     };
@@ -1128,7 +1130,7 @@ function getReturnCaseBadge(status, orderStatus = null) {
         partial: 'Teilrückgabe offen',
         payment_pending: 'Nachzahlung offen',
         payment_failed: 'Nachzahlung fehlgeschlagen',
-        refund_pending: 'Erstattung offen',
+        refund_pending: 'Erstattung ausstehend',
         refund_failed: 'Erstattung fehlgeschlagen',
         payment_dispute: 'Zahlung strittig',
         closed: 'Abgeschlossen'
@@ -1140,6 +1142,9 @@ function getReturnCaseBadge(status, orderStatus = null) {
 }
 
 function switchProfileView(view) {
+    document.getElementById('invoicesView').classList.toggle('d-none',view !== 'invoices');
+    document.getElementById('nav-invoices').classList.toggle('active',view === 'invoices');
+    if(view === 'invoices')loadCustomerInvoices();
     document.getElementById('profileView').classList.add('d-none');
     document.getElementById('ordersView').classList.add('d-none');
 
@@ -1452,3 +1457,34 @@ async function cancelMyOrder(orderId, button) {
     } catch (error) { showAlert(error.message, 'danger'); }
     finally { button.disabled = false; }
 }
+
+for (const [formId, action] of [['emailChangeForm', 'request'], ['emailConfirmForm', 'confirm']]) {
+    document.getElementById(formId)?.addEventListener('submit', async event => {
+        event.preventDefault();
+        const button = event.currentTarget.querySelector('button[type="submit"]');
+        if (button.disabled) return;
+        button.disabled = true;
+        const message = document.getElementById('emailChangeMessage');
+        try {
+            const body = action === 'request' ? { email: document.getElementById('newEmail').value.trim(), password: document.getElementById('emailChangePassword').value } : { code: document.getElementById('emailChangeCode').value.trim() };
+            const response = await fetch('/my-profile/email/' + action, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.error || 'Die Änderung konnte nicht verarbeitet werden.');
+            message.className = 'alert alert-success mt-3';
+            message.textContent = result.message;
+            document.getElementById('emailChangePassword').value = '';
+            document.getElementById('emailChangeCode').value = '';
+            document.getElementById('emailConfirmForm').classList.toggle('d-none', action === 'confirm');
+            if (action === 'confirm') {
+                document.getElementById('email').value = result.email;
+                document.getElementById('newEmail').value = '';
+                document.getElementById('verified').value = 'Ja';
+            } else document.getElementById('emailChangeCode').focus();
+        } catch (error) {
+            message.className = 'alert alert-danger mt-3';
+            message.textContent = error.message;
+        } finally { button.disabled = false; }
+    });
+}
+
+if (new URLSearchParams(location.search).get('view') === 'invoices') switchProfileView('invoices');

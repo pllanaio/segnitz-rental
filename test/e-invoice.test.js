@@ -1,0 +1,13 @@
+'use strict';
+const {test}=require('node:test');const assert=require('node:assert/strict');const {renderInvoiceXml,amounts}=require('../services/eInvoice');
+const invoice={kind:'invoice',number:'RE-2026-1',orderNo:'R1',issuedAt:'2026-09-28T23:30:00Z',dueAt:'2026-10-12T23:30:00Z',issuer:{name:'A & B',address:'Straße 1',postalCode:'97070',city:'Würzburg',taxId:'DE123456789',email:'test@example.de'},buyer:{name:'<Kunde>',address:'Weg 2',postalCode:'97070',city:'Würzburg'},depositCents:30000,lines:[{description:'Bagger',grossCents:16000,vatRate:19,quantity:2}]};
+test('E-Rechnung: lokale Datumsgrenzen, XML-Escaping und Kaution außerhalb der Umsatzsteuer',()=>{const xml=renderInvoiceXml(invoice);assert.match(xml,/<cbc:IssueDate>2026-09-29/);assert.match(xml,/A &amp; B/);assert.match(xml,/&lt;Kunde&gt;/);assert.match(xml,/<cbc:TaxAmount currencyID="EUR">25.55/);assert.match(xml,/<cbc:PayableAmount currencyID="EUR">160.00/);assert.match(xml,/460.00 EUR/);});
+test('E-Rechnung: bezahlte Rechnung und positive CreditNote mit ursprünglicher Referenz',()=>{assert.match(renderInvoiceXml({...invoice,paidAt:invoice.issuedAt}),/<cbc:PayableAmount currencyID="EUR">0.00/);const credit=renderInvoiceXml({...invoice,kind:'credit',originalNumber:invoice.number,originalDate:invoice.issuedAt,lines:invoice.lines.map(l=>({...l,grossCents:-l.grossCents}))});assert.match(credit,/<CreditNote /);assert.match(credit,/<cbc:CreditNoteTypeCode>381/);assert.match(credit,/<cac:BillingReference>/);assert.match(credit,/<cbc:PayableAmount currencyID="EUR">160.00/);});
+test('E-Rechnung: centgenaue Rundung und keine unvollständige Rechnungsadresse',()=>{const totals=amounts(Array.from({length:12},(_,i)=>({grossCents:1000+i,vatRate:19})));assert.equal(totals.net+totals.tax+totals.rounding,totals.gross);assert.throws(()=>renderInvoiceXml({...invoice,buyer:{name:'X'}}),/Rechnungsanschrift/);});
+
+test('Rechnungskorrektur spiegelt auch halbe Steuer-Cents exakt',()=>{const {totals}=require('../services/invoicePdf');const positive=totals([{grossCents:59,vatRate:19}]),negative=totals([{grossCents:-59,vatRate:19}]);for(const key of ['net','tax','gross','rounding'])assert.equal(positive[key]+negative[key],0);});
+
+test('Mollie-Überweisung verwendet ausschließlich Provider-Konto und unveränderte Referenz',()=>{
+ const xml=renderInvoiceXml({...invoice,issuer:{...invoice.issuer,iban:'DEOWNACCOUNT'},bankTransfer:{bankAccount:'DEPROVIDER',transferReference:'123.456 789'}});
+ assert.ok(xml.includes('<cbc:ID>DEPROVIDER</cbc:ID>'));assert.ok(xml.includes('<cbc:PaymentID>123.456 789</cbc:PaymentID>'));assert.ok(!xml.includes('DEOWNACCOUNT'));
+});

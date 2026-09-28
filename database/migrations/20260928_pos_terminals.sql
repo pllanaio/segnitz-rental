@@ -1,0 +1,10 @@
+CREATE TABLE pos_terminals (
+    terminal_id VARCHAR(80) NOT NULL,
+    mode VARCHAR(8) NOT NULL,
+    label VARCHAR(120) NOT NULL DEFAULT '',
+    location VARCHAR(160) NOT NULL DEFAULT '',
+    enabled TINYINT(1) NOT NULL DEFAULT 1,
+    revision INT UNSIGNED NOT NULL DEFAULT 1,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (terminal_id, mode)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

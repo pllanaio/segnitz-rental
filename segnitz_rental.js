@@ -133,7 +133,8 @@ const INITIAL_MOLLIE_SOURCE_PAYMENT_TYPES = Object.freeze([
 ]);
 const ADDITIONAL_MOLLIE_SOURCE_PAYMENT_TYPES = Object.freeze([
     'rental_adjustment',
-    'return_additional_charge'
+    'return_additional_charge',
+    'invoice_payment'
 ]);
 
 function getMollieSourcePaymentTypes(paymentType) {
@@ -272,6 +273,7 @@ function parseOrderId(value) {
 }
 
 function sendTransactionFailure(res, error, fallbackMessage) {
+    if ([400,404,409,422].includes(error.statusCode)) return res.status(error.statusCode).json({error:error.message});
     if (isRetryableTransactionError(error)) {
         res.set('Retry-After', '1');
         return res.status(503).json({
@@ -650,6 +652,7 @@ function isSensitiveResponsePath(pathname) {
         pathname.startsWith('/cart/') ||
         pathname.startsWith('/my-profile') ||
         pathname.startsWith('/my-orders') ||
+        pathname.startsWith('/my-invoices') ||
         pathname.startsWith('/admin/') ||
         pathname.startsWith('/orders/') ||
         pathname.startsWith('/img/returns/');
@@ -1182,7 +1185,7 @@ app.post('/data', guestOrderLimiter, async (req, res) => {
         }
 
         const orderNo = await generateOrderNo(connection);
-        const initialOrderStatus = paymentMethod === 'cash' ? 'confirmed' : 'reserved';
+        const initialOrderStatus = paymentMethod === 'online' ? 'reserved' : 'confirmed';
         const orderSummary = buildOrderSummary(orderNo, cartItems, initialOrderStatus);
         if (req.body.coupon) {
             const coupon = await loadValidCoupon(connection, req.body.coupon.code, true);
@@ -1225,6 +1228,7 @@ app.post('/data', guestOrderLimiter, async (req, res) => {
         );
 
         const orderId = orderResult.insertId;
+        await require('./services/salesInvoices').queueInvoice(connection, orderId, orderSummary.totals.rentalTotal);
         if (orderSummary.coupon) {
             await connection.execute('UPDATE rental_orders SET coupon_code = ?, coupon_percent = ?, discount_amount = ? WHERE id = ?',
                 [orderSummary.coupon.code, orderSummary.coupon.percent, orderSummary.totals.discountAmount, orderId]);
@@ -1768,6 +1772,8 @@ app.post('/verify-email/complete', async (req, res) => {
     }
 });
 
+require('./routes/emailChange').registerEmailChange(app, { createConnection: () => mysql.createConnection(dbConfig), isValidEmail });
+
 app.get('/my-profile', async (req, res) => {
     if (!req.session.user) {
         return res.status(401).json({
@@ -2081,6 +2087,7 @@ app.get('/my-orders', async (req, res) => {
             `SELECT
                 ro.id,
                 ro.order_no,
+                EXISTS(SELECT 1 FROM rental_invoices ri WHERE ri.order_id=ro.id AND ri.pdf_data IS NOT NULL) AS hasInvoice,
                 ro.customer_email,
                 ro.customer_first_name,
                 ro.customer_last_name,
@@ -2540,7 +2547,7 @@ async function cancelOpenMolliePayments(
          AND payment_method = 'online'
          AND mollie_refund_id IS NULL
          AND payment_type IN (
-            'initial_payment', 'rental', 'deposit',
+            'invoice_payment', 'initial_payment', 'rental', 'deposit',
             'rental_adjustment', 'return_additional_charge'
          )
          AND payment_status IN ('pending', 'open', 'authorized')
@@ -2563,7 +2570,7 @@ async function cancelOpenMolliePayments(
              AND mollie_refund_id IS NULL
              AND payment_method = 'online'
              AND payment_type IN (
-                'initial_payment', 'rental', 'deposit',
+                'invoice_payment', 'initial_payment', 'rental', 'deposit',
                 'rental_adjustment', 'return_additional_charge'
              )
              AND payment_status IN ('pending', 'open', 'authorized')`,
@@ -2707,7 +2714,7 @@ async function createOnlineCancellationRefund(connection, {
          WHERE order_id = ?
          AND mollie_payment_id = ?
          AND payment_status = 'paid'
-         AND payment_type IN ('initial_payment', 'rental_adjustment')`,
+         AND (payment_type IN ('invoice_payment', 'initial_payment', 'rental_adjustment') OR (payment_type='deposit' AND EXISTS (SELECT 1 FROM rental_orders ro WHERE ro.id=rental_order_payments.order_id AND ro.payment_method='invoice' AND ro.invoice_combined_payment=0)))`,
         [order.id, paymentId]
     );
     const [refundRows] = await connection.execute(
@@ -2753,7 +2760,53 @@ async function createOnlineCancellationRefund(connection, {
     });
 }
 
+async function refundExcessInvoicePayment(connection,order,paymentId){
+    const balance=await require('./services/salesInvoices').invoiceBalance(connection,order.id);
+    const [[refunds]]=await connection.execute(`SELECT COALESCE(SUM(ABS(r.amount)),0) amount FROM rental_order_payments r WHERE r.order_id=? AND r.amount<0 AND r.payment_type IN ('order_cancellation_refund','duplicate_payment_refund','refund_record','chargeback') AND r.payment_status NOT IN ('failed','cancelled') AND EXISTS(SELECT 1 FROM rental_order_payments s WHERE s.order_id=r.order_id AND s.mollie_payment_id=r.mollie_payment_id AND s.payment_type='invoice_payment')`,[order.id]);
+    const excess=Math.max(0,balance.paidCents-Math.round(Number(refunds.amount)*100)-balance.dueCents)/100;if(excess<=0)return;
+    const [[source]]=await connection.execute("SELECT amount FROM rental_order_payments WHERE order_id=? AND mollie_payment_id=? AND payment_type='invoice_payment' AND payment_status='paid' LIMIT 1",[order.id,paymentId]);
+    const [[used]]=await connection.execute("SELECT COALESCE(SUM(ABS(amount)),0) amount FROM rental_order_payments WHERE order_id=? AND mollie_payment_id=? AND amount<0 AND payment_status NOT IN ('failed','cancelled')",[order.id,paymentId]);
+    const amount=Math.min(excess,Math.max(0,Number(source?.amount||0)-Number(used.amount)));if(amount<=0)return;
+    await persistOnlineRefundIntent(connection,{operationKey:'invoice-overpayment-'+paymentId+'-'+Math.round(Number(used.amount)*100),orderId:order.id,orderItemId:null,paymentType:'duplicate_payment_refund',paymentId,amount,description:'Überzahlung Mietrechnung '+order.order_no,metadata:{orderId:String(order.id)},note:'Überzahlung der Mietrechnung automatisch an ursprüngliches Zahlungsmittel erstattet'});
+}
+
+async function createInvoiceCancellationRefunds(connection,order,item){
+    const [[billingMode]]=await connection.execute('SELECT invoice_combined_payment FROM rental_orders WHERE id=?',[order.id]);
+    if(billingMode.invoice_combined_payment){
+        const [sources]=await connection.execute("SELECT * FROM rental_order_payments WHERE order_id=? AND payment_status='paid' AND payment_type IN ('initial_payment','invoice_payment','rental_adjustment') ORDER BY id",[order.id]);
+        const groups=new Map();
+        for(const source of sources){const key=source.payment_method+':'+(source.mollie_payment_id||'');if(!groups.has(key))groups.set(key,{source,paid:0,requested:0});const g=groups.get(key);g.paid+=Number(source.amount);if(!item)g.requested+=Number(source.amount);else if(['initial_payment','invoice_payment'].includes(source.payment_type))g.requested+=calculateRentalDays(item.rental_start,item.rental_end)*Number(item.price_per_day)-Number(item.discount_amount||0)+Number(item.deposit);else if(Number(source.order_item_id)===Number(item.id))g.requested+=Number(source.amount);}
+        for(const {source,paid,requested} of groups.values()){
+            const [[prior]]=await connection.execute("SELECT COALESCE(SUM(ABS(amount)),0) amount FROM rental_order_payments WHERE order_id=? AND payment_type IN ('order_cancellation_refund','deposit_refund','duplicate_payment_refund','refund_record','chargeback') AND payment_status NOT IN ('failed','cancelled') AND payment_method=? AND mollie_payment_id <=> ?",[order.id,source.payment_method,source.mollie_payment_id]);
+            const amount=roundMoney(Math.min(requested,Math.max(0,paid-Number(prior.amount))));if(amount<=0)continue;
+            const [[exists]]=await connection.execute("SELECT id FROM rental_order_payments WHERE order_id=? AND order_item_id <=> ? AND payment_type='order_cancellation_refund' AND payment_method=? AND mollie_payment_id <=> ? AND payment_status NOT IN ('failed','cancelled')",[order.id,item?.id||null,source.payment_method,source.mollie_payment_id]);if(exists)continue;
+            if(source.mollie_payment_id)await createOnlineCancellationRefund(connection,{order,itemId:item?.id||null,paymentId:source.mollie_payment_id,requestedAmount:amount,note:'Stornierung'});
+            else await connection.execute("INSERT INTO rental_order_payments(order_id,order_item_id,payment_type,payment_method,payment_status,amount,note) VALUES(?,?,'order_cancellation_refund',?,'pending',?,'Erstattung an ursprüngliches Zahlungsmittel')",[order.id,item?.id||null,source.payment_method,-amount]);
+        }return;
+    }
+    let rentRemaining=item?Math.round((calculateRentalDays(item.rental_start,item.rental_end)*Number(item.price_per_day)-Number(item.discount_amount||0))*100):Infinity;
+    let depositRemaining=item?Math.round(Number(item.deposit||0)*100):Infinity;
+    const [sources]=await connection.execute("SELECT * FROM rental_order_payments WHERE order_id=? AND payment_status='paid' AND payment_type IN ('invoice_payment','initial_payment','deposit','rental_adjustment') ORDER BY id",[order.id]);
+    for(const source of sources){
+        if(item&&source.payment_type==='rental_adjustment'&&Number(source.order_item_id)!==Number(item.id))continue;
+        const [[prior]]=await connection.execute("SELECT COALESCE(SUM(ABS(amount)),0) amount FROM rental_order_payments WHERE order_id=? AND payment_type IN ('order_cancellation_refund','deposit_refund','duplicate_payment_refund','refund_record','chargeback') AND payment_status NOT IN ('failed','cancelled') AND mollie_payment_id <=> ? AND payment_method=?",[order.id,source.mollie_payment_id,source.payment_method]);
+        const available=Math.max(0,Math.round((Number(source.amount)-Number(prior.amount))*100));
+        const category=source.payment_type==='deposit'?'deposit':source.payment_type==='rental_adjustment'?'extension':'rent';
+        const amount=Math.min(available,category==='deposit'?depositRemaining:category==='rent'?rentRemaining:Infinity)/100;
+        if(amount<=0)continue;
+        const [[existing]]=await connection.execute("SELECT id FROM rental_order_payments WHERE order_id=? AND order_item_id <=> ? AND payment_type='order_cancellation_refund' AND mollie_payment_id <=> ? AND payment_method=? AND payment_status NOT IN ('failed','cancelled')",[order.id,item?.id||null,source.mollie_payment_id,source.payment_method]);
+        if(existing)continue;
+        if(source.payment_method==='cash')await connection.execute("INSERT INTO rental_order_payments(order_id,order_item_id,payment_type,payment_method,payment_status,amount,note) VALUES(?,?,'order_cancellation_refund','cash','pending',?,'Kautionsauszahlung wegen Stornierung')",[order.id,item?.id||null,-amount]);
+        else if(source.payment_method==='banktransfer')await connection.execute("INSERT INTO rental_order_payments(order_id,order_item_id,payment_type,payment_method,payment_status,amount,note) VALUES(?,?,'order_cancellation_refund','banktransfer','pending',?,'Rücküberweisung an ursprüngliches Absenderkonto erforderlich')",[order.id,item?.id||null,-amount]);
+        else if(source.mollie_payment_id)await createOnlineCancellationRefund(connection,{order,itemId:item?.id||null,paymentId:source.mollie_payment_id,requestedAmount:amount,note:'Erstattung zur Rechnungskorrektur / Kautionsfreigabe'});
+        else throw Object.assign(new Error('Der ursprüngliche Zahlungsweg muss vor der Erstattung geklärt werden.'),{statusCode:409});
+        if(category==='deposit')depositRemaining-=Math.round(amount*100);if(category==='rent')rentRemaining-=Math.round(amount*100);
+    }
+}
+
 async function createCancellationRefunds(connection, order, item = null) {
+    await require('./services/salesInvoices').cancelInvoice(connection,order.id,item);
+    if(order.payment_method==='invoice') return createInvoiceCancellationRefunds(connection,order,item);
     const itemId = item?.id || null;
     let baseRefundAmount = 0;
 
@@ -2779,7 +2832,7 @@ async function createCancellationRefunds(connection, order, item = null) {
                FROM rental_order_payments
                WHERE order_id = ?
                AND payment_status = 'paid'
-               AND payment_type IN ('initial_payment', 'rental_adjustment')
+               AND (payment_type IN ('invoice_payment', 'initial_payment', 'rental_adjustment') OR (payment_type='deposit' AND EXISTS (SELECT 1 FROM rental_orders ro WHERE ro.id=rental_order_payments.order_id AND ro.payment_method='invoice' AND ro.invoice_combined_payment=0)))
                ORDER BY id ASC`,
         item ? [order.id, item.id] : [order.id]
     );
@@ -2806,7 +2859,7 @@ async function createCancellationRefunds(connection, order, item = null) {
                     WHERE order_id = ?
                     AND payment_method = 'cash'
                     AND payment_status = 'paid'
-                    AND payment_type IN ('initial_payment', 'rental_adjustment')
+                    AND (payment_type IN ('invoice_payment', 'initial_payment', 'rental_adjustment') OR (payment_type='deposit' AND EXISTS (SELECT 1 FROM rental_orders ro WHERE ro.id=rental_order_payments.order_id AND ro.payment_method='invoice' AND ro.invoice_combined_payment=0)))
                 ), 0) AS paidAmount,
                 COALESCE((
                     SELECT SUM(ABS(amount))
@@ -2960,6 +3013,22 @@ require('./routes/coupons').registerCouponRoutes(app, {
     transact: runInTransactionWithRetry, checkAdmin, limiter: adminReturnMutationLimiter, publicLimiter: guestOrderLimiter
 });
 
+const invoiceMutationLimiter = rateLimit({windowMs:60000,limit:30,standardHeaders:true,legacyHeaders:false,keyGenerator:req=>String(req.session.user),message:{error:'Zu viele Rechnungsaktionen. Bitte kurz warten.'}});
+require('./routes/invoiceSettings').registerInvoiceSettingsRoutes(app, {
+    createConnection: () => mysql.createConnection(dbConfig), checkAdmin, limiter: invoiceMutationLimiter
+});
+
+require('./routes/salesInvoices').registerSalesInvoiceRoutes(app, {
+    createConnection: () => mysql.createConnection(dbConfig), transact: runInTransactionWithRetry,
+    checkAdmin, limiter: invoiceMutationLimiter, processEffect: processExternalEffectByKey, reconcile: reconcileMolliePayment, refreshCancelled: refreshCancelledOrderPaymentStatus, refundDeposits: refundEligibleDepositsAfterPaymentsSettled, refreshReturns: refreshReturnCaseStatus
+});
+
+require('./routes/pos').registerPosRoutes(app, {
+    createConnection: () => mysql.createConnection(dbConfig),
+    transact: runInTransactionWithRetry, checkAdmin, limiter: adminReturnMutationLimiter,
+    processEffect: processExternalEffectByKey, reconcile: reconcileMolliePayment
+});
+
 app.get('/admin/orders', checkAdmin, async (req, res) => {
     let connection;
 
@@ -3006,6 +3075,7 @@ app.get('/admin/orders', checkAdmin, async (req, res) => {
             `SELECT
                 ro.id,
                 ro.order_no,
+                EXISTS(SELECT 1 FROM rental_invoices ri WHERE ri.order_id=ro.id AND ri.pdf_data IS NOT NULL) AS hasInvoice,
                 ro.customer_email,
                 ro.customer_first_name,
                 ro.customer_last_name,
@@ -3203,6 +3273,7 @@ ORDER BY id DESC`,
         payment_status AS paymentStatus,
         amount,
         mollie_payment_id AS molliePaymentId,
+        pos_terminal_id AS posTerminalId,
         checkout_url AS checkoutUrl,
         DATE_FORMAT(paid_at, '%Y-%m-%d %H:%i:%s') AS paidAt,
         note,
@@ -3241,6 +3312,7 @@ ORDER BY id DESC`,
         res.json({
             ...orders[0],
             handoverStatus: handover?.status || 'missing',
+            pickupAllowed: await require('./services/salesInvoices').pickupAllowed(connection, orders[0]),
             items: finalItems,
             returnImages: images,
             payments
@@ -3292,6 +3364,7 @@ app.put('/admin/order-items/:itemId/pickup', checkAdmin, async (req, res) => {
                 roi.order_id,
                 roi.item_status,
                 ro.order_no,
+                EXISTS(SELECT 1 FROM rental_invoices ri WHERE ri.order_id=ro.id AND ri.pdf_data IS NOT NULL) AS hasInvoice,
                 ro.customer_email,
                 ro.payment_method,
                 ro.payment_status
@@ -3310,10 +3383,10 @@ app.put('/admin/order-items/:itemId/pickup', checkAdmin, async (req, res) => {
 
         const item = items[0];
 
-        if (String(item.payment_status || '').toLowerCase() !== 'paid') {
+        if (!(await require('./services/salesInvoices').pickupAllowed(connection, {...item,id:item.order_id}))) {
             await connection.rollback();
             return res.status(409).json({
-                error: 'Der Artikel kann erst abgeholt werden, wenn Miete und Kaution vollständig bezahlt wurden.'
+                error: item.payment_method === 'invoice' ? 'Vor Abholung müssen die Kaution bezahlt und die Mietrechnung ausgestellt sein.' : 'Der Artikel kann erst abgeholt werden, wenn Miete und Kaution vollständig bezahlt wurden.'
             });
         }
 
@@ -3387,10 +3460,10 @@ app.put('/admin/orders/:id/pick-up', checkAdmin, async (req, res) => {
 
         const order = orders[0];
 
-        if (String(order.payment_status || '').toLowerCase() !== 'paid') {
+        if (!(await require('./services/salesInvoices').pickupAllowed(connection, order))) {
             await connection.rollback();
             return res.status(409).json({
-                error: 'Die Bestellung kann erst abgeholt werden, wenn Miete und Kaution vollständig bezahlt wurden.'
+                error: order.payment_method === 'invoice' ? 'Vor Abholung müssen die Kaution bezahlt und die Mietrechnung ausgestellt sein.' : 'Die Bestellung kann erst abgeholt werden, wenn Miete und Kaution vollständig bezahlt wurden.'
             });
         }
 
@@ -3400,6 +3473,9 @@ app.put('/admin/orders/:id/pick-up', checkAdmin, async (req, res) => {
                 error: 'Diese Bestellung kann nicht als abgeholt markiert werden.'
             });
         }
+
+        const [[handover]]=await connection.execute("SELECT status FROM handover_reports WHERE order_id=? AND pdf_data IS NOT NULL AND signed_at IS NOT NULL FOR UPDATE",[order.id]);
+        if(handover?.status!=='signed'){await connection.rollback();return res.status(409).json({error:'Vor der Abholung muss ein unterschriebenes und festgeschriebenes Übergabeprotokoll vorliegen.'});}
 
         const pickedUpByUserId = await getUserIdByEmail(connection, req.session.user);
 
@@ -3652,10 +3728,13 @@ FOR UPDATE`,
 
         const cancelledByUserId = await getUserIdByEmail(connection, req.session.user);
 
+        const [[invoiceMode]]=await connection.execute('SELECT invoice_combined_payment FROM rental_orders WHERE id=?',[item.order_id]);
         await cancelOpenMolliePayments(connection, item.order_id, {
-            orderItemId: item.id,
+            orderItemId: invoiceMode?.invoice_combined_payment ? null : item.id,
             reason: 'Offene Nachzahlung wegen Artikel-Storno beendet'
         });
+
+        if(invoiceMode?.invoice_combined_payment)await connection.execute("UPDATE rental_order_payments SET payment_status='cancelled' WHERE order_id=? AND payment_type='invoice_payment' AND payment_status IN ('pending','open','authorized') AND mollie_payment_id IS NULL",[item.order_id]);
 
         const cancelledBaseRentalAmount = roundMoney(
             calculateRentalDays(item.rental_start, item.rental_end) *
@@ -4861,7 +4940,7 @@ FOR UPDATE`,
             );
         }
 
-        const initialPaymentMethod = item.payment_method || null;
+        const initialPaymentMethod = await getDepositPaymentMethod(connection, item.order_id, item.payment_method);
 
         const [openBlockingPayments] = await connection.execute(
             `SELECT id
@@ -4877,8 +4956,9 @@ FOR UPDATE`,
         );
 
         const hasCurrentReturnAdditionalCharge = customerAdditionalDue > 0;
+        const [[depositReceipt]]=await connection.execute("SELECT id FROM rental_order_payments WHERE order_id=? AND payment_type IN ('deposit','initial_payment') AND payment_status='paid' LIMIT 1",[item.order_id]);
         const canRefundDepositNow =
-            openBlockingPayments.length === 0 &&
+            (!!depositReceipt||item.order_payment_status==='paid') && openBlockingPayments.length === 0 &&
             !hasCurrentReturnAdditionalCharge;
 
         if (
@@ -4910,7 +4990,7 @@ FOR UPDATE`,
          AND payment_type IN ('initial_payment', 'rental', 'deposit')
          AND payment_status = 'paid'
          AND mollie_payment_id IS NOT NULL
-         ORDER BY (mollie_payment_id = ?) DESC,
+         ORDER BY (payment_type = 'deposit') DESC, (mollie_payment_id = ?) DESC,
                   CASE WHEN payment_type = 'initial_payment' THEN 0 ELSE 1 END,
                   id ASC
          LIMIT 1`,
@@ -4944,6 +5024,8 @@ FOR UPDATE`,
                     },
                     note: 'Kautionsrückerstattung bei Mollie vorgemerkt'
                 });
+            } else if(initialPaymentMethod==='banktransfer'){
+                await connection.execute("INSERT INTO rental_order_payments(order_id,order_item_id,payment_type,payment_method,payment_status,amount,note) VALUES(?,?,'deposit_refund','banktransfer','pending',?,'Kaution an ursprüngliches Absenderkonto zurücküberweisen')",[item.order_id,req.params.itemId,-Math.abs(calculatedDepositRefundAmount)]);
             } else if (initialPaymentMethod === 'cash') {
                 await connection.execute(
                     `INSERT INTO rental_order_payments
@@ -5479,6 +5561,7 @@ app.post('/orders/:id/mollie-checkout', async (req, res) => {
         }
 
         let order = orders[0];
+        if(order.paymentMethod==='invoice') return res.status(409).json({error:'Diese Zahlungsart wird durch unser Team verwaltet. Bitte kontaktieren Sie uns.'});
 
         if (!mayAccessOrder(req, order)) {
             await connection.rollback();
@@ -6290,7 +6373,7 @@ app.post('/orders/:id/payment-status/sync', async (req, res) => {
             });
         }
         const newOrderStatus = deriveOrderStatusFromInitialPayment(lockedOrder.status, payment.status);
-        const mayFollowInitialPayment = ['reserved', 'pending_payment', 'payment_failed'].includes(
+        const mayFollowInitialPayment = ['reserved', 'pending_payment', 'payment_failed', 'picked_up'].includes(
             String(lockedOrder.status || '').toLowerCase()
         );
         let effectivePaymentStatus = publicPaymentStatus;
@@ -6420,11 +6503,21 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
         try {
             connection = await mysql.createConnection(dbConfig);
 
+            let initialPosSnapshot = null;
+            let initialPosProvider = null;
+            if (paymentType === 'initial_payment') {
+                const [[latest]] = await connection.execute("SELECT * FROM rental_order_payments WHERE order_id = ? AND payment_type = 'initial_payment' ORDER BY id DESC LIMIT 1", [orderId]);
+                if (latest?.pos_terminal_id && latest.mollie_payment_id) {
+                    initialPosSnapshot = latest;
+                    try { initialPosProvider = await getMolliePayment(latest.mollie_payment_id); }
+                    catch { return res.status(503).json({ error: 'Mollie ist nicht erreichbar. Die Kartenzahlung muss vor der Barzahlung geprüft werden.' }); }
+                }
+            }
             let additionalPaymentSnapshot = null;
             let prefetchedAdditionalMolliePayment = null;
             if (['rental_adjustment', 'return_additional_charge'].includes(paymentType) && orderItemId) {
                 const [snapshotRows] = await connection.execute(
-                    `SELECT id, amount, payment_method, mollie_payment_id, payment_status
+                    `SELECT id, amount, payment_method, mollie_payment_id, payment_status, pos_terminal_id
                      FROM rental_order_payments
                      WHERE order_id = ?
                      AND order_item_id = ?
@@ -6473,6 +6566,7 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
                 return res.status(404).json({ error: 'Bestellung nicht gefunden.' });
             }
             const order = orders[0];
+            if (order.payment_method === 'invoice' && paymentType === 'initial_payment') throw Object.assign(new Error('Bitte die separate Kautionszahlung verwenden. Die Miete wird über die Rechnung bezahlt.'), {statusCode:409});
 
             if (['cancelled', 'expired'].includes(String(order.status || '').toLowerCase())) {
                 return res.status(409).json({
@@ -6482,7 +6576,26 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
 
             const initialPaymentMethod = order.payment_method;
 
-            if (paymentType === 'initial_payment' && initialPaymentMethod !== 'cash') {
+            if (paymentType === 'initial_payment' && initialPaymentMethod !== 'cash' && initialPosSnapshot) {
+                const [[latest]] = await connection.execute("SELECT * FROM rental_order_payments WHERE order_id = ? AND payment_type = 'initial_payment' ORDER BY id DESC LIMIT 1 FOR UPDATE", [orderId]);
+                if (!latest || latest.id !== initialPosSnapshot.id || latest.mollie_payment_id !== initialPosSnapshot.mollie_payment_id ||
+                    !['failed', 'cancelled', 'expired'].includes(mapMolliePaymentStatus(initialPosProvider.status)) ||
+                    !['failed', 'cancelled', 'expired'].includes(latest.payment_status)) {
+                    await connection.rollback();
+                    return res.status(409).json({ error: 'Die Kartenzahlung ist noch offen, bereits bezahlt oder wurde geändert. Bitte zuerst den Zahlungsstatus prüfen.' });
+                }
+                const [components] = await connection.execute("SELECT payment_type, amount FROM rental_order_payments WHERE order_id = ? AND mollie_payment_id = ? AND payment_type IN ('rental', 'deposit') FOR UPDATE", [orderId, latest.mollie_payment_id]);
+                if (!components.length || components.some(row => Number(row.amount) < 0) || components.reduce((sum,row)=>sum+Math.round(Number(row.amount)*100),0) !== Math.round(Number(latest.amount)*100)) {
+                    await connection.rollback();
+                    return res.status(409).json({ error: 'Die Zahlungsaufteilung muss geprüft werden.' });
+                }
+                const [[paid]] = await connection.execute("SELECT id FROM rental_order_payments WHERE order_id = ? AND payment_type = 'initial_payment' AND payment_status = 'paid' LIMIT 1", [orderId]);
+                if (paid) { await connection.rollback(); return res.status(409).json({ error: 'Diese Bestellung wurde bereits bezahlt.' }); }
+                for (const component of components) await connection.execute("INSERT INTO rental_order_payments (order_id, payment_type, payment_method, payment_status, amount) VALUES (?, ?, 'cash', 'pending', ?)", [orderId, component.payment_type, component.amount]);
+                await connection.execute("UPDATE rental_orders SET payment_method = 'cash', payment_status = 'pending', status = 'confirmed', reserved_until = NULL, mollie_payment_id = NULL, mollie_payment_status = NULL, mollie_payment_method = NULL WHERE id = ?", [orderId]);
+                order.payment_method = 'cash';
+            }
+            if (paymentType === 'initial_payment' && order.payment_method !== 'cash') {
                 return res.status(409).json({
                     error: 'Die Initialzahlung darf nur bei Bestellungen mit Zahlung bei Abholung manuell erfasst werden.'
                 });
@@ -6595,7 +6708,7 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
 
             if (['rental_adjustment', 'return_additional_charge'].includes(paymentType) && orderItemId) {
                 const [openPayments] = await connection.execute(
-                    `SELECT id, amount, payment_method, mollie_payment_id, payment_status
+                    `SELECT id, amount, payment_method, mollie_payment_id, payment_status, pos_terminal_id
              FROM rental_order_payments
              WHERE order_id = ?
              AND order_item_id = ?
@@ -6630,6 +6743,10 @@ app.post('/admin/order-payments/manual', checkAdmin, async (req, res) => {
                     });
                 }
 
+                if (openAdditionalPayment.pos_terminal_id && (!prefetchedAdditionalMolliePayment || !['failed', 'cancelled', 'expired'].includes(mapMolliePaymentStatus(prefetchedAdditionalMolliePayment.status)))) {
+                    await connection.rollback();
+                    return res.status(409).json({ error: 'Die Terminalzahlung muss zuerst bei Mollie als beendet und unbezahlt bestätigt sein.' });
+                }
                 if (openAdditionalPayment.payment_method === 'online' && openAdditionalPayment.mollie_payment_id) {
                     if (!prefetchedAdditionalMolliePayment) {
                         await connection.rollback();
@@ -7014,7 +7131,7 @@ app.post('/admin/order-payments/manual-refund', checkAdmin, adminReturnMutationL
         }
 
         const [openRefunds] = await connection.execute(
-            `SELECT id, amount
+            `SELECT id, amount, mollie_payment_id
      FROM rental_order_payments
      WHERE order_id = ?
      AND order_item_id <=> ?
@@ -7033,6 +7150,53 @@ app.post('/admin/order-payments/manual-refund', checkAdmin, adminReturnMutationL
 
         if (openRefunds.length > 0) {
             const expectedAmount = Math.abs(Number(openRefunds[0].amount || 0));
+
+            // A cash refund record alone is not proof that money was received in cash.
+            // Check the original receipts under the order lock, including historical
+            // or incorrectly classified refund records. Extensions retain their own method.
+            const [sourcePayments] = await connection.execute(
+                `SELECT order_item_id, payment_type, payment_method, mollie_payment_id, amount
+                 FROM rental_order_payments
+                 WHERE order_id = ? AND payment_status = 'paid' AND amount > 0
+                 AND payment_type IN ('initial_payment', 'deposit', 'rental_adjustment')
+                 FOR UPDATE`,
+                [orderId]
+            );
+            const targetSources = sourcePayments.filter(source =>
+                !orderItemId || !source.order_item_id || Number(source.order_item_id) === Number(orderItemId));
+            const sources = targetSources.filter(source =>
+                paymentType === 'deposit_refund'
+                    ? (targetSources.some(p => p.payment_type === 'deposit') ? source.payment_type === 'deposit' : source.payment_type === 'initial_payment')
+                    : (['initial_payment', 'rental_adjustment'].includes(source.payment_type) || (orders[0].payment_method === 'invoice' && source.payment_type === 'deposit'))
+            );
+            const cashCapacity = sources
+                .filter(source => source.payment_method === 'cash' && !source.mollie_payment_id)
+                .reduce((sum, source) => sum + Number(source.amount), 0);
+            const hasInitialReceipt = sourcePayments.some(source => source.payment_type === 'initial_payment');
+            const totalCashCapacity = sourcePayments.filter(source =>
+                source.payment_method === 'cash' && !source.mollie_payment_id &&
+                (source.payment_type !== 'deposit' || !hasInitialReceipt || orders[0].payment_method === 'invoice')
+            ).reduce((sum, source) => sum + Number(source.amount), 0);
+            const onlineDeposit = paymentType === 'deposit_refund' && (
+                orders[0].payment_method === 'online' ||
+                sources.some(source => source.payment_method === 'online' || source.mollie_payment_id)
+            );
+            const [previousRefunds] = await connection.execute(
+                `SELECT COALESCE(SUM(ABS(amount)), 0) AS amount
+                 FROM rental_order_payments
+                 WHERE order_id = ? AND payment_method = 'cash'
+                 AND payment_type IN ('deposit_refund', 'order_cancellation_refund')
+                 AND payment_status = 'paid'`,
+                [orderId]
+            );
+            if (onlineDeposit || openRefunds[0].mollie_payment_id || !Number.isFinite(expectedAmount) || expectedAmount <= 0 ||
+                roundMoney(cashCapacity) < roundMoney(expectedAmount) ||
+                roundMoney(totalCashCapacity - Number(previousRefunds[0].amount)) < roundMoney(expectedAmount)) {
+                await connection.rollback();
+                return res.status(409).json({
+                    error: 'Rückerstattungen sind ausschließlich auf das ursprüngliche Zahlungsmittel möglich. Eine Online-Zahlung kann nicht vor Ort erstattet werden.'
+                });
+            }
 
             if (Number(amount).toFixed(2) !== expectedAmount.toFixed(2)) {
                 await connection.rollback();
@@ -7098,6 +7262,21 @@ app.post('/admin/order-payments/manual-refund', checkAdmin, adminReturnMutationL
 });
 
 
+async function getDepositPaymentMethod(connection, orderId, historicalMethod) {
+    const [sources] = await connection.execute(
+        `SELECT payment_type, payment_method, mollie_payment_id FROM rental_order_payments
+         WHERE order_id = ? AND payment_status = 'paid' AND amount > 0
+         AND payment_type IN ('initial_payment', 'deposit') FOR UPDATE`,
+        [orderId]
+    );
+    const depositSources = sources.some(source => source.payment_type === 'deposit') ? sources.filter(source => source.payment_type === 'deposit') : sources;
+    const methods = new Set(depositSources.map(source => source.mollie_payment_id ? 'online' : source.payment_method));
+    if (methods.size > 1) {
+        throw new Error('Die ursprüngliche Kautionszahlung ist nicht eindeutig. Die Zahlungsbelege müssen geprüft werden.');
+    }
+    return methods.size === 1 ? [...methods][0] : historicalMethod;
+}
+
 async function refundEligibleDepositsAfterPaymentsSettled(connection, orderId) {
     const [items] = await connection.execute(
         `SELECT
@@ -7160,7 +7339,10 @@ async function refundEligibleDepositsAfterPaymentsSettled(connection, orderId) {
             continue;
         }
 
-        if (item.payment_method === 'online') {
+        const [[depositReceipt]]=await connection.execute("SELECT id FROM rental_order_payments WHERE order_id=? AND payment_type IN ('deposit','initial_payment') AND payment_status='paid' LIMIT 1",[orderId]);
+        if(!depositReceipt&&item.order_payment_status!=='paid')continue;
+        const depositPaymentMethod = await getDepositPaymentMethod(connection, orderId, item.payment_method);
+        if (depositPaymentMethod === 'online') {
             const [payments] = await connection.execute(
                 `SELECT mollie_payment_id
                  FROM rental_order_payments
@@ -7168,7 +7350,7 @@ async function refundEligibleDepositsAfterPaymentsSettled(connection, orderId) {
                  AND payment_type IN ('initial_payment', 'rental', 'deposit')
                  AND payment_status = 'paid'
                  AND mollie_payment_id IS NOT NULL
-                 ORDER BY (mollie_payment_id = ?) DESC,
+                 ORDER BY (payment_type = 'deposit') DESC, (mollie_payment_id = ?) DESC,
                           CASE WHEN payment_type = 'initial_payment' THEN 0 ELSE 1 END,
                           id ASC
                  LIMIT 1`,
@@ -7202,7 +7384,9 @@ async function refundEligibleDepositsAfterPaymentsSettled(connection, orderId) {
                 },
                 note: 'Kautionsrückerstattung nach Zahlung aller Ausstände vorgemerkt'
             });
-        } else if (item.payment_method === 'cash') {
+        } else if (depositPaymentMethod === 'banktransfer') {
+            await connection.execute("INSERT INTO rental_order_payments(order_id,order_item_id,payment_type,payment_method,payment_status,amount,note) VALUES(?,?,'deposit_refund','banktransfer','pending',?,'Kaution an ursprüngliches Absenderkonto zurücküberweisen')",[orderId,item.id,-Math.abs(refundAmount)]);
+        } else if (depositPaymentMethod === 'cash') {
             await connection.execute(
                 `INSERT INTO rental_order_payments
                  (
@@ -7337,6 +7521,7 @@ async function reconcileMolliePayment(paymentId) {
                 rop.amount,
                 rop.mollie_payment_id,
                 ro.order_no,
+                EXISTS(SELECT 1 FROM rental_invoices ri WHERE ri.order_id=ro.id AND ri.pdf_data IS NOT NULL) AS hasInvoice,
                 ro.status AS order_status,
                 ro.payment_method AS order_payment_method,
                 roi.item_status,
@@ -7352,7 +7537,7 @@ async function reconcileMolliePayment(paymentId) {
              AND rop.mollie_refund_id IS NULL
              AND rop.payment_method = 'online'
              AND rop.payment_type IN (
-                'initial_payment', 'rental', 'deposit',
+                'invoice_payment', 'initial_payment', 'rental', 'deposit',
                 'rental_adjustment', 'return_additional_charge'
              )
              ORDER BY CASE WHEN rop.payment_type = 'initial_payment' THEN 0 ELSE 1 END,
@@ -7471,6 +7656,17 @@ async function reconcileMolliePayment(paymentId) {
             });
         }
 
+        if(paymentContext?.payment_type==='invoice_payment'&&mappedPaymentStatus==='paid'&&paymentContext.order_payment_method!=='invoice'){
+            await refundDuplicateOnlinePayment(connection,paymentContext,'Verspätete Überweisung nach Freigabe einer anderen Zahlungsart wird vollständig erstattet');
+            await connection.execute("UPDATE rental_order_payments SET payment_status='replaced' WHERE id=?",[paymentContext.paymentRecordId]);
+            await connection.commit();return;
+        }
+        if(paymentContext?.payment_type==='invoice_payment') {
+            const [[invoiceOrder]]=await connection.execute('SELECT invoice_combined_payment FROM rental_orders WHERE id=? FOR UPDATE',[paymentContext.order_id]);
+            if(invoiceOrder?.invoice_combined_payment&&mappedPaymentStatus==='paid') {
+                await connection.execute("UPDATE rental_order_payments SET payment_status='paid',payment_method='online',mollie_payment_id=?,paid_at=COALESCE(paid_at,NOW()) WHERE order_id=? AND payment_type='deposit' AND payment_status='pending' AND mollie_payment_id IS NULL",[payment.id,paymentContext.order_id]);
+            }
+        }
         if (paymentContext && mappedPaymentStatus === 'paid') {
             await refundEligibleDepositsAfterPaymentsSettled(
                 connection,
@@ -7482,6 +7678,29 @@ async function reconcileMolliePayment(paymentId) {
             await refreshReturnCaseStatus(connection, paymentContext.order_id);
         }
 
+        if (paymentContext?.payment_type === 'deposit' && mappedPaymentStatus === 'paid') {
+            const [[invoiceOrder]] = await connection.execute('SELECT * FROM rental_orders WHERE id = ? FOR UPDATE',[paymentContext.order_id]);
+            if (invoiceOrder?.payment_method === 'invoice' && !['cancelled','expired'].includes(invoiceOrder.status)) {
+                await require('./services/mailService').sendGraphMail({to:invoiceOrder.customer_email,subject:'Kaution erhalten – '+invoiceOrder.order_no,text:'Ihre separate Kautionszahlung wurde von Mollie bestätigt. Die Mietrechnung bleibt davon unabhängig.',receipt:await captureReceipt(connection,invoiceOrder.id,'order')},{connection,operationKey:'mail-deposit-online-'+payment.id});
+            }
+            if (invoiceOrder?.payment_method === 'invoice' && ['cancelled','expired'].includes(invoiceOrder.status)) {
+                await createCancellationRefunds(connection,invoiceOrder);
+                await refreshCancelledOrderPaymentStatus(connection,invoiceOrder.id);
+            }
+        }
+        if(paymentContext?.payment_type==='invoice_payment'&&mappedPaymentStatus==='paid'){
+            const [[billingOrder]]=await connection.execute('SELECT * FROM rental_orders WHERE id=? FOR UPDATE',[paymentContext.order_id]);
+            if(['cancelled','expired'].includes(billingOrder.status))await createCancellationRefunds(connection,billingOrder);
+            else {
+                await refundExcessInvoicePayment(connection,billingOrder,payment.id);
+                const balance=await require('./services/salesInvoices').invoiceBalance(connection,billingOrder.id);
+                if(billingOrder.invoice_combined_payment&&balance.openCents===0){
+                    const [others]=await connection.execute("SELECT id,mollie_payment_id FROM rental_order_payments WHERE order_id=? AND payment_type='invoice_payment' AND id<>? AND payment_status IN ('pending','open','authorized') FOR UPDATE",[billingOrder.id,paymentContext.paymentRecordId]);
+                    for(const other of others){if(other.mollie_payment_id)await enqueueMollieCancellationIntent(connection,other.mollie_payment_id);await connection.execute("UPDATE rental_order_payments SET payment_status='cancelled' WHERE id=?",[other.id]);}
+                }
+            }
+        }
+        if(paymentContext?.payment_type==='invoice_payment')await require('./services/salesInvoices').projectInvoicePaymentStatus(connection,paymentContext.order_id);
         const initialPaymentOrderId = paymentContext?.payment_type === 'initial_payment'
             ? paymentContext.order_id
             : null;
@@ -7523,7 +7742,7 @@ async function reconcileMolliePayment(paymentId) {
         }
 
         const newOrderStatus = deriveOrderStatusFromInitialPayment(order.status, payment.status);
-        const mayFollowInitialPayment = ['reserved', 'pending_payment', 'payment_failed'].includes(
+        const mayFollowInitialPayment = ['reserved', 'pending_payment', 'payment_failed', 'picked_up'].includes(
             String(order.status || '').toLowerCase()
         );
         let effectivePaymentStatus = mayFollowInitialPayment || mappedPaymentStatus === 'charged_back'
@@ -7684,6 +7903,7 @@ app.post('/webhooks/mollie', async (req, res) => {
     }
 });
 
+const invoiceWorker = require('./services/salesInvoices').startInvoiceWorker(() => mysql.createConnection(dbConfig));
 let cleanupTimer = null;
 const mollieReconciliationPoller = require('./services/mollieReconciliationPoller').startMollieReconciliationPoller(
     () => mysql.createConnection(dbConfig), reconcileMolliePayment
@@ -7707,6 +7927,7 @@ const httpServer = app.listen(port, () => {
 
 let applicationStopPromise = null;
 async function stopApplication() {
+    invoiceWorker.stop();
     if (applicationStopPromise) return applicationStopPromise;
 
     applicationStopPromise = (async () => {

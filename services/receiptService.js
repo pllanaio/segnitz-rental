@@ -12,11 +12,12 @@ const LABELS = {
     confirmed: 'Bestätigt', reserved: 'Reserviert', returned: 'Zurückgegeben', active: 'Aktiv',
     picked_up: 'Abgeholt', returned_ok: 'Ordnungsgemäß zurückgegeben', returned_late: 'Verspätet zurückgegeben',
     returned_damaged: 'Beschädigt zurückgegeben', returned_late_damaged: 'Verspätet und beschädigt',
+    invoice_payment: 'Mietrechnung', banktransfer: 'Banküberweisung',
     rental: 'Miete', deposit: 'Kaution', initial_payment: 'Miete und Kaution', rental_adjustment: 'Mietverlängerung',
     return_additional_charge: 'Rückgabe-Nachzahlung', deposit_refund: 'Kautionsrückerstattung',
     order_cancellation_refund: 'Stornoerstattung', duplicate_payment_refund: 'Erstattung Doppelzahlung',
     chargeback: 'Rückbelastung', charged_back: 'Rückbelastet', refund_record: 'Mollie-Erstattung',
-    cash: 'Zahlung vor Ort', online: 'Onlinezahlung'
+    cash: 'Zahlung vor Ort', online: 'Onlinezahlung', invoice: 'Überweisung (14 Tage)'
 };
 const label = value => LABELS[value] || value || '–';
 const iso = value => {

@@ -19,6 +19,37 @@ const {
 const PORT = Number(process.env.LIFECYCLE_TEST_PORT || 3103);
 const BASE_URL = `http://127.0.0.1:${PORT}`;
 const TEST_MOLLIE_API_KEY = 'test_abcdefghijklmnopqrstuvwxyz1234';
+
+const BILLING_SETTINGS={name:'Segnitz Rental Testbetrieb',address:'Testweg 1',postalCode:'97070',city:'Würzburg',taxId:'DE123456789',email:'info@example.de',iban:'DE89370400440532013000',bic:'',accountHolder:'',registerInfo:'',managingDirectors:''};
+async function seedBilling(){await execute('INSERT INTO billing_settings(id,settings_json) VALUES(1,?) ON DUPLICATE KEY UPDATE settings_json=VALUES(settings_json)',[JSON.stringify(BILLING_SETTINGS)]);}
+
+async function offerInvoiceTransfer(admin,orderId){
+ const base='/admin/orders/'+orderId+'/invoice';const response=await admin.request(base+'/offer-transfer',{method:'POST'});
+ if(response.ok&&(await response.clone().json()).pending){await waitForDatabaseRow("SELECT mollie_payment_id FROM rental_order_payments WHERE order_id=? AND payment_type='invoice_payment' ORDER BY id DESC LIMIT 1",[orderId],r=>!!r.mollie_payment_id,'Überweisung vorbereitet');await admin.request(base+'/sync',{method:'POST'});}
+ return response;
+}
+async function createTransferOrder(customer,admin){
+ const body={paymentMethod:'invoice',form:orderForm(TEST_OTHER_CUSTOMER.email)};
+ assert.equal((await customer.request('/data',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)})).status,400);
+ body.paymentMethod='cash';
+ const response=await customer.request('/data',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
+ assert.equal(response.status,200,await response.clone().text());
+ const order=await response.clone().json();
+ const base='/admin/orders/'+order.orderId+'/invoice';
+ assert.equal((await customer.request(base+'/offer-transfer',{method:'POST'})).status,403);
+ for(const action of ['pay','deposit','sync'])assert.equal((await customer.request('/my-orders/'+order.orderId+'/invoice/'+action,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({method:'online'})})).status,404);
+ await seedBilling();
+ const result=await offerInvoiceTransfer(admin,order.orderId);
+ assert.equal(result.status,200,await result.clone().text());
+ if(!createTransferOrder.duplicateChecked){assert.equal((await offerInvoiceTransfer(admin,order.orderId)).status,409);createTransferOrder.duplicateChecked=true;}
+ // Remove the newly generated offline transfer to reconstruct a pre-existing split-payment order.
+ await execute("DELETE FROM rental_order_payments WHERE order_id=? AND payment_type='invoice_payment'",[order.orderId]);
+ // Historical split-payment fixtures remain supported without rewriting their issued PDFs.
+ await execute('UPDATE rental_orders SET invoice_combined_payment=0 WHERE id=?',[order.orderId]);
+ await execute("UPDATE rental_order_payments SET amount=(SELECT amount FROM rental_invoices WHERE order_id=?) WHERE order_id=? AND payment_type='initial_payment' AND payment_method='invoice'",[order.orderId,order.orderId]);
+ return response;
+}
+
 let serverProcess;
 let serverOutput = '';
 
@@ -93,7 +124,7 @@ function orderForm(email) {
                 { name: 'CustomerAddress', value: 'Testweg 1' },
                 { name: 'CustomerZip', value: '97070' },
                 { name: 'CustomerCity', value: 'Wuerzburg' },
-                { name: 'Signature', value: 'data:image/png;base64,dGVzdA==' },
+                { name: 'Signature', value: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGAAAAAEAAH2FzhVAAAAAElFTkSuQmCC' },
                 { name: 'agbs', value: 'on', checked: true },
                 { name: 'dsgvo', value: 'on', checked: true }
             ]
@@ -905,7 +936,7 @@ test('kassiert Zahlung vor Ort, blockiert vorzeitige Abholung und verarbeitet R�
 
     const initialMails = await receiptMails(order.orderId);
     assert.equal(initialMails.filter(mail => mail.receipt.kind === 'order').length, 1);
-    assert.equal(initialMails[0].receipt.signature, 'data:image/png;base64,dGVzdA==');
+    assert.equal(initialMails[0].receipt.signature, 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGAAAAAEAAH2FzhVAAAAAElFTkSuQmCC');
 
     const [item] = await queryRows(
         `SELECT id FROM rental_order_items WHERE order_id = ? LIMIT 1`,
@@ -1623,6 +1654,101 @@ test('verlängert eine bezahlte Bar-Miete atomar und verrechnet offene Verlänge
     assert.deepEqual(persistedExtension, extensionMails[0], 'spätere Verrechnung darf den Verlängerungsbeleg nicht verändern');
 });
 
+test('verweigert Vor-Ort-Erstattungen für Online-Ausgangszahlungen auch bei falsch klassifizierten Erstattungen', async () => {
+    const customer = new SessionClient();
+    const admin = new SessionClient();
+    await login(customer, TEST_CUSTOMER);
+    await login(admin, TEST_ADMIN);
+    const order = await createOrder(customer, 'online', futureDate(160), futureDate(161));
+    const [item] = await queryRows('SELECT id FROM rental_order_items WHERE order_id = ?', [order.orderId]);
+    await execute("UPDATE rental_order_payments SET payment_status = 'paid' WHERE order_id = ?", [order.orderId]);
+    for (const paymentType of ['deposit_refund', 'order_cancellation_refund']) {
+        const itemId = paymentType === 'deposit_refund' ? item.id : null;
+        await execute(`INSERT INTO rental_order_payments
+            (order_id, order_item_id, payment_type, payment_method, payment_status, amount)
+            VALUES (?, ?, ?, 'cash', 'pending', -300)`, [order.orderId, itemId, paymentType]);
+        for (const orderMethod of ['online', 'cash']) {
+            await execute('UPDATE rental_orders SET payment_method = ? WHERE id = ?', [orderMethod, order.orderId]);
+            const response = await admin.request('/admin/order-payments/manual-refund', {
+                method: 'POST', headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ orderId: order.orderId, orderItemId: itemId, paymentType, amount: 300 })
+            });
+            assert.equal(response.status, 409, await response.text());
+        }
+    }
+    const refunds = await queryRows("SELECT payment_status FROM rental_order_payments WHERE order_id = ? AND amount < 0", [order.orderId]);
+    assert.equal(refunds.length, 2);
+    assert.ok(refunds.every(refund => refund.payment_status === 'pending'));
+});
+
+test('POS: Geräteverwaltung, parallele Geräte, idempotenter Start, Status und Erstattung auf die Originalzahlung', async () => {
+    const customer = new SessionClient(); const admin = new SessionClient();
+    await login(customer, TEST_CUSTOMER); await login(admin, TEST_ADMIN);
+    assert.equal((await customer.request('/admin/pos/terminals')).status, 403);
+    const list = await admin.request('/admin/pos/terminals');
+    assert.equal(list.status, 200, `${await list.clone().text()}\n${serverOutput}`);
+    const { items, mode } = await list.json();
+    assert.equal(mode, 'test'); assert.equal(items.length, 2);
+    const settings = { label: 'Abholung', location: 'Lager', enabled: false, revision: 0 };
+    const save = value => admin.request('/admin/pos/terminals/term_testone', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(value) });
+    assert.equal((await save(settings)).status, 200);
+    assert.equal((await save(settings)).status, 409);
+    const first = await createOrder(customer, 'cash', futureDate(180), futureDate(181));
+    const second = await createOrder(customer, 'cash', futureDate(183), futureDate(184));
+    const start = (orderId, terminalId = 'term_testone') => admin.request('/admin/pos/payments', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ orderId, paymentType: 'initial_payment', terminalId, amount: 0.01 }) });
+    assert.equal((await start(first.orderId)).status, 409);
+    assert.equal((await save({ ...settings, revision: 1, enabled: true })).status, 200);
+    const started = await start(first.orderId);
+    assert.equal(started.status, 202, await started.clone().text());
+    const record = await started.json();
+    const again = await start(first.orderId);
+    assert.equal(again.status, 202, await again.clone().text());
+    assert.equal((await again.json()).recordId, record.recordId);
+    assert.equal((await start(second.orderId)).status, 409);
+    const other = await start(second.orderId, 'term_testtwo');
+    assert.equal(other.status, 202, await other.clone().text());
+    await waitForDatabaseRow("SELECT e.status FROM external_effects_outbox e JOIN rental_order_payments p ON p.external_operation_key=e.operation_key WHERE p.id=?",[record.recordId],row=>row.status==='succeeded','Veröffentlichte POS-Initialzahlung');
+    const [[payment], [otherPayment]] = await Promise.all([
+        queryRows('SELECT * FROM rental_order_payments WHERE id = ?', [record.recordId]),
+        queryRows('SELECT * FROM rental_order_payments WHERE id = ?', [(await other.json()).recordId])
+    ]);
+    assert.equal(Number(payment.amount), 460, 'Betrag kommt vom Auftrag, nicht vom Browser');
+    assert.equal(payment.payment_method, 'online'); assert.notEqual(payment.mollie_payment_id, otherPayment.mollie_payment_id);
+    const sync = () => admin.request(`/admin/pos/payments/${record.recordId}/sync`, { method: 'POST' });
+    assert.ok(['pending', 'open'].includes((await (await sync()).json()).status));
+    const paidId = `tr_test_paid_pos_${first.orderId}`;
+    await execute('UPDATE rental_order_payments SET mollie_payment_id = ? WHERE mollie_payment_id = ?', [paidId, payment.mollie_payment_id]);
+    await execute('UPDATE rental_orders SET mollie_payment_id = ? WHERE id = ?', [paidId, first.orderId]);
+    const synced = await sync();
+    assert.equal(synced.status, 200, await synced.clone().text());
+    assert.equal((await synced.json()).status, 'paid');
+    assert.equal((await start(first.orderId)).status, 409);
+    const [posItem] = await queryRows('SELECT id FROM rental_order_items WHERE order_id = ?', [first.orderId]);
+    for (let extension = 0; extension < 2; extension++) {
+        await execute(`INSERT INTO rental_order_payments (order_id, order_item_id, payment_type, payment_method, payment_status, amount)
+            VALUES (?, ?, 'rental_adjustment', 'cash', 'pending', 80)`, [first.orderId, posItem.id]);
+        const response = await admin.request('/admin/pos/payments', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ orderId: first.orderId, orderItemId: posItem.id, paymentType: 'rental_adjustment', terminalId: 'term_testone' }) });
+        assert.equal(response.status, 202, await response.clone().text());
+        const additional = await response.json();
+        await waitForDatabaseRow("SELECT e.status FROM external_effects_outbox e JOIN rental_order_payments p ON p.external_operation_key=e.operation_key WHERE p.id=?",[additional.recordId],row=>row.status==='succeeded','Veröffentlichte POS-Nachzahlung');
+        await execute('UPDATE rental_order_payments SET mollie_payment_id = ? WHERE id = ?', [`tr_test_paid_pos_extension_${extension}_${first.orderId}`, additional.recordId]);
+        const confirmed = await admin.request(`/admin/pos/payments/${additional.recordId}/sync`, { method: 'POST' });
+        assert.equal(confirmed.status, 200, await confirmed.clone().text());
+        assert.equal((await confirmed.json()).status, 'paid');
+    }
+    const cancel = await customer.request(`/my-orders/${first.orderId}/cancel`, { method: 'POST' });
+    assert.equal(cancel.status, 200, await cancel.clone().text());
+    const refund = await waitForDatabaseRow("SELECT * FROM rental_order_payments WHERE order_id = ? AND payment_type = 'order_cancellation_refund'", [first.orderId], row => row.payment_status === 'paid', 'POS-Storno-Erstattung');
+    assert.equal(refund.payment_method, 'online'); assert.equal(refund.mollie_payment_id, paidId); assert.equal(Number(refund.amount), -460);
+    await execute("UPDATE rental_order_payments SET payment_status = 'failed', mollie_payment_id = NULL WHERE order_id = ?", [second.orderId]);
+    const failed = await admin.request(`/admin/pos/payments/${otherPayment.id}/sync`, { method: 'POST' });
+    assert.equal(failed.status, 200, await failed.clone().text());
+    assert.equal((await failed.json()).status, 'failed');
+    const retry = await start(second.orderId, 'term_testtwo');
+    assert.equal(retry.status, 202, await retry.clone().text());
+    assert.notEqual((await retry.json()).recordId, otherPayment.id);
+});
+
 test('erstattet eine Online-Kaution auch mit historischer Zahlung nur am Auftrag', async () => {
     const customer = new SessionClient();
     await login(customer, TEST_CUSTOMER);
@@ -1781,6 +1907,7 @@ test('erstattet eine verspätete Online-Verlängerungszahlung, wenn sie bei Rüc
         [order.orderId, item.id]
     );
 
+    await waitForDatabaseRow('SELECT mollie_payment_id FROM rental_order_payments WHERE id=?',[extensionPayment.id],row=>!!row.mollie_payment_id,'Veröffentlichter Verlängerungs-Checkout');
     const returnResponse = await admin.request(`/admin/order-items/${item.id}/return`, {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
@@ -2910,4 +3037,368 @@ test('Gutscheine: 100 Prozent ohne Kaution bestätigt eine Bestellung ohne Molli
         assert.match(mails[0].html, /keine Zahlung erforderlich/);
         assert.doesNotMatch(mails[0].html, /Onlinezahlung steht noch aus/);
     } finally { await execute('UPDATE rental_products SET deposit = ? WHERE id = ?', [TEST_PRODUCT.deposit, TEST_PRODUCT.id]); }
+});
+
+
+test('Fehlgeschlagene POS-Initialzahlung kann sicher bar kassiert werden', async () => {
+    const admin = new SessionClient(), customer = new SessionClient();
+    await login(admin, TEST_ADMIN); await login(customer, TEST_CUSTOMER);
+    const order = await createOrder(customer, 'cash', futureDate(250), futureDate(251));
+    const started = await admin.request('/admin/pos/payments', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ orderId: order.orderId, paymentType: 'initial_payment', terminalId: 'term_testone' }) });
+    assert.equal(started.status, 202, await started.text());
+    const [initial] = await queryRows("SELECT * FROM rental_order_payments WHERE order_id = ? AND payment_type = 'initial_payment' ORDER BY id DESC LIMIT 1", [order.orderId]);
+    await waitForDatabaseRow("SELECT e.status FROM external_effects_outbox e JOIN rental_order_payments p ON p.external_operation_key=e.operation_key WHERE p.id=?",[initial.id],row=>row.status==='succeeded','Veröffentlichte POS-Zahlung vor Fallback');
+    const requestCash = amount => admin.request('/admin/order-payments/manual', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ orderId: order.orderId, paymentType: 'initial_payment', amount }) });
+    for (const providerStatus of ['open', 'paid', 'failed']) {
+        const paymentId = 'tr_test_' + providerStatus + '_pos_cash_' + order.orderId;
+        await execute("UPDATE rental_order_payments SET mollie_payment_id = ?, payment_status = 'failed' WHERE order_id = ? AND pos_terminal_id IS NOT NULL", [paymentId, order.orderId]);
+        await execute("UPDATE rental_orders SET mollie_payment_id = ?, payment_status = 'failed' WHERE id = ?", [paymentId, order.orderId]);
+        if (providerStatus !== 'failed') { assert.equal((await requestCash(initial.amount)).status, 409); continue; }
+        assert.equal((await requestCash(Number(initial.amount) + 1)).status, 400);
+        const result = await requestCash(initial.amount); assert.equal(result.status, 200, await result.text());
+    }
+    const [saved] = await queryRows('SELECT payment_method, payment_status, mollie_payment_id FROM rental_orders WHERE id = ?', [order.orderId]);
+    assert.equal(saved.payment_method, 'cash'); assert.equal(saved.payment_status, 'paid'); assert.equal(saved.mollie_payment_id, null);
+    const ledger = await queryRows("SELECT payment_method, payment_status FROM rental_order_payments WHERE order_id = ? AND payment_type = 'initial_payment' ORDER BY id", [order.orderId]);
+    assert.deepEqual(ledger.map(row => [row.payment_method, row.payment_status]), [['online', 'failed'], ['cash', 'paid']]);
+    assert.equal((await requestCash(initial.amount)).status, 409);
+});
+
+test('POS-Betragslimit lehnt vor Buchung ab und lässt Barzahlung verfügbar', async () => {
+    const admin = new SessionClient(), customer = new SessionClient();
+    await login(admin, TEST_ADMIN); await login(customer, TEST_CUSTOMER);
+    const order = await createOrder(customer, 'cash', futureDate(260), futureDate(261));
+    await execute("UPDATE rental_order_payments SET amount = 24500 WHERE order_id = ? AND payment_type = 'rental'", [order.orderId]);
+    const response = await admin.request('/admin/pos/payments', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ orderId: order.orderId, paymentType: 'initial_payment', terminalId: 'term_testone' }) });
+    assert.equal(response.status, 422); assert.match((await response.json()).error, /10.000/);
+    const [saved] = await queryRows('SELECT payment_method, payment_status FROM rental_orders WHERE id = ?', [order.orderId]);
+    assert.equal(saved.payment_method, 'cash'); assert.equal(saved.payment_status, 'pending');
+    const records = await queryRows('SELECT id FROM rental_order_payments WHERE order_id = ? AND pos_terminal_id IS NOT NULL', [order.orderId]); assert.equal(records.length, 0);
+});
+
+test('Lokale Rechnungseinstellungen sind adminexklusiv und verhindern verlorene Updates', async () => {
+    const guest = new SessionClient();
+    assert.equal((await guest.request('/admin/invoice-settings')).status, 401);
+    const customer = new SessionClient(); await login(customer, TEST_CUSTOMER);
+    assert.equal((await customer.request('/admin/invoice-settings')).status, 403);
+    const admin = new SessionClient(); await login(admin, TEST_ADMIN);
+    const settings = await (await admin.request('/admin/invoice-settings')).json();
+    const save = body => admin.request('/admin/invoice-settings', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    assert.equal((await save({settings:{...BILLING_SETTINGS,email:'bad'}, revision: settings.revision})).status, 400);
+    assert.equal((await save({settings:BILLING_SETTINGS, revision: settings.revision})).status, 200);
+    assert.equal((await save({settings:BILLING_SETTINGS, revision: settings.revision})).status, 409);
+    assert.equal((await (await admin.request('/admin/invoice-settings')).json()).settings.email, 'info@example.de');
+    const { chromium } = require('playwright');
+    const browser = await chromium.launch();
+    try {
+        const context = await browser.newContext();
+        await context.addCookies([{name:'segnitz.sid',value:admin.cookie.slice('segnitz.sid='.length),url:BASE_URL}]);
+        const page = await context.newPage(); const errors=[]; page.on('pageerror', error=>errors.push(error.message));
+        for (const width of [1280,390]) {
+            await page.setViewportSize({width,height:900});
+            await page.goto(BASE_URL+'/backend.html');
+            await page.locator('#nav-invoices').click();
+            await page.locator('#invoiceSettingsSave:not([disabled])').waitFor();
+            assert.equal(await page.locator('#issuer-email').inputValue(), 'info@example.de');
+            await page.locator('#issuer-email').fill('changed@example.de');
+            await page.locator('#invoiceSettingsSave').click();
+            await page.getByText('Rechnungssteller gespeichert.',{exact:true}).waitFor();
+            await page.locator('#issuer-email').fill('info@example.de');
+            await Promise.all([page.waitForResponse(r=>r.url().endsWith('/admin/invoice-settings') && r.request().method()==='PUT'), page.locator('#invoiceSettingsSave').click()]);
+            await page.screenshot({path:'test-results/invoice-settings-'+width+'.png',fullPage:true});
+            assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
+        }
+        assert.deepEqual(errors,[]);
+    } finally { await browser.close(); }
+});
+
+
+test('Rechnungskauf trennt Miete und Kaution, prüft Archivzugriff und erlaubt keine gemischte Initialzahlung', async () => {
+    const customer=new SessionClient(); await login(customer,TEST_OTHER_CUSTOMER);
+    const admin=new SessionClient(); await login(admin,TEST_ADMIN);
+    await addCartItem(customer,futureDate(600),futureDate(601));
+    const created=await createTransferOrder(customer,admin);
+    assert.equal(created.status,200,(await created.clone().text())+serverOutput);const order=await created.json();
+    let details=await (await admin.request('/admin/orders/'+order.orderId)).json();
+    assert.equal(details.payment_method,'invoice');assert.equal(details.pickupAllowed,false);
+    assert.equal(details.payments.filter(p=>p.paymentType==='deposit'&&p.paymentStatus!=='replaced').length,1);
+    const rent=details.payments.find(p=>p.paymentType==='initial_payment');const deposit=details.payments.filter(p=>p.paymentType==='deposit').at(-1);
+    assert.equal(Number(rent.amount)+Number(deposit.amount),Number(details.total_amount));
+    const invoices=await (await customer.request('/my-invoices')).json();assert.ok(invoices.items.some(i=>i.orderId===order.orderId));
+    assert.equal((await admin.request('/my-orders/'+order.orderId+'/invoice')).status,404);
+    await seedBilling();
+    let sync=await admin.request('/admin/orders/'+order.orderId+'/invoice/sync',{method:'POST'});assert.equal(sync.status,200,await sync.clone().text());
+    const [stored]=await queryRows('SELECT * FROM rental_invoices WHERE order_id=?',[order.orderId]);
+    const payload=typeof stored.request_json==='string'?JSON.parse(stored.request_json):stored.request_json;
+    assert.equal(Math.round((Date.parse(payload.dueAt)-Date.parse(payload.issuedAt))/86400000),14);assert.equal(stored.status,'issued');
+    assert.equal(payload.lines.reduce((sum,l)=>sum+l.grossCents,0),Math.round(Number(rent.amount)*100));
+    const legacyCash=await admin.request('/admin/order-payments/manual',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({orderId:order.orderId,paymentType:'initial_payment',amount:deposit.amount})});
+    assert.equal(legacyCash.status,409);
+    assert.equal((await admin.request('/admin/pos/payments',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({orderId:order.orderId,paymentType:'initial_payment',terminalId:'term_testone'})})).status,409);
+    const cash=await admin.request('/admin/orders/'+order.orderId+'/invoice/deposit',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({method:'cash'})});assert.equal(cash.status,200,await cash.clone().text());
+    details=await (await admin.request('/admin/orders/'+order.orderId)).json();assert.equal(details.pickupAllowed,true);assert.equal(details.payment_status,'pending');
+    assert.equal((await admin.request('/admin/orders/'+order.orderId+'/pick-up',{method:'PUT'})).status,409);
+    const again=await admin.request('/admin/orders/'+order.orderId+'/invoice/deposit',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({method:'online'})});assert.equal(again.status,409);
+    const cancellation=await customer.request('/my-orders/'+order.orderId+'/cancel',{method:'POST'});assert.equal(cancellation.status,200,await cancellation.clone().text());
+    const refunds=await queryRows("SELECT amount,payment_method FROM rental_order_payments WHERE order_id=? AND payment_type='order_cancellation_refund'",[order.orderId]);
+    assert.equal(refunds.length,1);assert.equal(refunds[0].payment_method,'cash');assert.equal(Number(refunds[0].amount),-Number(deposit.amount));
+});
+
+test('Rechnungskaution online: keine doppelte Barzahlung, PDF nur für Eigentümer und richtiger Erstattungsweg', async () => {
+    const customer=new SessionClient();await login(customer,TEST_OTHER_CUSTOMER);
+    const admin=new SessionClient();await login(admin,TEST_ADMIN);
+    await addCartItem(customer,futureDate(604),futureDate(605));
+    const created=await createTransferOrder(customer,admin);
+    assert.equal(created.status,200,await created.clone().text());const order=await created.json();const base='/my-orders/'+order.orderId+'/invoice';
+    const start=await admin.request('/admin/orders/'+order.orderId+'/invoice/deposit',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({method:'online'})});
+    assert.equal(start.status,200,await start.clone().text());
+    const again=await admin.request('/admin/orders/'+order.orderId+'/invoice/deposit',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({method:'cash'})});
+    assert.equal((await again.json()).pending,true);
+    assert.equal((await queryRows("SELECT id FROM rental_order_payments WHERE order_id=? AND payment_type='deposit' AND payment_method='cash' AND payment_status='paid'",[order.orderId])).length,0);
+    await execute("UPDATE rental_order_payments SET mollie_payment_id='tr_test_paid_invoice_deposit' WHERE order_id=? AND payment_type='deposit' AND payment_method='online'",[order.orderId]);
+    await seedBilling();
+    const sync=await admin.request('/admin/orders/'+order.orderId+'/invoice/sync',{method:'POST'});assert.equal(sync.status,200,await sync.clone().text());
+    const [row]=await queryRows('SELECT id FROM rental_invoices WHERE order_id=?',[order.orderId]);
+    const PDFDocument=require('pdfkit');const pdf=await new Promise(resolve=>{const doc=new PDFDocument();const chunks=[];doc.on('data',c=>chunks.push(c));doc.on('end',()=>resolve(Buffer.concat(chunks)));doc.text('Testrechnung');doc.end();});
+    await execute('UPDATE rental_invoices SET pdf_data=? WHERE id=?',[pdf,row.id]);
+    assert.equal((await customer.request(base+'/pdf')).status,200);
+    assert.equal((await admin.request(base+'/pdf')).status,404);
+    const {chromium}=require('playwright');const browser=await chromium.launch();
+    try{const context=await browser.newContext();await context.addCookies([{name:'segnitz.sid',value:customer.cookie.slice('segnitz.sid='.length),url:BASE_URL}]);
+        const page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
+        for(const width of [1280,390]){await page.setViewportSize({width,height:900});await page.goto(BASE_URL+'/profile.html?view=invoices');await page.getByRole('heading',{name:'Meine Rechnungen',exact:true}).waitFor();await page.locator('#customerInvoices a[href^="'+base+'/documents/"][href$="/pdf"]').waitFor();assert.equal(await page.locator('#customerInvoices [data-invoice-action]').count(),0);await page.screenshot({path:'test-results/invoice-archive-'+width+'.png',fullPage:true,animations:'disabled'});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));}
+        assert.deepEqual(errors,[]);
+    }finally{await browser.close();}
+    const cancel=await customer.request('/my-orders/'+order.orderId+'/cancel',{method:'POST'});assert.equal(cancel.status,200,await cancel.clone().text());
+    const refunds=await queryRows("SELECT amount,payment_method,mollie_payment_id FROM rental_order_payments WHERE order_id=? AND payment_type='order_cancellation_refund'",[order.orderId]);
+    assert.equal(refunds.length,1);assert.equal(Number(refunds[0].amount),-300);assert.equal(refunds[0].mollie_payment_id,'tr_test_paid_invoice_deposit');assert.equal(refunds[0].payment_method,'online');
+});
+
+test('Lokale Rechnung: unveränderliches PDF, einmaliger Versand, Teilstorno und Original-Zahlungswege',async()=>{
+ const customer=new SessionClient(),admin=new SessionClient();await login(customer,TEST_OTHER_CUSTOMER);await login(admin,TEST_ADMIN);await seedBilling();
+ await addCartItem(customer,futureDate(1700),futureDate(1701));await addCartItem(customer,futureDate(1704),futureDate(1705));
+ const response=await createTransferOrder(customer,admin);assert.equal(response.status,200,await response.clone().text());const order=await response.json();
+ const base='/admin/orders/'+order.orderId+'/invoice';
+ const sync=()=>admin.request(base+'/sync',{method:'POST'});
+ let r=await sync();assert.equal(r.status,200,await r.clone().text());
+ const [original]=await queryRows('SELECT * FROM billing_documents WHERE order_id=?',[order.orderId]);assert.match(original.document_number,/^RE-/);require('fs').writeFileSync('test-results/local-invoice.pdf',original.pdf_data);
+ await sync();assert.equal((await queryRows('SELECT id FROM billing_documents WHERE order_id=?',[order.orderId])).length,1);
+ const paid=await admin.request('/admin/orders/'+order.orderId+'/invoice/pay',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({method:'online'})});assert.equal(paid.status,200,await paid.clone().text());
+ await waitForDatabaseRow("SELECT e.status FROM external_effects_outbox e JOIN rental_order_payments p ON p.external_operation_key=e.operation_key WHERE p.order_id=? AND p.payment_type='invoice_payment'",[order.orderId],r=>r.status==='succeeded','Rechnungszahlung veröffentlicht');
+ await execute("UPDATE rental_order_payments SET mollie_payment_id='tr_test_paid_rental_invoice' WHERE order_id=? AND payment_type='invoice_payment'",[order.orderId]);
+ r=await sync();assert.equal(r.status,200,await r.clone().text());
+ r=await admin.request(base+'/deposit',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({method:'cash'})});assert.equal(r.status,200,await r.clone().text());
+ await sync();
+ await execute("INSERT INTO rental_order_payments(order_id,payment_type,payment_method,payment_status,amount,mollie_payment_id) VALUES(?,'invoice_payment','online','pending',80,'tr_test_paid_invoice_overpayment')",[order.orderId]);
+ const webhook=()=>customer.request('/webhooks/mollie',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:'tr_test_paid_invoice_overpayment'})});assert.equal((await webhook()).status,200);await webhook();
+ const duplicate=await queryRows("SELECT amount FROM rental_order_payments WHERE order_id=? AND payment_type='duplicate_payment_refund' AND mollie_payment_id='tr_test_paid_invoice_overpayment'",[order.orderId]);assert.equal(duplicate.length,1);assert.equal(Number(duplicate[0].amount),-80);
+ const items=await queryRows('SELECT id FROM rental_order_items WHERE order_id=? ORDER BY id',[order.orderId]);
+ const cancel=()=>admin.request('/admin/order-items/'+items[0].id+'/cancel',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({reason:'Test Teilstorno'})});
+ r=await cancel();assert.equal(r.status,200,await r.clone().text());await cancel();
+ const docs=await queryRows('SELECT * FROM billing_documents WHERE order_id=? ORDER BY id',[order.orderId]);assert.equal(docs.length,2);assert.deepEqual(docs[0].pdf_data,original.pdf_data);assert.equal(Number(docs[1].gross_cents),-16000);require('fs').writeFileSync('test-results/local-credit.pdf',docs[1].pdf_data);
+ const refunds=await queryRows("SELECT * FROM rental_order_payments WHERE order_id=? AND payment_type='order_cancellation_refund' ORDER BY payment_method",[order.orderId]);assert.equal(refunds.length,2);assert.equal(refunds[0].payment_method,'cash');assert.equal(Number(refunds[0].amount),-300);assert.equal(refunds[1].mollie_payment_id,'tr_test_paid_rental_invoice');assert.equal(Number(refunds[1].amount),-160);
+ const stranger=new SessionClient();await login(stranger,TEST_CUSTOMER);assert.equal((await stranger.request('/my-orders/'+order.orderId+'/invoice/documents/'+docs[1].id+'/pdf')).status,404);
+ const full=await customer.request('/my-orders/'+order.orderId+'/cancel',{method:'POST'});assert.equal(full.status,200,await full.clone().text());const all=await queryRows("SELECT SUM(gross_cents) total FROM billing_documents WHERE order_id=?",[order.orderId]);assert.equal(Number(all[0].total),0);
+ const mails=await queryRows("SELECT operation_key FROM external_effects_outbox WHERE operation_key LIKE 'mail-billing-document-%' AND JSON_EXTRACT(payload_json,'$.message.to') IS NOT NULL");assert.ok(mails.length>=3);
+});
+
+test('Unbezahlte Teilstornierung reduziert Rechnung und Kaution; Bankbuchung und Rückzahlung bleiben getrennt',async()=>{
+ // Keep the real per-admin mutation limiter enabled during this burst of lifecycle tests.
+ await delay(60000);
+ const customer=new SessionClient(),admin=new SessionClient();await login(customer,TEST_OTHER_CUSTOMER);await login(admin,TEST_ADMIN);await seedBilling();
+ await addCartItem(customer,futureDate(720),futureDate(721));await addCartItem(customer,futureDate(724),futureDate(725));
+ const created=await createTransferOrder(customer,admin);assert.equal(created.status,200);const order=await created.json(),base='/admin/orders/'+order.orderId+'/invoice';
+ const sync=()=>admin.request(base+'/sync',{method:'POST'});await sync();
+ const items=await queryRows('SELECT id FROM rental_order_items WHERE order_id=? ORDER BY id',[order.orderId]);
+ const cancelled=await admin.request('/admin/order-items/'+items[0].id+'/cancel',{method:'PUT',headers:{'content-type':'application/json'},body:'{}'});assert.equal(cancelled.status,200,await cancelled.clone().text());
+ const detail=await (await admin.request(base)).json();assert.equal(detail.balance.openCents,16000);assert.equal(Number(detail.deposit.amount),300);
+ const record=()=>admin.request(base+'/bank-transfer',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({reference:'TEST-KONTOAUSZUG-1',amount:160})});assert.equal((await record()).status,409);await execute("INSERT INTO rental_order_payments(order_id,payment_type,payment_method,payment_status,amount,paid_at) VALUES(?,'invoice_payment','banktransfer','paid',160,NOW())",[order.orderId]);await sync();
+ const full=await customer.request('/my-orders/'+order.orderId+'/cancel',{method:'POST'});assert.equal(full.status,200,await full.clone().text());
+ const [refund]=await queryRows("SELECT * FROM rental_order_payments WHERE order_id=? AND payment_type='order_cancellation_refund'",[order.orderId]);assert.equal(refund.payment_method,'banktransfer');assert.equal(Number(refund.amount),-160);
+ const confirm=await admin.request(base+'/bank-transfer',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({reference:'TEST-RUECK-1',refundId:refund.id})});assert.equal(confirm.status,409);
+});
+
+
+test('Admin-Überweisung: Checkout bleibt zweigeteilt und automatische Rechnungen folgen erst der Zahlung',async()=>{
+ const customer=new SessionClient(),admin=new SessionClient();await login(customer,TEST_CUSTOMER);await login(admin,TEST_ADMIN);await seedBilling();
+ for(let n=0;n<12;n++)await createOrder(customer,'cash',futureDate(2500+n*3),futureDate(2501+n*3));
+ const cash=await createOrder(customer,'cash',futureDate(2600),futureDate(2601));
+ const online=await createOrder(customer,'online',futureDate(2610),futureDate(2611));
+ await waitForDatabaseRow('SELECT mollie_payment_id FROM rental_orders WHERE id=?',[online.orderId],r=>!!r.mollie_payment_id,'Onlinezahlung vorbereitet');
+ const blocked=await admin.request('/admin/orders/'+online.orderId+'/invoice/offer-transfer',{method:'POST'});assert.equal(blocked.status,409);
+ assert.equal((await queryRows('SELECT payment_method FROM rental_orders WHERE id=?',[online.orderId]))[0].payment_method,'online');
+ const paid=await admin.request('/admin/order-payments/manual',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({orderId:cash.orderId,paymentType:'initial_payment',amount:460})});assert.equal(paid.status,200,await paid.clone().text());
+ assert.equal((await admin.request('/admin/orders/'+cash.orderId+'/invoice/offer-transfer',{method:'POST'})).status,409);
+ const paymentId='tr_test_paid_automatic_invoice_'+online.orderId;
+ await execute('UPDATE rental_orders SET mollie_payment_id=? WHERE id=?',[paymentId,online.orderId]);await execute('UPDATE rental_order_payments SET mollie_payment_id=? WHERE order_id=?',[paymentId,online.orderId]);
+ assert.equal((await customer.request('/webhooks/mollie',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:paymentId})})).status,200);
+ const disabled=process.env.DISABLE_PERIODIC_CLEANUP;delete process.env.DISABLE_PERIODIC_CLEANUP;
+ const worker=require('../../services/salesInvoices').startInvoiceWorker(()=>require('mysql2/promise').createConnection(require('../../config/db')));process.env.DISABLE_PERIODIC_CLEANUP=disabled;
+ try{for(const order of [cash,online]){
+  await waitForDatabaseRow('SELECT id FROM billing_documents WHERE order_id=?',[order.orderId],r=>!!r,'Automatische Rechnung nach Zahlung',90000);
+  const documents=await queryRows('SELECT id,snapshot_json FROM billing_documents WHERE order_id=?',[order.orderId]);assert.equal(documents.length,1);
+  const snapshot=typeof documents[0].snapshot_json==='string'?JSON.parse(documents[0].snapshot_json):documents[0].snapshot_json;assert.ok(snapshot.paidAt);
+  assert.equal((await queryRows('SELECT id FROM external_effects_outbox WHERE operation_key=?',['mail-billing-document-'+documents[0].id])).length,1);
+ }}finally{worker.stop();}
+ const {chromium}=require('playwright');const browser=await chromium.launch();
+ try{const page=await browser.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));await page.goto(BASE_URL+'/');assert.equal(await page.locator('input[name="paymentMethod"]').count(),2);assert.deepEqual(await page.locator('input[name="paymentMethod"]').evaluateAll(es=>es.map(e=>e.value).sort()),['cash','online']);
+ await page.context().addCookies([{name:'segnitz.sid',value:admin.cookie.slice('segnitz.sid='.length),url:BASE_URL}]);await page.goto(BASE_URL+'/backend.html');
+ const [unpaid]=await queryRows("SELECT id FROM rental_orders WHERE payment_method='cash' AND payment_status='pending' AND status='confirmed' ORDER BY id DESC LIMIT 1");
+ for(const width of [1280,390]){await page.setViewportSize({width,height:900});await page.evaluate(id=>openOrderDetails(id),unpaid.id);const button=page.locator('[data-transfer-order]');await button.waitFor();await page.screenshot({path:'test-results/admin-transfer-'+width+'.png'});}
+ await page.locator('[data-transfer-order]').click();await page.locator('#confirmModalConfirmBtn').click();await page.locator('[data-invoice-action="rent-banktransfer"]').waitFor();assert.equal(await page.locator('[data-transfer-order]').count(),0);assert.deepEqual(errors,[]);
+ }finally{await browser.close();}
+});
+
+
+async function payCombinedTransfer(customer,orderId) {
+ const [payment]=await queryRows("SELECT * FROM rental_order_payments WHERE order_id=? AND payment_type='invoice_payment' ORDER BY id DESC LIMIT 1",[orderId]);
+ await waitForDatabaseRow('SELECT status FROM external_effects_outbox WHERE operation_key=?',[payment.external_operation_key],r=>r.status==='succeeded','Mollie-Überweisung erstellt');
+ const id='tr_test_paid_combined_'+payment.id;await queryRows('UPDATE rental_order_payments SET mollie_payment_id=? WHERE id=?',[id,payment.id]);
+ for(let i=0;i<2;i++){const response=await customer.request('/webhooks/mollie',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id})});assert.equal(response.status,200,await response.clone().text());}
+ return id;
+}
+
+test('Gemeinsame Rechnung: Abholung vor Zahlung, Archivsuche, XML und Kautionsrücküberweisung',async()=>{
+ const customer=new SessionClient(),admin=new SessionClient(),stranger=new SessionClient();await login(customer,TEST_CUSTOMER);await login(admin,TEST_ADMIN);await login(stranger,TEST_OTHER_CUSTOMER);await seedBilling();
+ const start=futureDate(2800),end=futureDate(2801),order=await createOrder(customer,'cash',start,end),base='/admin/orders/'+order.orderId+'/invoice';
+ const offer=await offerInvoiceTransfer(admin,order.orderId);assert.equal(offer.status,200,await offer.clone().text());
+ const detail=await (await admin.request(base)).json();assert.equal(detail.combinedPayment,true);assert.equal(detail.separateDeposit,false);assert.equal(detail.balance.openCents,46000);assert.equal(detail.pickupAllowed,true);
+ assert.equal((await admin.request(base+'/deposit',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({method:'cash'})})).status,409);
+ const [doc]=await queryRows('SELECT * FROM billing_documents WHERE order_id=?',[order.orderId]);assert.ok(doc.xml_data);assert.match(doc.xml_data.toString(),/25.55/);assert.match(doc.xml_data.toString(),/460.00/);
+ for(const q of [doc.document_number,'160,00',TEST_CUSTOMER.email,'Lifecycle-Minibagger',new Date(doc.created_at).toLocaleDateString('de-DE')]){const result=await admin.request('/admin/invoices?q='+encodeURIComponent(q+' '+doc.document_number));assert.equal(result.status,200,await result.clone().text());assert.ok((await result.json()).items.some(i=>i.id===doc.id));}
+ assert.equal((await (await stranger.request('/my-invoices?q='+doc.document_number)).json()).total,0);
+ const xmlPath='/my-orders/'+order.orderId+'/invoice/documents/'+doc.id+'/xml';assert.equal((await customer.request(xmlPath)).status,200);assert.equal((await stranger.request(xmlPath)).status,404);
+ const [item]=await queryRows('SELECT id FROM rental_order_items WHERE order_id=?',[order.orderId]);await signHandoverBeforePickup(admin,item.id);
+ assert.equal((await admin.request('/admin/order-items/'+item.id+'/pickup',{method:'PUT'})).status,200);
+ const returned=await admin.request('/admin/order-items/'+item.id+'/return',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({actualReturnDate:end,adjustedRentalStart:start,adjustedRentalEnd:end,adjustedPricePerDay:80,returnStatus:'returned_ok',isDamaged:false,damageDescription:'',isLate:false,lateDescription:'',depositDecision:'full_refund',depositDeductionPercent:0,depositDeductionReason:'',additionalChargeReason:'',additionalChargeAmount:0,additionalChargePaymentMethod:'cash'})});assert.equal(returned.status,200,await returned.clone().text());
+ assert.equal((await queryRows("SELECT id FROM rental_order_payments WHERE order_id=? AND payment_type='deposit_refund'",[order.orderId])).length,0);
+ const forbidden=await admin.request(base+'/bank-transfer',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({reference:'MANUAL',amount:460})});assert.equal(forbidden.status,409);
+ const [effect]=await queryRows("SELECT e.result_json FROM external_effects_outbox e JOIN rental_order_payments p ON p.external_operation_key=e.operation_key WHERE p.order_id=? AND p.payment_type='invoice_payment'",[order.orderId]);const result=typeof effect.result_json==='string'?JSON.parse(effect.result_json):effect.result_json;assert.equal(result.method,'banktransfer');assert.equal(result.amount.value,'460.00');assert.match(doc.xml_data.toString(),/TEST-tr_test_open/);
+ const paymentId=await payCombinedTransfer(customer,order.orderId);
+ await admin.request(base+'/sync',{method:'POST'});
+ const [refund]=await queryRows("SELECT * FROM rental_order_payments WHERE order_id=? AND payment_type='deposit_refund'",[order.orderId]);assert.equal(refund.payment_method,'online');assert.equal(refund.mollie_payment_id,paymentId);assert.equal(Number(refund.amount),-300);
+ await waitForDatabaseRow('SELECT mollie_refund_id FROM rental_order_payments WHERE id=?',[refund.id],r=>!!r.mollie_refund_id,'Mollie-Kautionsrückzahlung');
+ assert.equal((await queryRows('SELECT pdf_data FROM billing_documents WHERE id=?',[doc.id]))[0].pdf_data.equals(doc.pdf_data),true);
+ const mails=await queryRows("SELECT payload_json FROM external_effects_outbox WHERE operation_key=?",['mail-local-invoice-paid-'+doc.invoice_id]);assert.equal(mails.length,1);const payload=typeof mails[0].payload_json==='string'?JSON.parse(mails[0].payload_json):mails[0].payload_json;assert.ok(payload.message.invoiceXml);assert.ok(payload.message.invoicePdf);
+ const list=await (await customer.request('/my-orders')).json();assert.ok(list.items.some(o=>o.id===order.orderId&&o.hasInvoice));
+});
+
+
+test('Gemeinsame Rechnung: Teilstorno reduziert den Gesamtbetrag und erstattet Miete plus Kaution genau einmal',async()=>{
+ const customer=new SessionClient(),admin=new SessionClient();await login(customer,TEST_CUSTOMER);await login(admin,TEST_ADMIN);await seedBilling();
+ await addCartItem(customer,futureDate(2904),futureDate(2905));const order=await createOrder(customer,'cash',futureDate(2900),futureDate(2901));const base='/admin/orders/'+order.orderId+'/invoice';
+ assert.equal((await offerInvoiceTransfer(admin,order.orderId)).status,200);
+ const items=await queryRows('SELECT id FROM rental_order_items WHERE order_id=? ORDER BY id',[order.orderId]);
+ const cancelled=await admin.request('/admin/order-items/'+items[0].id+'/cancel',{method:'PUT',headers:{'content-type':'application/json'},body:'{}'});assert.equal(cancelled.status,200,await cancelled.clone().text());
+ assert.equal((await (await admin.request(base)).json()).balance.openCents,46000);
+ assert.equal((await queryRows("SELECT id FROM rental_order_payments WHERE order_id=? AND payment_type='order_cancellation_refund'",[order.orderId])).length,0);
+ const [old]=await queryRows("SELECT id FROM rental_order_payments WHERE order_id=? AND payment_type='invoice_payment' ORDER BY id DESC LIMIT 1",[order.orderId]);await queryRows("UPDATE rental_order_payments SET mollie_payment_id=?,payment_status='cancelled' WHERE id=?",['tr_test_canceled_partial_'+old.id,old.id]);
+ await admin.request(base+'/sync',{method:'POST'});
+ const [replacement]=await queryRows("SELECT id,amount FROM rental_order_payments WHERE order_id=? AND payment_type='invoice_payment' ORDER BY id DESC LIMIT 1",[order.orderId]);assert.notEqual(replacement.id,old.id);assert.equal(Number(replacement.amount),460);
+ await payCombinedTransfer(customer,order.orderId);
+ const cancel=()=>customer.request('/my-orders/'+order.orderId+'/cancel',{method:'POST'});const full=await cancel();assert.equal(full.status,200,await full.clone().text());await cancel();
+ const refunds=await queryRows("SELECT amount,payment_method FROM rental_order_payments WHERE order_id=? AND payment_type='order_cancellation_refund'",[order.orderId]);assert.equal(refunds.length,1);assert.equal(Number(refunds[0].amount),-460);assert.equal(refunds[0].payment_method,'online');
+ const [[sum]]=[await queryRows('SELECT SUM(gross_cents) total FROM billing_documents WHERE order_id=?',[order.orderId])];assert.equal(Number(sum.total),0);
+});
+
+test('Mollie-Überweisung: verspätete alte Zahlung nach Teilstorno erstattet nur den Überschuss und beendet Ersatzauftrag',async()=>{
+ const customer=new SessionClient(),admin=new SessionClient();await login(customer,TEST_CUSTOMER);await login(admin,TEST_ADMIN);await seedBilling();
+ await addCartItem(customer,futureDate(3004),futureDate(3005));const order=await createOrder(customer,'cash',futureDate(3000),futureDate(3001));const base='/admin/orders/'+order.orderId+'/invoice';
+ assert.equal((await offerInvoiceTransfer(admin,order.orderId)).status,200);
+ const [old]=await queryRows("SELECT * FROM rental_order_payments WHERE order_id=? AND payment_type='invoice_payment'",[order.orderId]);
+ const [item]=await queryRows('SELECT id FROM rental_order_items WHERE order_id=? ORDER BY id',[order.orderId]);
+ const cancelled=await admin.request('/admin/order-items/'+item.id+'/cancel',{method:'PUT',headers:{'content-type':'application/json'},body:'{}'});assert.equal(cancelled.status,200,await cancelled.clone().text());
+ await execute("UPDATE rental_order_payments SET mollie_payment_id=?,payment_status='cancelled' WHERE id=?",['tr_test_canceled_late_'+old.id,old.id]);await admin.request(base+'/sync',{method:'POST'});
+ const [replacement]=await queryRows("SELECT * FROM rental_order_payments WHERE order_id=? AND payment_type='invoice_payment' ORDER BY id DESC LIMIT 1",[order.orderId]);assert.notEqual(replacement.id,old.id);
+ await waitForDatabaseRow('SELECT status FROM external_effects_outbox WHERE operation_key=?',[replacement.external_operation_key],r=>r.status==='succeeded','Ersatzüberweisung');
+ const id='tr_test_paid_late_transfer_'+old.id;await execute('UPDATE rental_order_payments SET mollie_payment_id=? WHERE id=?',[id,old.id]);
+ for(let n=0;n<2;n++){const r=await customer.request('/webhooks/mollie',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id})});assert.equal(r.status,200,await r.clone().text());}
+ const refunds=await queryRows("SELECT amount,mollie_payment_id FROM rental_order_payments WHERE order_id=? AND payment_type='duplicate_payment_refund'",[order.orderId]);assert.equal(refunds.length,1);assert.equal(Number(refunds[0].amount),-460);assert.equal(refunds[0].mollie_payment_id,id);
+ assert.equal((await queryRows('SELECT payment_status FROM rental_order_payments WHERE id=?',[replacement.id]))[0].payment_status,'cancelled');
+ const cancel=await customer.request('/my-orders/'+order.orderId+'/cancel',{method:'POST'});assert.equal(cancel.status,200,await cancel.clone().text());
+ const [sum]=await queryRows("SELECT SUM(ABS(amount)) amount FROM rental_order_payments WHERE order_id=? AND amount<0 AND payment_status NOT IN ('failed','cancelled')",[order.orderId]);assert.equal(Number(sum.amount),920);
+});
+
+test('Überweisung: Mollie-Endstatus bleibt in der Bestellung erhalten und Rechnungsmail enthält Zahlungslink',async()=>{
+ const customer=new SessionClient(),admin=new SessionClient();await login(customer,TEST_CUSTOMER);await login(admin,TEST_ADMIN);await seedBilling();
+ const order=await createOrder(customer,'cash',futureDate(3100),futureDate(3101));assert.equal((await offerInvoiceTransfer(admin,order.orderId)).status,200);
+ const [invoice]=await queryRows("SELECT id FROM billing_documents WHERE order_id=? AND kind='invoice'",[order.orderId]);const [mail]=await queryRows('SELECT payload_json FROM external_effects_outbox WHERE operation_key=?',['mail-billing-document-'+invoice.id]);const payload=typeof mail.payload_json==='string'?JSON.parse(mail.payload_json):mail.payload_json;assert.ok(payload.message.paymentUrl.startsWith('https://'));assert.ok(payload.message.invoicePdf);assert.ok(payload.message.invoiceXml);
+ await execute("UPDATE rental_order_items SET item_status='returned_ok',actual_return_date=CURDATE() WHERE order_id=?",[order.orderId]);
+ for(const [remote,expected] of [['canceled','cancelled'],['failed','failed'],['expired','expired']]){
+  const id='tr_test_'+remote+'_invoice_status';await execute("UPDATE rental_order_payments SET mollie_payment_id=?,payment_status='pending' WHERE order_id=? AND payment_type='invoice_payment'",[id,order.orderId]);
+  const r=await customer.request('/webhooks/mollie',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id})});assert.equal(r.status,200,await r.clone().text());
+  assert.equal((await queryRows('SELECT payment_status,status FROM rental_orders WHERE id=?',[order.orderId]))[0].payment_status,expected);
+  assert.equal((await admin.request('/admin/orders/'+order.orderId+'/invoice/sync',{method:'POST'})).status,200);
+  const [saved]=await queryRows('SELECT payment_status,status FROM rental_orders WHERE id=?',[order.orderId]);assert.equal(saved.payment_status,expected);assert.equal(saved.status,'confirmed');
+ }
+});
+
+test('Bestelldialog: wiederholtes Öffnen und Barzahlung hinterlassen keinen grauen Hintergrund',async()=>{
+ const customer=new SessionClient(),admin=new SessionClient();await login(customer,TEST_CUSTOMER);await login(admin,TEST_ADMIN);
+ const {chromium}=require('playwright');const browser=await chromium.launch();try{
+ const page=await browser.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));await page.context().addCookies([{name:'segnitz.sid',value:admin.cookie.slice('segnitz.sid='.length),url:BASE_URL}]);await page.goto(BASE_URL+'/backend.html');await page.locator('#nav-orders').click();
+ for(const [n,width] of [1280,390].entries()){
+  await page.setViewportSize({width,height:900});const order=await createOrder(customer,'cash',futureDate(3120+n*4),futureDate(3121+n*4));
+  await page.evaluate(id=>openOrderDetails(id),order.orderId);await page.locator('#orderDetailsModal.show').waitFor();await page.evaluate(id=>openOrderDetails(id),order.orderId);
+  await page.locator('#orderDetailsModal [data-backend-action="open-manual-payment"]').first().click();await page.locator('#manualPaymentModal.show').waitFor();
+  await page.locator('#manualPaymentSubmitButton').click();await page.locator('#manualPaymentModal').waitFor({state:'hidden'});
+  await page.locator('#orderDetailsModal .modal-footer [data-bs-dismiss="modal"]').click();await page.locator('#orderDetailsModal').waitFor({state:'hidden'});
+  await page.waitForFunction(()=>!document.querySelector('.modal-backdrop')&&!document.body.classList.contains('modal-open'));
+  await page.screenshot({path:'test-results/payment-modal-closed-'+width+'.png'});
+  await page.evaluate(id=>openOrderDetails(id),order.orderId);await page.locator('#orderDetailsModal.show').waitFor();await page.locator('#orderDetailsModal .modal-footer [data-bs-dismiss="modal"]').click();await page.waitForFunction(()=>!document.querySelector('.modal-backdrop'));
+ }
+ const card=await createOrder(customer,'cash',futureDate(3150),futureDate(3151));await page.evaluate(id=>openOrderDetails(id),card.orderId);
+ await page.locator('#orderDetailsModal [data-pos-order]').first().click();await page.locator('#posPaymentStart:not([disabled])').waitFor();await page.locator('#posPaymentStart').click();
+ const payment=await waitForDatabaseRow("SELECT id,mollie_payment_id FROM rental_order_payments WHERE order_id=? AND pos_terminal_id IS NOT NULL ORDER BY id DESC LIMIT 1",[card.orderId],r=>!!r.mollie_payment_id,'POS-Zahlung angelegt');
+ const paymentId='tr_test_paid_modal_'+payment.id;await execute('UPDATE rental_order_payments SET mollie_payment_id=? WHERE order_id=? AND mollie_payment_id=?',[paymentId,card.orderId,payment.mollie_payment_id]);await execute('UPDATE rental_orders SET mollie_payment_id=? WHERE id=?',[paymentId,card.orderId]);
+ await page.locator('#posPaymentCheck').click();await page.waitForFunction(()=>document.getElementById('posPaymentStatus').textContent.includes('bestätigt'));
+ await page.locator('#posPaymentModal [data-bs-dismiss="modal"]').first().click();await page.locator('#posPaymentModal').waitFor({state:'hidden'});await page.locator('#orderDetailsModal .modal-footer [data-bs-dismiss="modal"]').click();await page.waitForFunction(()=>!document.querySelector('.modal-backdrop')&&!document.body.classList.contains('modal-open'));
+ assert.deepEqual(errors,[]);
+ }finally{await browser.close();}
+});
+
+test('Stornierte Überweisung gibt vor Rückgabe Bar, POS und neue Überweisung frei',async()=>{
+ const customer=new SessionClient(),admin=new SessionClient();await login(customer,TEST_CUSTOMER);await login(admin,TEST_ADMIN);await seedBilling();
+ for(const [n,method] of ['cash','pos','transfer'].entries()){
+  const order=await createOrder(customer,'cash',futureDate(3200+n*4),futureDate(3201+n*4));const base='/admin/orders/'+order.orderId+'/invoice';assert.equal((await offerInvoiceTransfer(admin,order.orderId)).status,200);
+  const [doc]=await queryRows('SELECT id,pdf_data FROM billing_documents WHERE order_id=?',[order.orderId]);
+  await execute("UPDATE rental_order_items SET item_status='picked_up' WHERE order_id=?",[order.orderId]);await execute("UPDATE rental_orders SET status='picked_up' WHERE id=?",[order.orderId]);
+  const [source]=await queryRows("SELECT id FROM rental_order_payments WHERE order_id=? AND payment_type='invoice_payment' ORDER BY id DESC LIMIT 1",[order.orderId]);const canceledId='tr_test_canceled_fallback_'+source.id;await execute('UPDATE rental_order_payments SET mollie_payment_id=? WHERE id=?',[canceledId,source.id]);
+  for(let k=0;k<2;k++)assert.equal((await customer.request('/webhooks/mollie',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:canceledId})})).status,200);
+  let [saved]=await queryRows('SELECT payment_method,payment_status,status FROM rental_orders WHERE id=?',[order.orderId]);assert.equal(saved.payment_method,'cash');assert.equal(saved.payment_status,'pending');assert.equal(saved.status,'picked_up');
+  const parts=await queryRows("SELECT amount FROM rental_order_payments WHERE order_id=? AND payment_type IN ('rental','deposit') AND payment_status='pending' AND payment_method='cash'",[order.orderId]);assert.equal(parts.length,2);assert.equal(parts.reduce((sum,p)=>sum+Number(p.amount),0),460);
+  if(n===0){const browser=await require('playwright').chromium.launch();try{const page=await browser.newPage();await page.context().addCookies([{name:'segnitz.sid',value:admin.cookie.slice('segnitz.sid='.length),url:BASE_URL}]);await page.goto(BASE_URL+'/backend.html');await page.evaluate(id=>openOrderDetails(id),order.orderId);await page.locator('#orderDetailsModal.show').waitFor();assert.equal(await page.locator('#orderDetailsModal [data-backend-action="open-manual-payment"]').count(),1);assert.equal(await page.locator('#orderDetailsModal [data-pos-order]').count(),1);assert.equal(await page.locator('#orderDetailsModal [data-transfer-order]').count(),1);await page.screenshot({path:'test-results/transfer-fallback-options.png'});}finally{await browser.close();}}
+  if(n===0){const lateId='tr_test_paid_canceled_transfer_'+source.id;await execute('UPDATE rental_order_payments SET mollie_payment_id=? WHERE id=?',[lateId,source.id]);for(let j=0;j<2;j++)assert.equal((await customer.request('/webhooks/mollie',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:lateId})})).status,200);const refunds=await queryRows("SELECT amount FROM rental_order_payments WHERE order_id=? AND payment_type='duplicate_payment_refund'",[order.orderId]);assert.equal(refunds.length,1);assert.equal(Number(refunds[0].amount),-460);assert.equal((await queryRows('SELECT payment_status FROM rental_orders WHERE id=?',[order.orderId]))[0].payment_status,'pending');}
+  if(method==='cash'){const r=await admin.request('/admin/order-payments/manual',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({orderId:order.orderId,paymentType:'initial_payment',amount:460})});assert.equal(r.status,200,await r.clone().text());}
+  if(method==='pos'){const r=await admin.request('/admin/pos/payments',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({orderId:order.orderId,paymentType:'initial_payment',terminalId:'term_testone'})});assert.ok([200,202].includes(r.status),await r.clone().text());const result=await r.json();await waitForDatabaseRow('SELECT mollie_payment_id FROM rental_order_payments WHERE id=?',[result.recordId],p=>!!p.mollie_payment_id,'POS nach Überweisung');const id='tr_test_paid_transfer_pos_'+order.orderId;await execute("UPDATE rental_order_payments SET mollie_payment_id=? WHERE order_id=? AND pos_terminal_id IS NOT NULL",[id,order.orderId]);await execute('UPDATE rental_orders SET mollie_payment_id=? WHERE id=?',[id,order.orderId]);assert.equal((await customer.request('/webhooks/mollie',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id})})).status,200);}
+  if(method==='transfer'){const r=await offerInvoiceTransfer(admin,order.orderId);assert.equal(r.status,200,await r.clone().text());await payCombinedTransfer(customer,order.orderId);}
+  await admin.request(base+'/sync',{method:'POST'});[saved]=await queryRows('SELECT payment_status,status FROM rental_orders WHERE id=?',[order.orderId]);assert.equal(saved.payment_status,'paid');assert.equal(saved.status,'picked_up');
+  const documents=await queryRows("SELECT id,pdf_data FROM billing_documents WHERE order_id=? AND kind='invoice'",[order.orderId]);assert.equal(documents.length,2);assert.ok(documents.find(d=>d.id===doc.id).pdf_data.equals(doc.pdf_data));const credits=await queryRows("SELECT * FROM billing_documents WHERE original_document_id=? AND kind='credit'",[doc.id]);assert.equal(credits.length,1);assert.equal(Number(credits[0].gross_cents),-16000);const archive=await (await admin.request('/admin/invoices?q='+encodeURIComponent(order.orderNo||''))).json();assert.equal(archive.items.find(d=>d.id===doc.id).status,'cancelled');
+ }
+});
+
+test('E-Mail-Wechsel verlangt Passwort und Code, erhält Bestellungen und sperrt alte Sitzungen', async () => {
+    const customer = new SessionClient(); const oldSession = new SessionClient();
+    await login(customer, TEST_CUSTOMER); await login(oldSession, TEST_CUSTOMER);
+    const order = await createOrder(customer, 'cash', futureDate(240), futureDate(241));
+    const post = (action, body) => customer.request('/my-profile/email/' + action, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    assert.equal((await post('request', { email: 'changed@example.com', password: 'wrong' })).status, 400);
+    assert.equal((await post('request', { email: TEST_OTHER_CUSTOMER.email, password: TEST_CUSTOMER.password })).status, 409);
+    const requested = await post('request', { email: 'changed@example.com', password: TEST_CUSTOMER.password });
+    assert.equal(requested.status, 200, await requested.text());
+    const [beforeUser] = await queryRows('SELECT username, pending_email FROM users WHERE username = ?', [TEST_CUSTOMER.email]);
+    assert.equal(beforeUser.pending_email, 'changed@example.com');
+    const mails = await queryRows('SELECT payload_json FROM external_effects_outbox ORDER BY id DESC');
+    const mail = mails.map(row => typeof row.payload_json === 'string' ? JSON.parse(row.payload_json) : row.payload_json).find(payload => payload.message?.to === 'changed@example.com');
+    const code = mail.message.html.match(/<strong>([0-9]{6})<\/strong>/)[1];
+    assert.equal((await post('confirm', { code: '000000' })).status, 400);
+    const confirmed = await post('confirm', { code });
+    assert.equal(confirmed.status, 200, await confirmed.text());
+    const profile = await customer.request('/my-profile'); assert.equal((await profile.json()).email, 'changed@example.com');
+    const [savedOrder] = await queryRows('SELECT customer_email FROM rental_orders WHERE id = ?', [order.orderId]);
+    assert.equal(savedOrder.customer_email, 'changed@example.com');
+    assert.equal((await customer.request('/my-orders/' + order.orderId)).status, 200);
+    assert.equal((await oldSession.request('/my-profile')).status, 401);
+    assert.equal((await post('confirm', { code })).status, 400);
+    const newSession = new SessionClient(); await login(newSession, { ...TEST_CUSTOMER, email: 'changed@example.com' });
 });

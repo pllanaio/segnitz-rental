@@ -96,7 +96,8 @@ document.addEventListener('DOMContentLoaded', () => {
     initCategoryUi();
 
     form.addEventListener('submit', saveProduct);
-    cancelEditBtn.addEventListener('click', resetForm);
+    cancelEditBtn.addEventListener('click', closeProductEditor);
+    document.getElementById('newProductBtn').addEventListener('click', () => { resetForm(); openProductEditor(); document.getElementById('title').focus(); });
 
     const backendSearchInput = document.getElementById('backendProductSearchInput');
 
@@ -307,13 +308,7 @@ async function saveProduct(event) {
 
         await loadProducts();
 
-        const updatedProduct = products.find(product => product.id == savedProductId);
-
-        if (updatedProduct) {
-            editProduct(updatedProduct.id);
-        }
-
-        document.getElementById('productImages').value = '';
+        closeProductEditor();
     } catch (error) {
         console.error('Fehler beim Speichern:', error);
         showAlert('Speichern oder Bilder-Upload fehlgeschlagen. Bitte prüfen und erneut speichern.', 'danger');
@@ -327,6 +322,7 @@ function editProduct(id) {
         return;
     }
 
+    openProductEditor();
     document.getElementById('productId').value = product.id;
     document.getElementById('productKey').value = product.product_key;
     document.getElementById('productEditorTitle').textContent = 'Produkt bearbeiten';
@@ -542,6 +538,20 @@ async function deleteProduct(id) {
     }
 }
 
+function openProductEditor() {
+    document.getElementById('productEditor').classList.remove('d-none');
+    document.getElementById('newProductBtn').classList.add('d-none');
+}
+
+function closeProductEditor() {
+    resetForm();
+    document.getElementById('productEditor').classList.add('d-none');
+    const button = document.getElementById('newProductBtn');
+    button.classList.remove('d-none');
+    button.focus({ preventScroll: true });
+    button.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
 function resetForm() {
     document.getElementById('productForm').reset();
     document.getElementById('productId').value = '';
@@ -549,7 +559,7 @@ function resetForm() {
     updateProductAttributeSuggestions();
     document.getElementById('isActive').checked = true;
     document.getElementById('saveProductBtn').textContent = 'Produkt speichern';
-    document.getElementById('cancelEditBtn').classList.add('d-none');
+    document.getElementById('cancelEditBtn').classList.remove('d-none');
     document.getElementById('existingImagesWrapper').classList.add('d-none');
     document.getElementById('existingImages').innerHTML = '';
     setSelectedCategories([]);
@@ -654,6 +664,7 @@ const returnStatusLabelMap = {
 };
 
 const paymentStatusLabelMap = {
+    refund_pending: 'Erstattung ausstehend',
     unpaid: 'Unbezahlt',
     pending: 'Ausstehend',
     paid: 'Bezahlt',
@@ -740,10 +751,10 @@ function renderOrders() {
                         ${getReturnCaseBadge(order.return_case_status, order.status)}
                     </div>
 
-                    <button class="btn btn-primary btn-sm"
+                    <div class="d-flex flex-wrap gap-2">${order.hasInvoice?`<a class="btn btn-outline-primary btn-sm" href="/admin/orders/${Number(order.id)}/invoice/pdf">Rechnung</a>`:''}<button class="btn btn-primary btn-sm"
                         data-backend-action="open-order-details" data-order-id="${order.id}">
                         Details
-                    </button>
+                    </button></div>
                 </div>
             </div>
         `;
@@ -800,7 +811,7 @@ async function openOrderDetails(orderId) {
 
         renderOrderDetails(order);
 
-        const modal = new bootstrap.Modal(document.getElementById('orderDetailsModal'));
+        const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('orderDetailsModal'));
         modal.show();
 
     } catch (error) {
@@ -810,6 +821,7 @@ async function openOrderDetails(orderId) {
 }
 
 function renderOrderDetails(order) {
+    setTimeout(() => renderAdminInvoice(order), 0);
     const body = document.getElementById('orderDetailsBody');
     currentOrderItems = order.items || [];
     currentOrderPayments = order.payments || [];
@@ -863,7 +875,7 @@ function renderOrderDetails(order) {
                     ` : ''}
 
                     <strong>Zahlungsstatus:</strong> ${escapeHtml(order.payment_status || '-')}<br>
-                    <strong>Zahlungsmethode:</strong> ${escapeHtml(order.payment_method || '-')}<br>
+                    <strong>Zahlungsmethode:</strong> ${escapeHtml(order.payment_method === 'invoice' ? 'Überweisung (14 Tage)' : order.payment_method || '-')}<br>
                     <strong>Rückgabeabwicklung:</strong>
                     ${getReturnCaseBadge(order.return_case_status, order.status) || '-'}
                 </p>
@@ -896,16 +908,33 @@ function renderOrderDetails(order) {
 
 function renderOrderPaymentActionPanel(order) {
     const payments = order.payments || [];
+    const hasOriginalCashPayment = refund => {
+        const sourceTypes = refund.paymentType === 'deposit_refund'
+            ? (payments.some(p=>p.paymentType==='deposit'&&p.paymentStatus==='paid') ? ['deposit'] : ['initial_payment'])
+            : (order.payment_method === 'invoice' ? ['initial_payment','deposit','rental_adjustment'] : ['initial_payment', 'rental_adjustment']);
+        const sources = payments.filter(source =>
+            sourceTypes.includes(source.paymentType) && source.paymentStatus === 'paid' &&
+            Number(source.amount) > 0 &&
+            (!refund.orderItemId || !source.orderItemId || Number(source.orderItemId) === Number(refund.orderItemId))
+        );
+        if (refund.paymentType === 'deposit_refund' && sources.some(source =>
+            source.paymentMethod === 'online' || source.molliePaymentId)) return false;
+        return sources.filter(source => source.paymentMethod === 'cash' && !source.molliePaymentId)
+            .reduce((sum, source) => sum + Number(source.amount), 0) + 0.001 >= Math.abs(Number(refund.amount));
+    };
     const orderStatus = String(order.status || '').toLowerCase();
     const paymentStatus = String(order.payment_status || '').toLowerCase();
 
     const actions = [];
     const orderIsClosed = ['cancelled', 'expired'].includes(orderStatus);
 
+    const latestInitialPayment = payments.filter(payment => payment.paymentType === 'initial_payment').sort((a,b) => Number(b.id)-Number(a.id))[0];
+    const failedInitialPos = latestInitialPayment?.posTerminalId && latestInitialPayment.molliePaymentId &&
+        ['failed', 'cancelled', 'expired'].includes(latestInitialPayment.paymentStatus) ? latestInitialPayment : null;
     const openInitialPayments = payments.filter(payment =>
-        ['rental', 'deposit'].includes(payment.paymentType) &&
-        payment.paymentMethod === 'cash' &&
-        ['pending', 'open'].includes(payment.paymentStatus) &&
+        order.payment_method !== 'invoice' && ['rental', 'deposit'].includes(payment.paymentType) &&
+        ((payment.paymentMethod === 'cash' && ['pending', 'open'].includes(payment.paymentStatus)) ||
+            (failedInitialPos && payment.molliePaymentId === failedInitialPos.molliePaymentId && ['failed', 'cancelled', 'expired'].includes(payment.paymentStatus))) &&
         !payment.orderItemId
     );
 
@@ -920,12 +949,31 @@ function renderOrderPaymentActionPanel(order) {
         payment.paymentStatus === 'paid'
     );
 
+    const posTargets = new Map();
+    if (!orderIsClosed && initialAmount > 0 && !initialPaid) posTargets.set('initial_payment:', { paymentType: 'initial_payment', orderItemId: null });
+    payments.filter(payment => ['initial_payment', 'rental_adjustment', 'return_additional_charge'].includes(payment.paymentType))
+        .sort((a,b) => Number(a.id) - Number(b.id)).forEach(payment => {
+            if ((payment.paymentMethod === 'cash' || payment.posTerminalId) && !orderIsClosed &&
+                ['pending', 'open', 'failed', 'cancelled', 'expired', 'authorized'].includes(payment.paymentStatus)) {
+                posTargets.set(`${payment.paymentType}:${payment.orderItemId || ''}`, payment);
+            } else posTargets.delete(`${payment.paymentType}:${payment.orderItemId || ''}`);
+        });
+    if (!orderIsClosed && initialAmount > 0 && !initialPaid && !posTargets.has('initial_payment:')) posTargets.set('initial_payment:', { paymentType: 'initial_payment', orderItemId: null });
+    const posButton = (paymentType, orderItemId) => {
+        const key = `${paymentType}:${orderItemId || ""}`;
+        const payment = posTargets.get(key);
+        if (!payment) return "";
+        posTargets.delete(key);
+        const active = payment.posTerminalId && ["pending", "open", "authorized"].includes(payment.paymentStatus);
+        return `<button type="button" class="btn btn-outline-primary btn-sm" data-pos-order="${order.id}" data-pos-item="${orderItemId || ""}" data-pos-type="${paymentType}" data-pos-record="${active ? payment.id : ""}">${active ? "Zahlung prüfen" : "Kartenzahlung vor Ort"}</button>`;
+    };
+
     if (!orderIsClosed && initialAmount > 0 && !initialPaid) {
         actions.push(`
             <div class="cash-action-row">
                 <div>
-                    <div class="cash-action-title">Bei Abholung</div>
-                    <div class="small text-muted">Miete und Kaution müssen vor Abholung vollständig kassiert werden.</div>
+                    <div class="cash-action-title">Miete und Kaution</div>
+                    <div class="small text-muted">Miete und Kaution gemeinsam bezahlen oder Kauf auf Rechnung vereinbaren.</div>
                 </div>
 
                 <div class="cash-action-controls">
@@ -937,8 +985,10 @@ function renderOrderPaymentActionPanel(order) {
                         data-item-id=""
                         data-payment-type="initial_payment"
                         data-amount="${initialAmount}">
-                        Miete und Kaution vor Ort kassieren
+                        Barzahlung erfassen
                     </button>
+                    ${posButton('initial_payment', null)}
+                    <button type="button" class="btn btn-outline-primary btn-sm" data-transfer-order="${order.id}">Kauf auf Rechnung · 14 Tage</button>
                 </div>
             </div>
         `);
@@ -975,8 +1025,9 @@ function renderOrderPaymentActionPanel(order) {
                         data-item-id="${payment.orderItemId || ''}"
                         data-payment-type="rental_adjustment"
                         data-amount="${Number(payment.amount || 0)}">
-                        Verlängerung vor Ort kassieren
+                        Barzahlung erfassen
                     </button>
+                    ${posButton('rental_adjustment', payment.orderItemId)}
                 </div>
             </div>
         `);
@@ -1013,8 +1064,9 @@ function renderOrderPaymentActionPanel(order) {
                         data-item-id="${payment.orderItemId || ''}"
                         data-payment-type="return_additional_charge"
                         data-amount="${Number(payment.amount || 0)}">
-                        Nachzahlung vor Ort kassieren
+                        Barzahlung erfassen
                     </button>
+                    ${posButton('return_additional_charge', payment.orderItemId)}
                 </div>
             </div>
         `);
@@ -1023,6 +1075,8 @@ function renderOrderPaymentActionPanel(order) {
     const openDepositRefunds = payments.filter(payment =>
         payment.paymentType === 'deposit_refund' &&
         payment.paymentMethod === 'cash' &&
+        order.payment_method !== 'online' &&
+        hasOriginalCashPayment(payment) &&
         ['pending', 'open'].includes(payment.paymentStatus)
     );
 
@@ -1053,6 +1107,7 @@ function renderOrderPaymentActionPanel(order) {
     const openCancellationRefunds = payments.filter(payment =>
         payment.paymentType === 'order_cancellation_refund' &&
         payment.paymentMethod === 'cash' &&
+        hasOriginalCashPayment(payment) &&
         ['pending', 'open'].includes(payment.paymentStatus)
     );
 
@@ -1126,6 +1181,13 @@ function renderOrderPaymentActionPanel(order) {
             `);
         });
 
+    posTargets.forEach(payment => {
+        const active = payment.posTerminalId && ['pending', 'open', 'authorized'].includes(payment.paymentStatus);
+        actions.push(`<div class="cash-action-row"><div><div class="cash-action-title">Kartenzahlung vor Ort · ${formatPaymentType(payment.paymentType)}</div>
+            <div class="small text-muted">${active ? 'Zahlungsstatus bei Mollie prüfen.' : 'Betrag an ein freigegebenes Mollie-Tap-Gerät senden.'}</div></div>
+            <button type="button" class="btn btn-primary btn-sm" data-pos-order="${order.id}" data-pos-item="${payment.orderItemId || ''}" data-pos-type="${payment.paymentType}" data-pos-record="${active ? payment.id : ''}">${active ? 'Zahlung prüfen' : 'Kartenzahlung vor Ort'}</button></div>`);
+    });
+
     if (actions.length === 0) {
         return '';
     }
@@ -1157,7 +1219,7 @@ function renderOrderItemCard(order, item) {
     const isCancelled = itemStatus === 'cancelled';
     const isReturned = String(itemStatus).startsWith('returned_');
     const orderStatus = String(order.status || '').trim().toLowerCase();
-    const orderPaymentIsPaid = String(order.payment_status || '').toLowerCase() === 'paid';
+    const orderPaymentIsPaid = order.pickupAllowed === true || String(order.payment_status || '').toLowerCase() === 'paid';
     const isExpired = orderStatus === 'expired';
     const canEdit = ['active', 'picked_up'].includes(itemStatus) && !isExpired && orderPaymentIsPaid;
     const canCancelItem = itemStatus === 'active' && !isExpired && !(
@@ -1420,6 +1482,12 @@ async function uploadProductImages(productId) {
 
 
 function switchBackendView(view) {
+    document.getElementById('invoicesView')?.classList.toggle('d-none', view !== 'invoices');
+    document.getElementById('nav-invoices')?.classList.toggle('active', view === 'invoices');
+    if (view === 'invoices') { loadInvoiceSettings(); loadAdminInvoiceList(); }
+    document.getElementById('posView')?.classList.toggle('d-none', view !== 'pos');
+    document.getElementById('nav-pos')?.classList.toggle('active', view === 'pos');
+    if (view === 'pos') loadPosTerminals();
     document.getElementById('couponsView')?.classList.add('d-none');
     document.getElementById('nav-coupons')?.classList.remove('active');
     if (view === 'coupons') {
@@ -1443,6 +1511,8 @@ function switchBackendView(view) {
     document.getElementById('nav-opening-hours')?.classList.remove('active');
 
     if (view === 'products') {
+        document.getElementById('productEditor').classList.add('d-none');
+        document.getElementById('newProductBtn').classList.remove('d-none');
         document.getElementById('productsView')?.classList.remove('d-none');
         document.getElementById('nav-products')?.classList.add('active');
     }
@@ -1629,7 +1699,7 @@ function getPaymentBadge(status) {
         cancelled: 'Storniert',
         expired: 'Abgelaufen',
         refunded: 'Erstattet',
-        refund_pending: 'Erstattung läuft',
+        refund_pending: 'Erstattung ausstehend',
         refund_failed: 'Erstattung fehlgeschlagen',
         charged_back: 'Rückbelastet'
     };
@@ -1689,7 +1759,7 @@ function getReturnCaseBadge(status, orderStatus = null) {
         partial: 'Teilrückgabe offen',
         payment_pending: 'Nachzahlung offen',
         payment_failed: 'Nachzahlung fehlgeschlagen',
-        refund_pending: 'Erstattung offen',
+        refund_pending: 'Erstattung ausstehend',
         refund_failed: 'Erstattung fehlgeschlagen',
         payment_dispute: 'Zahlung strittig',
         closed: 'Abgeschlossen'
@@ -1886,7 +1956,7 @@ function renderItemPayments(order, item) {
             payment.paymentStatus === 'paid'
         );
 
-    const rentalPaidLabel = String(order.payment_method || '').toLowerCase() === 'online'
+    const rentalPaidLabel = order.payment_method === 'invoice' ? 'Rechnung bezahlt' : String(order.payment_method || '').toLowerCase() === 'online'
         ? 'Online bezahlt'
         : 'Vor Ort bezahlt';
 
@@ -1927,7 +1997,7 @@ ${rentalPaid
 }
 
 function openManualPaymentModal(orderId, orderItemId, paymentType, amount) {
-    document.querySelector('#manualPaymentModal .modal-title').textContent = 'Zahlung vor Ort erfassen';
+    document.querySelector('#manualPaymentModal .modal-title').textContent = 'Bargeldzahlung erfassen';
     const submitButton = document.getElementById('manualPaymentSubmitButton');
     submitButton.textContent = 'Zahlung erfassen';
     submitButton.dataset.operation = 'payment';
@@ -1937,7 +2007,7 @@ function openManualPaymentModal(orderId, orderItemId, paymentType, amount) {
     document.getElementById('manualPaymentAmount').value = Number(amount || 0).toFixed(2);
     document.getElementById('manualPaymentNote').value = '';
 
-    const modal = new bootstrap.Modal(document.getElementById('manualPaymentModal'));
+    const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('manualPaymentModal'));
     modal.show();
 }
 
@@ -1953,7 +2023,7 @@ function openManualRefundModal(orderId, orderItemId, paymentType, amount) {
     submitButton.textContent = 'Rückerstattung erfassen';
     submitButton.dataset.operation = 'refund';
 
-    new bootstrap.Modal(document.getElementById('manualPaymentModal')).show();
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('manualPaymentModal')).show();
 }
 
 async function submitManualPayment() {
@@ -2103,6 +2173,7 @@ async function retryOnlineRefund(paymentId, orderId) {
 
 function formatPaymentType(type) {
     const labels = {
+        invoice_payment: 'Mietrechnung',
         initial_payment: 'Initialzahlung',
         rental: 'Miete',
         deposit: 'Kaution',
@@ -2146,7 +2217,7 @@ function formatPaymentStatusBadge(status) {
         replaced: 'Durch Zahlung vor Ort ersetzt',
         offset: 'Mit Kaution verrechnet',
         refunded: 'Erstattet',
-        refund_pending: 'Erstattung läuft',
+        refund_pending: 'Erstattung ausstehend',
         refund_failed: 'Erstattung fehlgeschlagen',
         charged_back: 'Rückbelastet'
     };
@@ -2326,7 +2397,7 @@ function openRentalPeriodModal(orderId, itemId) {
 
     updateRentalPeriodPreview();
 
-    new bootstrap.Modal(document.getElementById('orderItemRentalPeriodModal')).show();
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('orderItemRentalPeriodModal')).show();
 }
 
 function updateRentalPeriodPreview() {
@@ -2384,7 +2455,7 @@ function openCancelOrderItemModal(orderId, itemId) {
     document.getElementById('cancelOrderItemOrderId').value = orderId;
     document.getElementById('cancelOrderItemId').value = itemId;
 
-    new bootstrap.Modal(document.getElementById('cancelOrderItemModal')).show();
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('cancelOrderItemModal')).show();
 }
 
 async function submitCancelOrderItem() {
@@ -2468,7 +2539,7 @@ function openOrderItemReturnModal(orderId, itemId) {
 
     applyOrderItemReturnModalRules();
 
-    new bootstrap.Modal(document.getElementById('orderItemReturnModal')).show();
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('orderItemReturnModal')).show();
 }
 
 function applyOrderItemReturnModalRules(triggerSource = 'auto') {

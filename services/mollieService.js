@@ -129,7 +129,8 @@ function createTestPayment(order, status = 'open') {
     return {
         id,
         status,
-        method: status === 'paid' ? 'ideal' : null,
+        method: order.method || (status === 'paid' ? 'ideal' : null),
+        ...(order.method === 'banktransfer' ? { details: { bankName: 'Mollie Test Bank', bankAccount: 'DE89370400440532013000', bankBic: 'COBADEFFXXX', transferReference: 'TEST-' + id } } : {}),
         amount: {
             currency: order.currency || 'EUR',
             value: formatMollieAmount(order.totalAmount, {
@@ -248,6 +249,7 @@ async function createMolliePaymentForOrder(order) {
     if (webhookUrl) payload.webhookUrl = webhookUrl;
     if (order.billingAddress) payload.billingAddress = order.billingAddress;
     if (order.lines) payload.lines = order.lines;
+    if (order.method === 'banktransfer' && order.dueDate) payload.dueDate = order.dueDate;
     payload.locale = order.locale || 'de_DE';
 
     if (order.customerId) payload.customerId = order.customerId;
@@ -261,6 +263,11 @@ async function createMolliePaymentForOrder(order) {
     }
 
     if (order.idempotencyKey) payload.idempotencyKey = order.idempotencyKey;
+    if (order.terminalId) {
+        if (!/^term_[A-Za-z0-9]+$/.test(order.terminalId)) throw new Error('Ungültige Terminal-ID.');
+        payload.method = 'pointofsale';
+        payload.terminalId = order.terminalId;
+    }
 
     return withMollieTimeout(mollie.payments.create(payload), 'Mollie-Zahlungserstellung');
 }
@@ -410,7 +417,8 @@ function serializeMolliePayment(payment) {
         amount: payment.amount || null,
         metadata: payment.metadata || null,
         checkoutUrl: getMollieCheckoutUrl(payment) || null,
-        links: payment._links || null
+        links: payment._links || null,
+        details: payment.method === 'banktransfer' ? { bankName: payment.details?.bankName, bankAccount: payment.details?.bankAccount, bankBic: payment.details?.bankBic, transferReference: payment.details?.transferReference } : null
     };
 }
 
@@ -464,6 +472,7 @@ async function executeMollieExternalEffect(effectType, payload, operationKey) {
 }
 
 module.exports = {
+    getMollieClient,
     createMolliePaymentForOrder,
     createFirstMolliePayment,
     createRecurringMolliePayment,

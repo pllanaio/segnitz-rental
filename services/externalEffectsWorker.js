@@ -356,7 +356,7 @@ async function applyExternalEffectResult(connection, effect, result) {
             order = orderRows[0] || null;
             orderAcceptsPayment = Boolean(
                 order &&
-                ['reserved', 'pending_payment', 'payment_failed'].includes(
+                ['reserved', 'pending_payment', 'payment_failed', 'picked_up'].includes(
                     String(order.status || '').toLowerCase()
                 ) &&
                 !['paid', 'refunded', 'charged_back'].includes(
@@ -405,7 +405,7 @@ async function applyExternalEffectResult(connection, effect, result) {
                      mollie_payment_status = ?, payment_method = 'online',
                      payment_status = 'pending'
                  WHERE id = ?
-                 AND status IN ('reserved', 'pending_payment', 'payment_failed')
+                 AND status IN ('reserved', 'pending_payment', 'payment_failed', 'picked_up')
                  AND payment_status NOT IN ('paid', 'refunded', 'charged_back')`,
                 [
                     result.id,
@@ -504,12 +504,20 @@ async function applyExternalEffectFailure(connection, effect, error) {
                 `UPDATE rental_orders
                  SET mollie_payment_status = 'failed',
                      payment_status = 'failed',
-                     status = 'payment_failed'
+                     status = IF(status = 'picked_up', 'picked_up', 'payment_failed')
                  WHERE id = ?
-                 AND status IN ('reserved', 'pending_payment', 'payment_failed')
+                 AND status IN ('reserved', 'pending_payment', 'payment_failed', 'picked_up')
                  AND payment_status NOT IN ('paid', 'refunded', 'charged_back')`,
                 [application.orderId]
             );
+        }
+
+        // A definitive API validation rejection created no payment: restore the cash option.
+        if (effect.payload?.payment?.terminalId && (Number(error?.statusCode) === 422 || errorMessage.includes('The amount is higher than the maximum')) && paymentRecords.every(record => !record.mollie_payment_id)) {
+            for (const record of paymentRecords.filter(record => record.payment_type !== 'initial_payment')) {
+                await connection.execute("INSERT INTO rental_order_payments (order_id, order_item_id, payment_type, payment_method, payment_status, amount) VALUES (?, ?, ?, 'cash', 'pending', ?)", [record.order_id, record.order_item_id, record.payment_type, record.amount]);
+            }
+            if (application.orderId) await connection.execute("UPDATE rental_orders SET payment_method = 'cash', payment_status = 'pending', status = IF(status = 'picked_up', 'picked_up', 'confirmed'), reserved_until = NULL, mollie_payment_id = NULL, mollie_payment_status = NULL WHERE id = ? AND status IN ('payment_failed', 'picked_up') AND payment_status = 'failed'", [application.orderId]);
         }
 
         const additionalOrderIds = [...new Set(paymentRecords

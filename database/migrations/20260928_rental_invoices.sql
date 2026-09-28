@@ -1,0 +1,20 @@
+CREATE TABLE rental_invoices (
+ id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+ order_id INT NOT NULL,
+ mode VARCHAR(8) NOT NULL,
+ operation_key CHAR(36) NOT NULL,
+ provider_id VARCHAR(100) NULL,
+ invoice_number VARCHAR(100) NULL,
+ status VARCHAR(40) NOT NULL DEFAULT 'queued',
+ amount DECIMAL(12,2) NOT NULL,
+ request_json JSON NULL,
+ provider_json JSON NULL,
+ pdf_data LONGBLOB NULL,
+ due_at DATETIME NULL,
+ last_error VARCHAR(500) NULL,
+ next_attempt_at DATETIME NULL,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ UNIQUE KEY uq_invoice_order (order_id),
+ UNIQUE KEY uq_invoice_provider (provider_id),
+ FOREIGN KEY (order_id) REFERENCES rental_orders(id)
+);

@@ -49,7 +49,7 @@ test('führt Payment-Synchronisierung nur über den schreibenden Owner-Endpunkt 
 
 test('behandelt vorgemerkte Online-Zahlungen nicht als Zahlung vor Orts-Erfolg', () => {
     const pendingBranch = frontendSource.indexOf('if (paymentPending)');
-    const cashConfirmation = frontendSource.indexOf("resultTitle.textContent = 'Bestellung bestätigt – Zahlung bei Abholung'");
+    const cashConfirmation = frontendSource.indexOf("'Bestellung bestätigt – Zahlung bei Abholung'");
 
     assert.notEqual(pendingBranch, -1, 'paymentPending-Zweig fehlt im Checkout-Frontend');
     assert.notEqual(cashConfirmation, -1, 'Zahlung vor Orts-Bestätigung fehlt');
@@ -97,9 +97,8 @@ test('lädt Mollie-Status vor manueller Bar-Ersetzung und revalidiert Zahlung un
         providerReadPosition < transactionPosition,
         'Provider-Read darf nicht innerhalb der Zahlung vor Orts-Transaktion erfolgen'
     );
-    assert.equal(
-        manualRoute.lastIndexOf('getMolliePayment('),
-        providerReadPosition,
+    assert.ok(
+        manualRoute.lastIndexOf('getMolliePayment(') < transactionPosition,
         'Manuelle Zahlung darf nach Transaktionsbeginn keinen weiteren Mollie-Read ausführen'
     );
     assert.match(

@@ -1168,6 +1168,10 @@ async function loadRentalProducts() {
 
         rentalProducts = products.filter(product => product.is_active === 1);
         renderCategoryFilters();
+        const kindSelect = document.getElementById('productKindFilter');
+        if (kindSelect && kindSelect.options.length === 1) {
+            [...new Set(rentalProducts.map(product => product.product_kind).filter(Boolean))].sort((a,b) => a.localeCompare(b, 'de')).forEach(kind => kindSelect.add(new Option(kind, kind)));
+        }
         filteredRentalProducts = [...rentalProducts];
         currentProductPage = 1;
 
@@ -1741,6 +1745,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!searchInput) return;
 
     searchInput.addEventListener('input', applyProductFilters);
+    document.getElementById('productKindFilter')?.addEventListener('change', applyProductFilters);
 
     searchInput.addEventListener('keydown', event => {
         if (event.key === 'Enter') {
@@ -2045,6 +2050,20 @@ function selectCategoryFilter(category) {
     renderBestsellers();
 }
 
+function normalizeProductSearch(value) {
+    return String(value ?? '').toLocaleLowerCase('de').replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss').normalize('NFKD').replace(/[\u0300-\u036f]/g, '');
+}
+function productMatchesSearch(product, query) {
+    const values = [product.title, product.description, product.product_key, product.manufacturer, product.model,
+        product.product_kind, product.color, product.power_value, product.power_unit,
+        product.operating_hours, product.mileage_km, ...getProductCategoryNames(product)];
+    for (const [value, unit] of [[product.power_value, product.power_unit], [product.operating_hours, 'Betriebsstunden h'], [product.mileage_km, 'Kilometer km']]) {
+        if (value !== null && value !== undefined && value !== '') values.push(value + ' ' + unit, Number(value).toLocaleString('de-DE') + ' ' + unit);
+    }
+    const text = normalizeProductSearch(values.filter(value => value !== null && value !== undefined).join(' '));
+    return normalizeProductSearch(query).trim().split(/\s+/).filter(Boolean).every(word => text.includes(word));
+}
+
 function applyProductFilters() {
     if (selectedCategory === 'all') {
         filteredRentalProducts = [...rentalProducts];
@@ -2057,6 +2076,9 @@ function applyProductFilters() {
         );
     }
 
+    const query = document.getElementById('productSearchInput')?.value || '';
+    const kind = document.getElementById('productKindFilter')?.value || '';
+    filteredRentalProducts = filteredRentalProducts.filter(product => (!kind || product.product_kind === kind) && productMatchesSearch(product, query));
     currentProductPage = 1;
     renderCategoryFilters();
     renderProductPage();
@@ -2111,7 +2133,7 @@ function renderBestsellers() {
 
     if (!grid || !section) return;
 
-    if (selectedCategory !== 'all') {
+    if (selectedCategory !== 'all' || document.getElementById('productSearchInput')?.value.trim() || document.getElementById('productKindFilter')?.value) {
         grid.innerHTML = '';
         section.classList.add('d-none');
         return;

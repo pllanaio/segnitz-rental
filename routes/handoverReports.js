@@ -11,8 +11,8 @@ function registerHandoverReports(app, { checkAdmin, createConnection, transact, 
     const base = '/admin/orders/:orderId/handover';
     const run = work => transact(createConnection, work);
     const failure = (res, err) => {
-        console.error('Ãœbergabeprotokoll:', err.message);
-        return res.status(err.statusCode || 500).json({ error: err.statusCode ? err.message : 'Das Ãœbergabeprotokoll konnte nicht verarbeitet werden.' });
+        console.error('Übergabeprotokoll:', err.message);
+        return res.status(err.statusCode || 500).json({ error: err.statusCode ? err.message : 'Das Übergabeprotokoll konnte nicht verarbeitet werden.' });
     };
     app.get('/my-orders/:orderId/handover/pdf', async (req, res) => {
         res.set('Cache-Control', 'private, no-store');
@@ -61,25 +61,25 @@ function registerHandoverReports(app, { checkAdmin, createConnection, transact, 
             connection = await createConnection();
             const order = await getOrder(connection, req.params.orderId);
             const [[report]] = await connection.execute("SELECT pdf_data FROM handover_reports WHERE order_id = ? AND status = 'signed'", [order.id]);
-            if (!report) throw error('Noch kein unterzeichnetes Ãœbergabeprotokoll vorhanden.', 404);
+            if (!report) throw error('Noch kein unterzeichnetes Übergabeprotokoll vorhanden.', 404);
             res.type('pdf').set('Content-Disposition', `attachment; filename="Uebergabeprotokoll-${String(order.order_no).replace(/[^a-zA-Z0-9_-]/g, '_')}.pdf"`).send(report.pdf_data);
         } catch (err) { failure(res, err); } finally { if (connection) await connection.end(); }
     });
-    app.post(base, checkAdmin, limiter, (req, res, next) => upload(req, res, err => err ? res.status(400).json({ error: 'Der Upload ist zu groÃŸ oder ungÃ¼ltig. Bitte weniger oder kleinere Fotos verwenden.' }) : next()), async (req, res) => {
+    app.post(base, checkAdmin, limiter, (req, res, next) => upload(req, res, err => err ? res.status(400).json({ error: 'Der Upload ist zu groß oder ungültig. Bitte weniger oder kleinere Fotos verwenden.' }) : next()), async (req, res) => {
         try {
             let body;
-            try { body = JSON.parse(req.body.payload); } catch { throw error('UngÃ¼ltiges Protokoll.', 400); }
+            try { body = JSON.parse(req.body.payload); } catch { throw error('Ungültiges Protokoll.', 400); }
             const finalizing = body.finalize === true;
             const document = await validateDocument(body, finalizing);
             const result = await run(async connection => {
                 const order = await getOrder(connection, req.params.orderId, true);
                 const [[existing]] = await connection.execute('SELECT revision, status FROM handover_reports WHERE order_id = ? FOR UPDATE', [order.id]);
-                if (existing?.status === 'signed') throw error('Das unterzeichnete Protokoll ist festgeschrieben und kann nicht verÃ¤ndert werden.');
-                if ((existing?.revision || 0) !== body.revision) throw error('Das Protokoll wurde zwischenzeitlich geÃ¤ndert. Bitte neu Ã¶ffnen.');
+                if (existing?.status === 'signed') throw error('Das unterzeichnete Protokoll ist festgeschrieben und kann nicht verändert werden.');
+                if ((existing?.revision || 0) !== body.revision) throw error('Das Protokoll wurde zwischenzeitlich geändert. Bitte neu öffnen.');
                 const allItems = await getItems(connection, order.id);
                 const items = allItems.filter(item => item.status === 'active');
-                if (['cancelled', 'expired', 'returned', 'completed'].includes(order.status) || !items.length || allItems.some(item => item.picked_up_at || ['picked_up', 'returned_ok', 'returned_late', 'returned_damaged', 'returned_late_damaged'].includes(item.status))) throw error('Das Ãœbergabeprotokoll muss vor der ersten Abholung erstellt und unterschrieben werden.');
-                if (document.entries.some(entry => !items.some(item => item.id === entry.itemId))) throw error('Ein Eintrag gehÃ¶rt nicht zu einem aktiven Artikel dieses Auftrags.', 400);
+                if (['cancelled', 'expired', 'returned', 'completed'].includes(order.status) || !items.length || allItems.some(item => item.picked_up_at || ['picked_up', 'returned_ok', 'returned_late', 'returned_damaged', 'returned_late_damaged'].includes(item.status))) throw error('Das Übergabeprotokoll muss vor der ersten Abholung erstellt und unterschrieben werden.');
+                if (document.entries.some(entry => !items.some(item => item.id === entry.itemId))) throw error('Ein Eintrag gehört nicht zu einem aktiven Artikel dieses Auftrags.', 400);
                 const signedAt = finalizing ? new Date() : null;
                 const report = { ...document, orderNo: order.order_no, email: order.customer_email,
                     customerName: `${order.customer_first_name || ''} ${order.customer_last_name || ''}`.trim(),
@@ -88,8 +88,8 @@ function registerHandoverReports(app, { checkAdmin, createConnection, transact, 
                 const pdf = finalizing ? await renderHandoverPdf(report) : null;
                 if (pdf) {
                     const message = { to: order.customer_email, bcc: (process.env.ORDER_BCC || '').split(/[;,]/).map(s => s.trim()).filter(Boolean),
-                        subject: `Ihr Ãœbergabeprotokoll â€“ ${order.order_no}`,
-                        html: `<h2>Ihr Ãœbergabeprotokoll</h2><p>Zum Auftrag <strong>${escapeHtml(order.order_no)}</strong> erhalten Sie das gemeinsam geprÃ¼fte und unterzeichnete Ãœbergabeprotokoll im Anhang. Es enthÃ¤lt alle dokumentierten EintrÃ¤ge und die zugehÃ¶rigen Fotos.</p>`,
+                        subject: `Ihr Übergabeprotokoll – ${order.order_no}`,
+                        html: `<h2>Ihr Übergabeprotokoll</h2><p>Zum Auftrag <strong>${escapeHtml(order.order_no)}</strong> erhalten Sie das gemeinsam geprüfte und unterzeichnete Übergabeprotokoll im Anhang. Es enthält alle dokumentierten Einträge und die zugehörigen Fotos.</p>`,
                         handoverPdf: { name: `Uebergabeprotokoll-${String(order.order_no).replace(/[^a-zA-Z0-9_-]/g, '_')}.pdf`, contentBytes: pdf.toString('base64') } };
                     // Validate the actual Graph message size before committing the signed document.
                     await presentMail(message);
@@ -100,7 +100,7 @@ function registerHandoverReports(app, { checkAdmin, createConnection, transact, 
                     VALUES (?, ?, ?, ?, ?, ?, NOW(3), ?) ON DUPLICATE KEY UPDATE revision = VALUES(revision), status = VALUES(status),
                     document_json = VALUES(document_json), pdf_data = VALUES(pdf_data), updated_by = VALUES(updated_by), updated_at = NOW(3), signed_at = VALUES(signed_at)`,
                     [order.id, revision, finalizing ? 'signed' : 'draft', JSON.stringify(report), pdf, req.session.user, signedAt]);
-                return { revision, status: finalizing ? 'signed' : 'draft', message: finalizing ? 'Ãœbergabeprotokoll festgeschrieben. Die E-Mail wurde zum Versand vorgemerkt.' : 'Entwurf gespeichert.' };
+                return { revision, status: finalizing ? 'signed' : 'draft', message: finalizing ? 'Übergabeprotokoll festgeschrieben. Die E-Mail wurde zum Versand vorgemerkt.' : 'Entwurf gespeichert.' };
             });
             res.json(result);
         } catch (err) { failure(res, err); }

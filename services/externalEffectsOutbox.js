@@ -397,7 +397,7 @@ async function failExternalEffect(effect, error, applyFailure = null) {
             return;
         }
 
-        const exhausted = Number(lockedEffect.attempt_count) >= Number(lockedEffect.max_attempts);
+        const exhausted = (lockedEffect.effect_type === EFFECT_TYPES.MOLLIE_PAYMENT_CREATE && lockedEffect.payload?.payment?.terminalId && Number(error?.statusCode) === 422) || Number(lockedEffect.attempt_count) >= Number(lockedEffect.max_attempts);
         const nextStatus = exhausted ? OUTBOX_STATUSES.DEAD : OUTBOX_STATUSES.RETRY;
         const backoffSeconds = calculateBackoffSeconds(lockedEffect.attempt_count);
         if (exhausted && applyFailure) {

@@ -13,6 +13,8 @@ const attachment = (name, contentType, buffer, contentId) => ({
 async function presentMail(message) {
     const attachments = [attachment('segnitz-logo.png', 'image/png', fs.readFileSync(path.join(__dirname, '../public/img/logo.png')), 'segnitz-logo')];
     let body = message.html || `<p>${escape(message.text).replace(/\n/g, '<br>')}</p>`;
+    const paymentLink=require('./invoiceTransfer').safeMolliePaymentLink(message.paymentUrl);
+    if(paymentLink)body+='<p>Sie können Miete und Kaution gemeinsam über Mollie bezahlen:</p><p><a href="'+escape(paymentLink)+'">Jetzt über Mollie bezahlen</a></p>';
     // Legacy order messages contained data URLs, which many mail clients hide.
     body = body.replace(/<h3>Unterschrift<\/h3>\s*(?:<img[^>]*>|<em>[^<]*<\/em>)/g, '');
     body = body.replace(/<h2>/g, '<h2 style="font-size:24px;line-height:1.3;margin:0 0 24px;color:#092447">')
@@ -36,6 +38,10 @@ async function presentMail(message) {
     }
     if (message.handoverPdf) {
         attachments.push(attachment(message.handoverPdf.name, 'application/pdf', Buffer.from(message.handoverPdf.contentBytes, 'base64')));
+    }
+    if(message.invoiceXml)attachments.push(attachment(message.invoiceXml.name,'application/xml',Buffer.from(message.invoiceXml.contentBytes,'base64')));
+    if (message.invoicePdf) {
+        attachments.push(attachment(message.invoicePdf.name, 'application/pdf', Buffer.from(message.invoicePdf.contentBytes, 'base64')));
     }
     const issuer = message.receipt?.issuer || { name: process.env.RECEIPT_COMPANY_NAME || 'Segnitz Rental', address: process.env.RECEIPT_COMPANY_ADDRESS || '' };
     const html = `<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(message.subject)}</title></head>
