@@ -3250,8 +3250,8 @@ test('Admin-Überweisung: Checkout bleibt zweigeteilt und automatische Rechnunge
  try{const page=await browser.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));await page.goto(BASE_URL+'/');assert.equal(await page.locator('input[name="paymentMethod"]').count(),2);assert.deepEqual(await page.locator('input[name="paymentMethod"]').evaluateAll(es=>es.map(e=>e.value).sort()),['cash','online']);
  await page.context().addCookies([{name:'segnitz.sid',value:admin.cookie.slice('segnitz.sid='.length),url:BASE_URL}]);await page.goto(BASE_URL+'/backend.html');
  const [unpaid]=await queryRows("SELECT id FROM rental_orders WHERE payment_method='cash' AND payment_status='pending' AND status='confirmed' ORDER BY id DESC LIMIT 1");
- for(const width of [1280,390]){await page.setViewportSize({width,height:900});await page.evaluate(id=>openOrderDetails(id),unpaid.id);const button=page.locator('[data-transfer-order]');await button.waitFor();await page.screenshot({path:'test-results/admin-transfer-'+width+'.png'});}
- await page.locator('[data-transfer-order]').click();await page.locator('#confirmModalConfirmBtn').click();await page.locator('[data-invoice-action="rent-banktransfer"]').waitFor();assert.equal(await page.locator('[data-transfer-order]').count(),0);assert.deepEqual(errors,[]);
+ for(const width of [1280,390]){await page.setViewportSize({width,height:900});await page.evaluate(id=>openOrderDetails(id),unpaid.id);await page.locator('#orderDetailsModal .order-sheet-payment-actions summary').first().click();const button=page.locator('[data-transfer-order]');await button.waitFor();await page.screenshot({path:'test-results/admin-transfer-'+width+'.png'});}
+ await page.locator('[data-transfer-order]').click();await page.locator('#confirmModalConfirmBtn').click();await page.waitForResponse(r=>r.url().endsWith('/admin/orders/'+unpaid.id)&&r.status()===200);assert.equal(await page.locator('[data-transfer-order]').count(),0);assert.deepEqual(errors,[]);
  }finally{await browser.close();}
 });
 
@@ -3346,7 +3346,7 @@ test('Bestelldialog: wiederholtes Öffnen und Barzahlung hinterlassen keinen gra
  for(const [n,width] of [1280,390].entries()){
   await page.setViewportSize({width,height:900});const order=await createOrder(customer,'cash',futureDate(3120+n*4),futureDate(3121+n*4));
   await page.evaluate(id=>openOrderDetails(id),order.orderId);await page.locator('#orderDetailsModal.show').waitFor();await page.evaluate(id=>openOrderDetails(id),order.orderId);
-  await page.locator('#orderDetailsModal [data-backend-action="open-manual-payment"]').first().click();await page.locator('#manualPaymentModal.show').waitFor();
+  await page.locator('#orderDetailsModal .order-sheet-payment-actions summary').first().click();await page.locator('#orderDetailsModal [data-backend-action="open-manual-payment"]').first().click();await page.locator('#manualPaymentModal.show').waitFor();
   await page.locator('#manualPaymentSubmitButton').click();await page.locator('#manualPaymentModal').waitFor({state:'hidden'});
   await page.locator('#orderDetailsModal .modal-footer [data-bs-dismiss="modal"]').click();await page.locator('#orderDetailsModal').waitFor({state:'hidden'});
   await page.waitForFunction(()=>!document.querySelector('.modal-backdrop')&&!document.body.classList.contains('modal-open'));
@@ -3354,7 +3354,7 @@ test('Bestelldialog: wiederholtes Öffnen und Barzahlung hinterlassen keinen gra
   await page.evaluate(id=>openOrderDetails(id),order.orderId);await page.locator('#orderDetailsModal.show').waitFor();await page.locator('#orderDetailsModal .modal-footer [data-bs-dismiss="modal"]').click();await page.waitForFunction(()=>!document.querySelector('.modal-backdrop'));
  }
  const card=await createOrder(customer,'cash',futureDate(3150),futureDate(3151));await page.evaluate(id=>openOrderDetails(id),card.orderId);
- await page.locator('#orderDetailsModal [data-pos-order]').first().click();await page.locator('#posPaymentStart:not([disabled])').waitFor();await page.locator('#posPaymentStart').click();
+ await page.locator('#orderDetailsModal .order-sheet-payment-actions summary').first().click();await page.locator('#orderDetailsModal [data-pos-order]').first().click();await page.locator('#posPaymentStart:not([disabled])').waitFor();await page.locator('#posPaymentStart').click();
  const payment=await waitForDatabaseRow("SELECT id,mollie_payment_id FROM rental_order_payments WHERE order_id=? AND pos_terminal_id IS NOT NULL ORDER BY id DESC LIMIT 1",[card.orderId],r=>!!r.mollie_payment_id,'POS-Zahlung angelegt');
  const paymentId='tr_test_paid_modal_'+payment.id;await execute('UPDATE rental_order_payments SET mollie_payment_id=? WHERE order_id=? AND mollie_payment_id=?',[paymentId,card.orderId,payment.mollie_payment_id]);await execute('UPDATE rental_orders SET mollie_payment_id=? WHERE id=?',[paymentId,card.orderId]);
  await page.locator('#posPaymentCheck').click();await page.waitForFunction(()=>document.getElementById('posPaymentStatus').textContent.includes('bestätigt'));
@@ -3418,7 +3418,7 @@ test('Zahlungsoberfläche: drei Nachzahlungswege und Checkout ohne Scrollsprung'
   await page.goto(BASE_URL+'/backend.html');await page.locator('#nav-orders').click();
   for(const width of [1280,390]){
    await page.setViewportSize({width,height:900});await page.evaluate(id=>openOrderDetails(id),order.orderId);
-   await page.locator('[data-additional-transfer]').waitFor();
+   await page.locator('#orderDetailsModal .order-sheet-payment-actions summary').first().click();await page.locator('[data-additional-transfer]').waitFor();
    assert.equal(await page.locator('[data-pos-type="rental_adjustment"]').count(),1);
    assert.equal(await page.locator('[data-payment-type="rental_adjustment"]').count(),1);
    await page.waitForTimeout(350);await page.screenshot({path:path.join(require('os').tmpdir(),'segnitz-payments-'+width+'.png')});
@@ -3530,7 +3530,7 @@ test('Unabhängige Verlängerungsrechnung: offener Mietlink bleibt bestehen und 
    await protocol.locator('#handoverAdd').click();await protocol.locator('textarea').fill('Kratzer am Gehäuse');
    assert.ok(await protocol.locator('[data-entry]').isVisible());
    await protocol.locator('[data-remove]').click();await protocol.locator('#handoverNoDamage').check();
-   await protocol.locator('#handoverSave').click();await page.waitForTimeout(400);
+   const draftSaved=page.waitForResponse(r=>r.url().endsWith('/handover')&&r.request().method()==='POST');await protocol.locator('#handoverSave').click();assert.equal((await draftSaved).status(),200);await page.waitForFunction(()=>document.getElementById('handoverStatus').textContent.includes('Gespeicherter Entwurf')&&!document.getElementById('handoverSave').disabled);
    await page.screenshot({path:path.join(require('os').tmpdir(),'segnitz-handover-form-mobile.png')});
    await protocol.locator('[data-bs-dismiss="modal"]').last().click();await cashModal.waitFor({state:'visible'});await page.waitForTimeout(350);
    const [pickupItem]=await queryRows('SELECT id FROM rental_order_items WHERE order_id=?',[cashOrder.orderId]);await signHandoverBeforePickup(admin,pickupItem.id);

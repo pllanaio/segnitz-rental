@@ -266,7 +266,7 @@ test('rendert gespeicherte Kundendaten im Adminbereich ohne HTML- oder Aktionsin
 
     await expect(page.locator('#ordersList')).toContainText(payload);
     await expect(page.locator('#ordersList .xss-probe')).toHaveCount(0);
-    await page.getByRole('button', { name: 'Details' }).click();
+    await page.getByRole('button', { name: 'Bestellung öffnen' }).click();
     await expect(page.locator('#orderDetailsBody')).toContainText(payload);
     await expect(page.locator('#orderDetailsBody .xss-probe')).toHaveCount(0);
     await expect(page.locator('[data-backend-action="mark-item-picked-up"][data-item-id="999"]')).toHaveCount(0);
@@ -367,6 +367,9 @@ test('führt die Rückgabemaske mit Schadensdokumentation und wählbarem Zahlung
         if (message.type() === 'error') consoleErrors.push(message.text());
     });
 
+    await page.route('**/admin/orders/77/payments/sync',route=>route.fulfill({json:{}}));
+    await page.route('**/admin/orders/77/invoice',route=>route.fulfill({json:{invoice:null}}));
+    await page.route('**/admin/invoices?orderId=77',route=>route.fulfill({json:{items:[]}}));
     await page.route('**/admin/orders?*', route => route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -515,10 +518,11 @@ test('führt die Rückgabemaske mit Schadensdokumentation und wählbarem Zahlung
     const completedCard = page.locator('#ordersList .card', { hasText: 'R202600078' });
     await expect(completedCard).toContainText('Zurückgegeben');
     await expect(completedCard).not.toContainText('Teilweise zurückgegeben');
-    await expect(completedCard).toContainText('Erstattung offen');
+    await expect(completedCard).toContainText('Erstattung ausstehend');
 
     const openCard = page.locator('#ordersList .card', { hasText: 'R202600077' });
-    await openCard.getByRole('button', { name: 'Details' }).click();
+    await openCard.getByRole('button', { name: 'Bestellung öffnen' }).click();
+    await page.locator('#orderDetailsBody .order-sheet-payment-actions').evaluateAll(nodes=>nodes.forEach(n=>n.open=true));
     await expect(page.getByRole('link', { name: 'Zahlungslink öffnen' })).toHaveAttribute(
         'href',
         'https://checkout.test.mollie.local/tr_test_open_7701'
@@ -592,9 +596,11 @@ test('führt die Rückgabemaske mit Schadensdokumentation und wählbarem Zahlung
     expect(payload.additionalChargeReason).toBe('Reparatur der Hydraulikleitung');
     expect(Number(payload.additionalChargeAmount)).toBe(400);
     expect(payload.additionalChargePaymentMethod).toBe('cash');
+    await page.locator('#orderDetailsBody .order-sheet-payment-actions').evaluateAll(nodes=>nodes.forEach(n=>n.open=true));
     const returnAction = page.locator('#orderDetailsBody .cash-action-row', { hasText: 'Rückgabe-Nachzahlung' });
     await expect(returnAction).toContainText('100.00 €');
-    await expect(returnAction.getByRole('button', { name: 'Nachzahlung vor Ort kassieren' })).toBeVisible();
+    await returnAction.locator('[data-backend-action="open-manual-payment"]').evaluate(el=>el.closest('details').open=true);
+    await expect(returnAction.getByRole('button', { name: 'Barzahlung erfassen' })).toBeVisible();
     await expect(page.locator('#orderDetailsBody').getByRole('button', { name: 'Foto löschen' })).toHaveCount(0);
     await expect(page.locator('#orderDetailsBody img[src="/img/returns/return-test.png"]').first()).toBeVisible();
 
@@ -605,19 +611,22 @@ test('führt die Rückgabemaske mit Schadensdokumentation und wählbarem Zahlung
         orderDetails.payments[0].paymentStatus = paymentStatus;
         orderDetails.payments[0].checkoutUrl = 'https://checkout.test.mollie.local/tr_return';
         await page.evaluate(order => renderOrderDetails(order), orderDetails);
-        await expect(returnAction.getByRole('button', { name: 'Nachzahlung vor Ort kassieren' })).toBeVisible();
+        await page.locator('#orderDetailsBody .order-sheet-payment-actions').evaluateAll(nodes=>nodes.forEach(n=>n.open=true));
+        await expect(returnAction.getByRole('button', { name: 'Barzahlung erfassen' })).toBeVisible();
         await expect(returnAction.getByRole('link', { name: 'Zahlungslink öffnen' }))
             .toHaveCount(['pending', 'authorized'].includes(paymentStatus) ? 1 : 0);
     }
     orderDetails.payments[0].paymentStatus = 'pending';
     orderDetails.payments[0].checkoutUrl = null;
     await page.evaluate(order => renderOrderDetails(order), orderDetails);
-    await returnAction.getByRole('button', { name: 'Nachzahlung vor Ort kassieren' }).click();
+        await page.locator('#orderDetailsBody .order-sheet-payment-actions').evaluateAll(nodes=>nodes.forEach(n=>n.open=true));
+    await returnAction.getByRole('button', { name: 'Barzahlung erfassen' }).click();
     await expect(page.locator('#manualPaymentModal')).toBeVisible();
     await page.locator('#manualPaymentModal [data-bs-dismiss="modal"]').first().click();
     for (const paymentStatus of ['paid', 'replaced', 'settled_with_deposit', 'refunded']) {
         orderDetails.payments[0].paymentStatus = paymentStatus;
         await page.evaluate(order => renderOrderDetails(order), orderDetails);
+        await page.locator('#orderDetailsBody .order-sheet-payment-actions').evaluateAll(nodes=>nodes.forEach(n=>n.open=true));
         await expect(returnAction).toHaveCount(0);
     }
     expect(apiErrors).toEqual([]);
@@ -706,8 +715,8 @@ test('verarbeitet den paginierten Kundenauftrags-Vertrag und zeigt vor Rückgabe
     await expect(page.locator('#myOrdersList')).toContainText('1 Bestellung gefunden');
     await page.getByRole('button', { name: 'Bestellung öffnen' }).click();
     await expect(page.locator('#myOrderDetailsModal')).toBeVisible();
-    await expect(page.locator('#myOrderDetailsBody')).toContainText('Kaution zurück');
-    await expect(page.locator('#myOrderDetailsBody')).toContainText('0.00 €');
+    await expect(page.locator('#myOrderDetailsBody')).toContainText('Noch gebundene Kaution');
+    await expect(page.locator('#myOrderDetailsBody')).toContainText('150,00');
     const appearance = await page.evaluate(() => {
         const row = document.createElement('div');
         row.className = 'checkout-summary-row';
