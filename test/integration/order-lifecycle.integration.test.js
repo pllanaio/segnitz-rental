@@ -3366,7 +3366,7 @@ test('Bestelldialog: wiederholtes Öffnen und Barzahlung hinterlassen keinen gra
 test('Stornierte Überweisung gibt vor Rückgabe Bar, POS und neue Überweisung frei',async()=>{
  const customer=new SessionClient(),admin=new SessionClient();await login(customer,TEST_CUSTOMER);await login(admin,TEST_ADMIN);await seedBilling();
  for(const [n,method] of ['cash','pos','transfer'].entries()){
-  const order=await createOrder(customer,'cash',futureDate(3200+n*4),futureDate(3201+n*4));const base='/admin/orders/'+order.orderId+'/invoice';assert.equal((await offerInvoiceTransfer(admin,order.orderId)).status,200);
+  const order=await createOrder(customer,'cash',futureDate(3200+n*4),futureDate(3201+n*4));const base='/admin/orders/'+order.orderId+'/invoice';const offered=await offerInvoiceTransfer(admin,order.orderId);assert.equal(offered.status,200,method+': '+await offered.clone().text()+' '+serverOutput.slice(-3000));
   const [doc]=await queryRows('SELECT id,pdf_data FROM billing_documents WHERE order_id=?',[order.orderId]);
   await execute("UPDATE rental_order_items SET item_status='picked_up' WHERE order_id=?",[order.orderId]);await execute("UPDATE rental_orders SET status='picked_up' WHERE id=?",[order.orderId]);
   const [source]=await queryRows("SELECT id FROM rental_order_payments WHERE order_id=? AND payment_type='invoice_payment' ORDER BY id DESC LIMIT 1",[order.orderId]);const canceledId='tr_test_canceled_fallback_'+source.id;await execute('UPDATE rental_order_payments SET mollie_payment_id=? WHERE id=?',[canceledId,source.id]);
@@ -3418,7 +3418,7 @@ test('Zahlungsoberfläche: drei Nachzahlungswege und Checkout ohne Scrollsprung'
   await page.goto(BASE_URL+'/backend.html');await page.locator('#nav-orders').click();
   for(const width of [1280,390]){
    await page.setViewportSize({width,height:900});await page.evaluate(id=>openOrderDetails(id),order.orderId);
-   await page.locator('#orderDetailsModal .order-sheet-payment-actions summary').first().click();await page.locator('[data-additional-transfer]').waitFor();
+   await page.locator('#orderDetailsModal details').filter({has:page.locator('[data-additional-transfer]')}).locator('summary').click();await page.locator('[data-additional-transfer]').waitFor();
    assert.equal(await page.locator('[data-pos-type="rental_adjustment"]').count(),1);
    assert.equal(await page.locator('[data-payment-type="rental_adjustment"]').count(),1);
    await page.waitForTimeout(350);await page.screenshot({path:path.join(require('os').tmpdir(),'segnitz-payments-'+width+'.png')});
