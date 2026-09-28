@@ -3440,7 +3440,7 @@ test('Zahlungsoberfläche: drei Nachzahlungswege und Checkout ohne Scrollsprung'
    await page.screenshot({path:path.join(require('os').tmpdir(),'segnitz-checkout-'+width+'.png')});
   }
   assert.deepEqual(errors,[]);
- }finally{await browser.close();}
+ }finally{await browser.close();assert.equal((await customer.request('/cart',{method:'DELETE'})).status,200);}
 });
 
 
