@@ -488,3 +488,26 @@ test('repariert ein unvollständiges Bestandsschema beim nächsten Start automat
         `${await ordersResponse.clone().text()}\n\nServerausgabe:\n${serverOutput}`
     );
 });
+
+
+test('starts an existing database from the published accounting image without replaying its migration', async () => {
+    await stopServer();
+    const c = await mysql.createConnection(dbConfig);
+    let usersBefore;
+    try {
+        [usersBefore] = await c.execute('SELECT id, username FROM users ORDER BY id');
+        await c.execute('UPDATE app_schema_migrations SET checksum=? WHERE version=?', [
+            '7a2f54c4eddc65950e9a584e783528f401bf209da3dab2ee20f22da45715d70c',
+            '20260928_15_local_accounting'
+        ]);
+    } finally { await c.end(); }
+    await startServer();
+    const verify = await mysql.createConnection(dbConfig);
+    try {
+        const [[row]] = await verify.execute('SELECT checksum FROM app_schema_migrations WHERE version=?', ['20260928_15_local_accounting']);
+        assert.equal(row.checksum, '1efeef9ba9dcda7a174f5f3a2be32ad17e2a65f6ecc31d10210111c432b9ae7a');
+        const [usersAfter] = await verify.execute('SELECT id, username FROM users ORDER BY id');
+        assert.deepEqual(usersAfter, usersBefore);
+        assert.doesNotMatch(serverOutput, /Starte Datenbankmigration 20260928_15_local_accounting/);
+    } finally { await verify.end(); }
+});

@@ -707,6 +707,12 @@ const migrations = [
     },
     {
         version: '20260928_15_local_accounting', checksumVersion: 1,
+        // Published 0708fb5a image contained one CRLF in otherwise LF SQL.
+        // Only this exact historical/current checksum pair is equivalent.
+        compatibleChecksums: {
+            '7a2f54c4eddc65950e9a584e783528f401bf209da3dab2ee20f22da45715d70c':
+                '1efeef9ba9dcda7a174f5f3a2be32ad17e2a65f6ecc31d10210111c432b9ae7a'
+        },
         checksumSource: fs.readFileSync(path.join(__dirname, '20260928_local_accounting.sql'), 'utf8'),
         checksumDependencies: [readSqlStatements, removeSqlComments],
         async up(connection) {

@@ -558,3 +558,23 @@ test('erzwingt für den ersten Admin eine starke und normalisierte Anmeldung', (
         /72 Bytes/
     );
 });
+
+
+test('accepts only the verified published accounting line-ending checksum without replaying SQL', async () => {
+    const migration = require('../database/migrations/automatic').migrations.find(m => m.version === '20260928_15_local_accounting');
+    const oldChecksum = '7a2f54c4eddc65950e9a584e783528f401bf209da3dab2ee20f22da45715d70c';
+    const canonical = '1efeef9ba9dcda7a174f5f3a2be32ad17e2a65f6ecc31d10210111c432b9ae7a';
+    assert.equal(migrationChecksum(migration), canonical);
+    const historicalSource = migration.checksumSource.replace(');\n\nDROP TABLE', ');\r\n\nDROP TABLE');
+    assert.equal(migrationChecksum({...migration, checksumSource: historicalSource}), oldChecksum);
+    const updates = [];
+    const connection = {async execute(sql, params) {
+        if (/SELECT version, checksum/.test(sql)) return [[{version:migration.version, checksum:oldChecksum}]];
+        assert.match(sql, /UPDATE app_schema_migrations/); updates.push(params); return [{affectedRows:1}];
+    }};
+    assert.deepEqual(await runAutomaticMigrations(connection, [migration]), []);
+    assert.deepEqual(updates, [[canonical, migration.version, oldChecksum]]);
+    await assert.rejects(runAutomaticMigrations(connection, [{...migration, checksumSource:migration.checksumSource+'SELECT 1;'}]), /nachträglich verändert/);
+    const unknown = {async execute(){return [[{version:migration.version,checksum:'f'.repeat(64)}]];}};
+    await assert.rejects(runAutomaticMigrations(unknown, [migration]), /nachträglich verändert/);
+});

@@ -176,8 +176,9 @@ async function runAutomaticMigrations(connection, migrationList = migrations) {
         if (appliedMigration) {
             if (appliedMigration.checksum !== checksum) {
                 if (
-                    (migration.legacyChecksums || []).includes(appliedMigration.checksum) &&
-                    legacyMigrationChecksum(migration) === appliedMigration.checksum
+                    ((migration.legacyChecksums || []).includes(appliedMigration.checksum) &&
+                    legacyMigrationChecksum(migration) === appliedMigration.checksum) ||
+                    migration.compatibleChecksums?.[appliedMigration.checksum] === checksum
                 ) {
                     await connection.execute(
                         `UPDATE app_schema_migrations
