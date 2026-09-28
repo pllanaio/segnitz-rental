@@ -6,7 +6,8 @@ ENV NODE_ENV=production \
 
 WORKDIR /app
 
-RUN apk add --no-cache tzdata su-exec \
+RUN apk upgrade --no-cache libcrypto3 libssl3 \
+    && apk add --no-cache tzdata su-exec \
     && mkdir -p /app/public/img/products /app/uploads/returns \
     && chown node:node /app /app/public/img/products /app/uploads/returns
 

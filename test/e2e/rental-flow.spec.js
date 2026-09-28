@@ -352,7 +352,7 @@ test('rendert öffentliche und eigene Bewertungen als Text statt als HTML', asyn
 
     await page.goto('/profile.html');
     await page.locator('#nav-orders').click();
-    await page.getByRole('button', { name: 'Details anzeigen' }).click();
+    await page.getByRole('button', { name: 'Bestellung öffnen' }).click();
     await expect(page.locator('#myOrderDetailsBody')).toContainText(payload);
     await expect(page.locator('#myOrderDetailsBody .xss-probe')).toHaveCount(0);
 });
@@ -704,7 +704,7 @@ test('verarbeitet den paginierten Kundenauftrags-Vertrag und zeigt vor Rückgabe
 
     await expect(page.locator('#myOrdersList')).toContainText('R202600001');
     await expect(page.locator('#myOrdersList')).toContainText('1 Bestellung gefunden');
-    await page.getByRole('button', { name: 'Details anzeigen' }).click();
+    await page.getByRole('button', { name: 'Bestellung öffnen' }).click();
     await expect(page.locator('#myOrderDetailsModal')).toBeVisible();
     await expect(page.locator('#myOrderDetailsBody')).toContainText('Kaution zurück');
     await expect(page.locator('#myOrderDetailsBody')).toContainText('0.00 €');

@@ -3187,7 +3187,7 @@ test('Lokale Rechnung: unveränderliches PDF, einmaliger Versand, Teilstorno und
  const base='/admin/orders/'+order.orderId+'/invoice';
  const sync=()=>admin.request(base+'/sync',{method:'POST'});
  let r=await sync();assert.equal(r.status,200,await r.clone().text());
- const [original]=await queryRows('SELECT * FROM billing_documents WHERE order_id=?',[order.orderId]);assert.match(original.document_number,/^RE-/);require('fs').writeFileSync('test-results/local-invoice.pdf',original.pdf_data);
+ const [original]=await queryRows('SELECT * FROM billing_documents WHERE order_id=?',[order.orderId]);assert.match(original.document_number,/^RE-/);require('fs').writeFileSync(path.join(require('os').tmpdir(),'local-invoice.pdf'),original.pdf_data);
  await sync();assert.equal((await queryRows('SELECT id FROM billing_documents WHERE order_id=?',[order.orderId])).length,1);
  const paid=await admin.request('/admin/orders/'+order.orderId+'/invoice/pay',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({method:'online'})});assert.equal(paid.status,200,await paid.clone().text());
  await waitForDatabaseRow("SELECT e.status FROM external_effects_outbox e JOIN rental_order_payments p ON p.external_operation_key=e.operation_key WHERE p.order_id=? AND p.payment_type='invoice_payment'",[order.orderId],r=>r.status==='succeeded','Rechnungszahlung veröffentlicht');

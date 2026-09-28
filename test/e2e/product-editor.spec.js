@@ -8,6 +8,7 @@ test('legt Produkt mit automatisch erzeugtem Key und Merkmalen an und bearbeitet
     await page.getByRole('button', { name: 'Einloggen' }).click(); await page.waitForURL(/backend/);
     await expect(page.locator('#productKey')).toHaveAttribute('readonly', '');
     await page.setViewportSize({ width: 1440, height: 1100 });
+    await page.getByRole('button', {name:'Produkt anlegen',exact:true}).click();
     await page.locator('#productKind').selectOption('Baumaschine');
     await expect(page.locator('#manufacturerOptions option[value="Wacker Neuson"]')).toHaveCount(1);
     await page.locator('#title').fill('Browser-Merkmaltest');
@@ -20,6 +21,8 @@ test('legt Produkt mit automatisch erzeugtem Key und Merkmalen an und bearbeitet
     await page.getByRole('button', { name: 'Produkt speichern', exact: true }).click();
     const response = await responsePromise; expect(response.status()).toBe(201); const created = await response.json();
     try {
+        await expect(page.locator('#productEditor')).toBeHidden();
+        await page.locator('#productList .card').filter({hasText:'Browser-Merkmaltest'}).getByRole('button',{name:'Bearbeiten',exact:true}).click();
         await expect(page.locator('#productEditorTitle')).toHaveText('Produkt bearbeiten');
         await expect(page.locator('#productKey')).toHaveValue(created.productKey);
         await expect(page.locator('#operatingHours')).toHaveValue('125.25');
@@ -32,7 +35,8 @@ test('legt Produkt mit automatisch erzeugtem Key und Merkmalen an und bearbeitet
         await page.locator('#manufacturer').fill('n.V.'); await page.locator('#productModel').fill('n.V.'); await page.locator('#operatingHours').fill('');
         const update = page.waitForResponse(r => r.url().endsWith('/products/' + created.productId) && r.request().method() === 'PUT');
         await page.getByRole('button', { name: 'Änderungen speichern' }).click(); expect((await update).status()).toBe(200);
-        await expect(page.locator('#saveProductBtn')).toBeEnabled();
+        await expect(page.locator('#productEditor')).toBeHidden();
+        await card.getByRole('button',{name:'Bearbeiten',exact:true}).click();
         await page.locator('#globalAlertContainer').evaluate(el => el.replaceChildren());
         await page.setViewportSize({ width: 390, height: 844 });
         await page.locator('#productForm').screenshot({ path: testInfo.outputPath('product-editor-mobile.png') });

@@ -34,7 +34,9 @@ module.exports = defineConfig({
         env: {
             ...process.env,
             PORT: String(port),
+            BASE_URL: baseURL,
             NODE_ENV: 'test',
+            MOLLIE_TEST_MODE: '1',
             DISABLE_PERIODIC_CLEANUP: '1',
             MOLLIE_API_KEY: process.env.MOLLIE_API_KEY || testMollieApiKey
         }

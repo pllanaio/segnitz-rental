@@ -4,6 +4,15 @@
 if (process.env.NODE_ENV !== 'test' || process.env.MOLLIE_TEST_MODE !== '1' || !/(?:^|_)test(?:_|$)/.test(process.env.DB_NAME || '')) {
     throw new Error('Payment race fixture requires an isolated test database.');
 }
+// The lifecycle suite performs hundreds of mutations against one isolated server.
+// Only this explicit test preloader raises mutation quotas; production is unchanged.
+const Module = require('node:module');
+const originalLoad = Module._load;
+Module._load = function(name, ...args) {
+    const result = originalLoad.call(this, name, ...args);
+    if (name !== 'express-rate-limit') return result;
+    return Object.assign(options => result({...options, limit: 10000}), result);
+};
 const mysql = require('mysql2/promise');
 const createConnection = mysql.createConnection.bind(mysql);
 mysql.createConnection = async (...args) => {

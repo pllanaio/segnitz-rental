@@ -68,8 +68,10 @@ test('Übergabeprotokoll mobil: Fotos, Entwurf, erneute Unterschrift und PDF', a
     await page.waitForURL(/index.html/);
     await page.goto('/profile.html');
     await page.evaluate(id => openMyOrderDetails(id), orderId);
-    const section = page.getByRole('region', { name: 'Übergabeprotokoll', exact: true });
-    await expect(section.getByRole('link', { name: 'Protokoll ansehen' })).toHaveAttribute('href', `/my-orders/${orderId}/handover/pdf`);
+    await page.locator('#myOrderDetailsModal .order-handover').click();
+    const section = page.locator('#handoverModal');
+    await expect(section.locator('#handoverReadOnly')).toContainText('Kratzer vorne links');
+    await expect(section.locator('#handoverPdf')).toHaveAttribute('href', `/my-orders/${orderId}/handover/pdf?download=1`);
     await page.setViewportSize({ width: 390, height: 844 });
     await section.screenshot({ path: require('path').join(process.env.HANDOVER_SCREENSHOT_DIR || require('os').tmpdir(), 'customer-handover-mobile.png') });
     const customerDownloadEvent = page.waitForEvent('download');
