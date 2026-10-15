@@ -49,7 +49,7 @@ function sendCartMutationError(res, error, fallbackMessage) {
 
 async function lockActiveProduct(connection, productId) {
     const [products] = await connection.execute(
-        `SELECT id, is_active
+        `SELECT id, is_active, price_per_day, hourly_prices
          FROM rental_products
          WHERE id = ?
          LIMIT 1
@@ -84,11 +84,11 @@ router.get('/cart', async (req, res) => {
                 ci.product_id AS productId,
                 DATE_FORMAT(ci.rental_start, '%Y-%m-%d') AS rentalStart,
                 DATE_FORMAT(ci.rental_end, '%Y-%m-%d') AS rentalEnd,
-                ci.quantity,
+                ci.quantity, ci.rental_hours AS rentalHours, TIME_FORMAT(ci.rental_start_time,'%H:%i') AS rentalStartTime, p.hourly_prices AS tariffPrices,
                 p.product_key AS productKey,
                 p.title,
                 p.description,
-                p.price_per_day AS pricePerDay,
+                CASE WHEN ci.rental_hours IS NULL THEN p.price_per_day WHEN ci.rental_hours=8 THEN p.price_per_day ELSE CAST(JSON_UNQUOTE(JSON_EXTRACT(p.hourly_prices,CONCAT('$.\"',ci.rental_hours,'\"'))) AS DECIMAL(10,2)) END AS pricePerDay,
                 p.deposit,
                 p.image_path AS imagePath
              FROM rental_cart_items ci
@@ -149,7 +149,8 @@ router.post('/cart/items', async (req, res) => {
             async connection => {
                 // Einheitliche Sperrreihenfolge für Cart-Mutationen: Cart -> Produkt -> Positionen.
                 const cartId = await getOrCreateActiveCart(connection, req, { forUpdate: true });
-                await lockActiveProduct(connection, productId);
+                const product=await lockActiveProduct(connection, productId);
+                const tariff=require('../services/rentalTariffs').quoteTariff(product,req.body);
 
                 const isAvailable = await checkProductAvailability(
                     connection,
@@ -157,7 +158,7 @@ router.post('/cart/items', async (req, res) => {
                     rentalStart,
                     rentalEnd,
                     null,
-                    true
+                    true,tariff
                 );
 
                 if (!isAvailable) {
@@ -172,7 +173,7 @@ router.post('/cart/items', async (req, res) => {
                     cartId,
                     productId,
                     rentalStart,
-                    rentalEnd
+                    rentalEnd,null,tariff
                 );
 
                 if (cartConflict) {
@@ -184,9 +185,9 @@ router.post('/cart/items', async (req, res) => {
 
                 const [insertResult] = await connection.execute(
                     `INSERT INTO rental_cart_items
-                     (cart_id, product_id, rental_start, rental_end, quantity)
-                     VALUES (?, ?, ?, ?, 1)`,
-                    [cartId, productId, rentalStart, rentalEnd]
+                     (cart_id, product_id, rental_start, rental_end, quantity,rental_hours,rental_start_time)
+                     VALUES (?, ?, ?, ?, 1,?,?)`,
+                    [cartId, productId, rentalStart, rentalEnd,tariff.rentalHours,tariff.rentalStartTime]
                 );
 
                 await connection.execute(
@@ -253,7 +254,7 @@ router.put('/cart/items/:id', async (req, res) => {
                 }
 
                 const [items] = await connection.execute(
-                    `SELECT id, product_id
+                    `SELECT id, product_id, rental_hours, rental_start_time
                      FROM rental_cart_items
                      WHERE id = ?
                      AND cart_id = ?
@@ -265,7 +266,8 @@ router.put('/cart/items/:id', async (req, res) => {
                     throw businessError(404, 'Warenkorbposition wurde nicht gefunden.');
                 }
 
-                await lockActiveProduct(connection, items[0].product_id);
+                const product=await lockActiveProduct(connection, items[0].product_id);
+                const tariff=require('../services/rentalTariffs').quoteTariff(product,{...req.body,rentalHours:items[0].rental_hours,rentalStartTime:req.body.rentalStartTime||String(items[0].rental_start_time||'').slice(0,5)});
 
                 const cartConflict = await checkCartItemConflict(
                     connection,
@@ -273,7 +275,7 @@ router.put('/cart/items/:id', async (req, res) => {
                     items[0].product_id,
                     rentalStart,
                     rentalEnd,
-                    req.params.id
+                    req.params.id,tariff
                 );
 
                 if (cartConflict) {
@@ -289,7 +291,7 @@ router.put('/cart/items/:id', async (req, res) => {
                     rentalStart,
                     rentalEnd,
                     null,
-                    true
+                    true,tariff
                 );
 
                 if (!isAvailable) {
@@ -301,10 +303,10 @@ router.put('/cart/items/:id', async (req, res) => {
 
                 await connection.execute(
                     `UPDATE rental_cart_items
-                     SET rental_start = ?, rental_end = ?
+                     SET rental_start = ?, rental_end = ?, rental_start_time=?
                      WHERE id = ?
                      AND cart_id = ?`,
-                    [rentalStart, rentalEnd, req.params.id, cartId]
+                    [rentalStart, rentalEnd,tariff.rentalStartTime, req.params.id, cartId]
                 );
 
                 await connection.execute(

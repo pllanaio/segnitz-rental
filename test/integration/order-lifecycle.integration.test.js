@@ -3130,7 +3130,7 @@ test('Rechnungskauf trennt Miete und Kaution, prüft Archivzugriff und erlaubt k
     assert.equal(details.payments.filter(p=>p.paymentType==='deposit'&&p.paymentStatus!=='replaced').length,1);
     const rent=details.payments.find(p=>p.paymentType==='initial_payment');const deposit=details.payments.filter(p=>p.paymentType==='deposit').at(-1);
     assert.equal(Number(rent.amount)+Number(deposit.amount),Number(details.total_amount));
-    const invoices=await (await customer.request('/my-invoices')).json();assert.ok(invoices.items.some(i=>i.orderId===order.orderId));
+    const invoices=await (await customer.request('/my-invoices')).json();assert.ok(!invoices.items.some(i=>i.orderId===order.orderId));
     assert.equal((await admin.request('/my-orders/'+order.orderId+'/invoice')).status,404);
     await seedBilling();
     let sync=await admin.request('/admin/orders/'+order.orderId+'/invoice/sync',{method:'POST'});assert.equal(sync.status,200,await sync.clone().text());
@@ -3167,12 +3167,12 @@ test('Rechnungskaution online: keine doppelte Barzahlung, PDF nur für Eigentüm
     const [row]=await queryRows('SELECT id FROM rental_invoices WHERE order_id=?',[order.orderId]);
     const PDFDocument=require('pdfkit');const pdf=await new Promise(resolve=>{const doc=new PDFDocument();const chunks=[];doc.on('data',c=>chunks.push(c));doc.on('end',()=>resolve(Buffer.concat(chunks)));doc.text('Testrechnung');doc.end();});
     await execute('UPDATE rental_invoices SET pdf_data=? WHERE id=?',[pdf,row.id]);
-    assert.equal((await customer.request(base+'/pdf')).status,200);
+    assert.equal((await customer.request(base+'/pdf')).status,409);
     assert.equal((await admin.request(base+'/pdf')).status,404);
     const {chromium}=require('playwright');const browser=await chromium.launch();
     try{const context=await browser.newContext();await context.addCookies([{name:'segnitz.sid',value:customer.cookie.slice('segnitz.sid='.length),url:BASE_URL}]);
         const page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
-        for(const width of [1280,390]){await page.setViewportSize({width,height:900});await page.goto(BASE_URL+'/profile.html?view=invoices');await page.getByRole('heading',{name:'Meine Rechnungen',exact:true}).waitFor();await page.locator('#customerInvoices a[href^="'+base+'/documents/"][href$="/pdf"]').waitFor();assert.equal(await page.locator('#customerInvoices [data-invoice-action]').count(),0);await page.screenshot({path:'test-results/invoice-archive-'+width+'.png',fullPage:true,animations:'disabled'});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));}
+        for(const width of [1280,390]){await page.setViewportSize({width,height:900});await page.goto(BASE_URL+'/profile.html?view=invoices');await page.getByRole('heading',{name:'Meine Rechnungen',exact:true}).waitFor();assert.equal(await page.locator('#customerInvoices a[href^="'+base+'/documents/"][href$="/pdf"]').count(),0);assert.equal(await page.locator('#customerInvoices [data-invoice-action]').count(),0);await page.screenshot({path:'test-results/invoice-archive-'+width+'.png',fullPage:true,animations:'disabled'});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));}
         assert.deepEqual(errors,[]);
     }finally{await browser.close();}
     const cancel=await customer.request('/my-orders/'+order.orderId+'/cancel',{method:'POST'});assert.equal(cancel.status,200,await cancel.clone().text());
@@ -3273,7 +3273,7 @@ test('Gemeinsame Rechnung: Abholung vor Zahlung, Archivsuche, XML und Kautionsr�
  const [doc]=await queryRows('SELECT * FROM billing_documents WHERE order_id=?',[order.orderId]);assert.ok(doc.xml_data);assert.match(doc.xml_data.toString(),/25.55/);assert.match(doc.xml_data.toString(),/460.00/);
  for(const q of [doc.document_number,'160,00',TEST_CUSTOMER.email,'Lifecycle-Minibagger',new Date(doc.created_at).toLocaleDateString('de-DE')]){const result=await admin.request('/admin/invoices?q='+encodeURIComponent(q+' '+doc.document_number));assert.equal(result.status,200,await result.clone().text());assert.ok((await result.json()).items.some(i=>i.id===doc.id));}
  assert.equal((await (await stranger.request('/my-invoices?q='+doc.document_number)).json()).total,0);
- const xmlPath='/my-orders/'+order.orderId+'/invoice/documents/'+doc.id+'/xml';assert.equal((await customer.request(xmlPath)).status,200);assert.equal((await stranger.request(xmlPath)).status,404);
+ const xmlPath='/my-orders/'+order.orderId+'/invoice/documents/'+doc.id+'/xml';assert.equal((await customer.request(xmlPath)).status,404);assert.equal((await stranger.request(xmlPath)).status,404);
  const [item]=await queryRows('SELECT id FROM rental_order_items WHERE order_id=?',[order.orderId]);await signHandoverBeforePickup(admin,item.id);
  assert.equal((await admin.request('/admin/order-items/'+item.id+'/pickup',{method:'PUT'})).status,200);
  const returned=await admin.request('/admin/order-items/'+item.id+'/return',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({actualReturnDate:end,adjustedRentalStart:start,adjustedRentalEnd:end,adjustedPricePerDay:80,returnStatus:'returned_ok',isDamaged:false,damageDescription:'',isLate:false,lateDescription:'',depositDecision:'full_refund',depositDeductionPercent:0,depositDeductionReason:'',additionalChargeReason:'',additionalChargeAmount:0,additionalChargePaymentMethod:'cash'})});assert.equal(returned.status,200,await returned.clone().text());
@@ -3285,7 +3285,7 @@ test('Gemeinsame Rechnung: Abholung vor Zahlung, Archivsuche, XML und Kautionsr�
  const [refund]=await queryRows("SELECT * FROM rental_order_payments WHERE order_id=? AND payment_type='deposit_refund'",[order.orderId]);assert.equal(refund.payment_method,'online');assert.equal(refund.mollie_payment_id,paymentId);assert.equal(Number(refund.amount),-300);
  await waitForDatabaseRow('SELECT mollie_refund_id FROM rental_order_payments WHERE id=?',[refund.id],r=>!!r.mollie_refund_id,'Mollie-Kautionsrückzahlung');
  assert.equal((await queryRows('SELECT pdf_data FROM billing_documents WHERE id=?',[doc.id]))[0].pdf_data.equals(doc.pdf_data),true);
- const mails=await queryRows("SELECT payload_json FROM external_effects_outbox WHERE operation_key=?",['mail-local-invoice-paid-'+doc.invoice_id]);assert.equal(mails.length,1);const payload=typeof mails[0].payload_json==='string'?JSON.parse(mails[0].payload_json):mails[0].payload_json;assert.ok(payload.message.invoiceXml);assert.ok(payload.message.invoicePdf);
+ const mails=await queryRows("SELECT payload_json FROM external_effects_outbox WHERE operation_key=?",['mail-billing-document-'+doc.id]);assert.equal(mails.length,1);const payload=typeof mails[0].payload_json==='string'?JSON.parse(mails[0].payload_json):mails[0].payload_json;assert.ok(payload.message.invoiceXml);assert.ok(payload.message.invoicePdf);
  const list=await (await customer.request('/my-orders')).json();assert.ok(list.items.some(o=>o.id===order.orderId&&o.hasInvoice));
 });
 
@@ -3328,7 +3328,7 @@ test('Mollie-Überweisung: verspätete alte Zahlung nach Teilstorno erstattet nu
 test('Überweisung: Mollie-Endstatus bleibt in der Bestellung erhalten und Rechnungsmail enthält Zahlungslink',async()=>{
  const customer=new SessionClient(),admin=new SessionClient();await login(customer,TEST_CUSTOMER);await login(admin,TEST_ADMIN);await seedBilling();
  const order=await createOrder(customer,'cash',futureDate(3100),futureDate(3101));assert.equal((await offerInvoiceTransfer(admin,order.orderId)).status,200);
- const [invoice]=await queryRows("SELECT id FROM billing_documents WHERE order_id=? AND kind='invoice'",[order.orderId]);const [mail]=await queryRows('SELECT payload_json FROM external_effects_outbox WHERE operation_key=?',['mail-billing-document-'+invoice.id]);const payload=typeof mail.payload_json==='string'?JSON.parse(mail.payload_json):mail.payload_json;assert.ok(payload.message.paymentUrl.startsWith('https://'));assert.ok(payload.message.invoicePdf);assert.ok(payload.message.invoiceXml);
+ const [invoice]=await queryRows("SELECT id FROM billing_documents WHERE order_id=? AND kind='invoice'",[order.orderId]);const [mail]=await queryRows('SELECT payload_json FROM external_effects_outbox WHERE operation_key=?',['mail-payment-request-'+invoice.id]);const payload=typeof mail.payload_json==='string'?JSON.parse(mail.payload_json):mail.payload_json;assert.ok(payload.message.paymentUrl.startsWith('https://'));assert.equal(payload.message.invoicePdf,undefined);assert.equal(payload.message.invoiceXml,undefined);
  await execute("UPDATE rental_order_items SET item_status='returned_ok',actual_return_date=CURDATE() WHERE order_id=?",[order.orderId]);
  for(const [remote,expected] of [['canceled','cancelled'],['failed','failed'],['expired','expired']]){
   const id='tr_test_'+remote+'_invoice_status';await execute("UPDATE rental_order_payments SET mollie_payment_id=?,payment_status='pending' WHERE order_id=? AND payment_type='invoice_payment'",[id,order.orderId]);
@@ -3460,10 +3460,10 @@ test('Unabhängige Verlängerungsrechnung: offener Mietlink bleibt bestehen und 
  assert.equal(snapshot.dueAt.slice(0,10),require('../../services/invoiceTransfer').transferDueDate());
  const [unchanged]=await queryRows('SELECT invoice_number,pdf_data,due_at FROM rental_invoices WHERE order_id=?',[order.orderId]);assert.equal(unchanged.invoice_number,original.invoice_number);assert.ok(unchanged.pdf_data.equals(original.pdf_data));assert.equal(String(unchanged.due_at),String(original.due_at));
  assert.equal((await queryRows('SELECT payment_status FROM rental_order_payments WHERE id=?',[initial.id]))[0].payment_status,initial.payment_status);
- const outbox=await queryRows("SELECT payload_json FROM external_effects_outbox WHERE operation_key=?",['mail-billing-document-'+invoice.id]);assert.equal(outbox.length,1);assert.match(JSON.stringify(outbox),/invoicePdf/);assert.match(JSON.stringify(outbox),/paymentUrl/);
- const archive=await (await customer.request('/my-invoices?q='+invoice.document_number)).json();assert.equal(archive.total,1);assert.equal(archive.items.length,2);assert.equal((await (await stranger.request('/my-invoices?orderId='+order.orderId)).json()).items.length,0);
+ const outbox=await queryRows("SELECT payload_json FROM external_effects_outbox WHERE operation_key=?",['mail-payment-request-'+invoice.id]);assert.equal(outbox.length,1);assert.doesNotMatch(JSON.stringify(outbox),/invoicePdf/);assert.match(JSON.stringify(outbox),/paymentUrl/);
+ const archive=await (await customer.request('/my-invoices?q='+invoice.document_number)).json();assert.equal(archive.total,0);assert.equal(archive.items.length,0);assert.equal((await (await stranger.request('/my-invoices?orderId='+order.orderId)).json()).items.length,0);
  const paid='tr_test_paid_independent_'+extra.id;await execute('UPDATE rental_order_payments SET mollie_payment_id=? WHERE id=?',[paid,extra.id]);assert.equal((await admin.request('/admin/orders/'+order.orderId+'/payments/sync',{method:'POST'})).status,200);
- const after=await (await customer.request('/my-invoices?orderId='+order.orderId)).json();assert.equal(after.items.find(d=>d.id===invoice.id).status,'paid');assert.equal(after.items.find(d=>d.id!==invoice.id).status,'issued');
+ const after=await (await customer.request('/my-invoices?orderId='+order.orderId)).json();assert.equal(after.items.find(d=>d.id===invoice.id).status,'paid');assert.equal(after.items.filter(d=>d.id!==invoice.id).length,0);
  assert.equal((await queryRows('SELECT payment_status FROM rental_orders WHERE id=?',[order.orderId]))[0].payment_status,'pending');
  const browser=await require('playwright').chromium.launch();
  try{for(const [role,client] of [['admin',admin],['customer',customer]]){
@@ -3472,7 +3472,7 @@ test('Unabhängige Verlängerungsrechnung: offener Mietlink bleibt bestehen und 
   await page.goto(BASE_URL+(role==='admin'?'/backend.html':'/profile.html?view=invoices'));
   if(role==='admin')await page.locator('#nav-invoices').click();
   await page.locator('[data-archive-search]').fill(invoice.document_number);await page.waitForTimeout(400);
-  assert.equal(await page.locator('.invoice-document').count(),2);
+  assert.equal(await page.locator('.invoice-document').count(),role==='admin'?2:1);
   for(const width of [1280,390]){
    await page.setViewportSize({width,height:900});await page.locator('[data-archive-search]').scrollIntoViewIfNeeded();await page.waitForTimeout(250);
    assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
@@ -3568,7 +3568,88 @@ test('Unabhängige Verlängerungsrechnung: offener Mietlink bleibt bestehen und 
 
  const cancelled=await admin.request('/admin/orders/'+order.orderId+'/cancel',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({})});assert.equal(cancelled.status,200,await cancelled.clone().text());
  const credits=await queryRows("SELECT * FROM billing_documents WHERE original_document_id=? AND kind='credit'",[invoice.id]);assert.equal(credits.length,1);assert.equal(credits[0].gross_cents,-8000);
- const finalArchive=await (await customer.request('/my-invoices?orderId='+order.orderId)).json();assert.equal(finalArchive.items.length,4);assert.equal(finalArchive.items.find(d=>d.id===invoice.id).status,'cancelled');
+ const finalArchive=await (await customer.request('/my-invoices?orderId='+order.orderId)).json();assert.equal(finalArchive.items.length,3);assert.equal(finalArchive.items.find(d=>d.id===invoice.id).status,'cancelled');
+});
+
+test('Neue Mietabläufe: Admin-Gastbestellung verwendet die Kundenadresse ohne Konto',async()=>{
+ const admin=new SessionClient(),customer=new SessionClient();await login(admin,TEST_ADMIN);await login(customer,TEST_CUSTOMER);
+ const email='walk-in@example.com';await addCartItem(admin,futureDate(5100),futureDate(5101));
+ const result=await admin.request('/data',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({paymentMethod:'cash',form:orderForm(email)})});
+ assert.equal(result.status,200,await result.clone().text());const order=await result.json();
+ const [stored]=await queryRows('SELECT user_id,customer_email FROM rental_orders WHERE id=?',[order.orderId]);assert.equal(stored.customer_email,email);assert.equal(stored.user_id,null);
+ assert.equal((await queryRows('SELECT id FROM users WHERE username=?',[email])).length,0);
+ await addCartItem(customer,futureDate(5103),futureDate(5104));
+ const blocked=await customer.request('/data',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({paymentMethod:'cash',form:orderForm(email)})});assert.equal(blocked.status,403);await customer.request('/cart',{method:'DELETE'});
+});
+
+test('Neue Mietabläufe: Überweisung sendet zunächst nur Zahlungsaufforderung; Belege erst bezahlt, Korrekturen immer',async()=>{
+ const admin=new SessionClient(),customer=new SessionClient();await login(admin,TEST_ADMIN);await login(customer,TEST_CUSTOMER);await seedBilling();
+ const order=await createOrder(customer,'cash',futureDate(5110),futureDate(5111));const base='/admin/orders/'+order.orderId+'/invoice';
+ const offer=await offerInvoiceTransfer(admin,order.orderId);assert.equal(offer.status,200,await offer.clone().text());
+ const [doc]=await queryRows("SELECT * FROM billing_documents WHERE order_id=? AND kind='invoice'",[order.orderId]);assert.equal(doc.customer_released_at,null);
+ assert.equal((await customer.request('/my-orders/'+order.orderId+'/invoice/documents/'+doc.id+'/pdf')).status,404);
+ assert.equal((await customer.request('/my-orders/'+order.orderId+'/invoice/documents/'+doc.id+'/xml')).status,404);
+ assert.equal((await customer.request('/my-orders/'+order.orderId+'/invoice/pdf')).status,409);
+ assert.equal((await (await customer.request('/my-invoices?orderId='+order.orderId)).json()).items.length,0);
+ const [mail]=await queryRows('SELECT payload_json FROM external_effects_outbox WHERE operation_key=?',['mail-payment-request-'+doc.id]);const payload=typeof mail.payload_json==='string'?JSON.parse(mail.payload_json):mail.payload_json;
+ assert.ok(payload.message.paymentUrl);assert.equal(payload.message.invoicePdf,undefined);assert.equal((await queryRows('SELECT id FROM external_effects_outbox WHERE operation_key=?',['mail-billing-document-'+doc.id])).length,0);
+ await payCombinedTransfer(customer,order.orderId);await admin.request(base+'/sync',{method:'POST'});
+ assert.equal((await customer.request('/my-orders/'+order.orderId+'/invoice/documents/'+doc.id+'/pdf')).status,200);
+ assert.equal((await queryRows('SELECT id FROM external_effects_outbox WHERE operation_key=?',['mail-billing-document-'+doc.id])).length,1);
+ await admin.request(base+'/sync',{method:'POST'});assert.equal((await queryRows('SELECT id FROM external_effects_outbox WHERE operation_key=?',['mail-billing-document-'+doc.id])).length,1);
+ const cancel=await admin.request('/admin/orders/'+order.orderId+'/cancel',{method:'PUT',headers:{'content-type':'application/json'},body:'{}'});assert.equal(cancel.status,200,await cancel.clone().text());
+ const [credit]=await queryRows("SELECT id,customer_released_at FROM billing_documents WHERE order_id=? AND kind='credit'",[order.orderId]);assert.ok(credit.customer_released_at);
+ assert.equal((await queryRows('SELECT id FROM external_effects_outbox WHERE operation_key=?',['mail-billing-document-'+credit.id])).length,1);
+ assert.equal((await customer.request('/my-orders/'+order.orderId+'/invoice/documents/'+credit.id+'/pdf')).status,200);
+});
+
+test('Neue Mietabläufe: Stundentarif, benachbarte Zeitfenster, Verlängerung und Rückgabe',async()=>{
+ const admin=new SessionClient(),customer=new SessionClient();await login(admin,TEST_ADMIN);await login(customer,TEST_CUSTOMER);await seedBilling();
+ await execute('UPDATE rental_products SET hourly_prices=? WHERE id=?',[JSON.stringify({2:30,4:50,6:65,8:80}),TEST_PRODUCT.id]);
+ const date=futureDate(5120);
+ const cart=await customer.request('/cart/items',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({productId:TEST_PRODUCT.id,rentalStart:date,rentalEnd:date,rentalHours:2,rentalStartTime:'08:00'})});assert.equal(cart.status,201,await cart.clone().text());
+ const booking=await customer.request('/data',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({paymentMethod:'cash',form:orderForm(TEST_CUSTOMER.email)})});assert.equal(booking.status,200,await booking.clone().text());const order=await booking.json();
+ const [item]=await queryRows('SELECT * FROM rental_order_items WHERE order_id=?',[order.orderId]);assert.equal(item.rental_hours,2);assert.equal(Number(item.price_per_day),30);
+ for(const [time,expected] of [['09:00',409],['10:00',201]]){const r=await customer.request('/cart/items',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({productId:TEST_PRODUCT.id,rentalStart:date,rentalEnd:date,rentalHours:2,rentalStartTime:time})});assert.equal(r.status,expected,await r.clone().text());}
+ await customer.request('/cart',{method:'DELETE'});
+ const paid=await admin.request('/admin/order-payments/manual',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({orderId:order.orderId,paymentType:'initial_payment',amount:330})});assert.equal(paid.status,200,await paid.clone().text());
+ await signHandoverBeforePickup(admin,item.id);assert.equal((await admin.request('/admin/order-items/'+item.id+'/pickup',{method:'PUT'})).status,200);
+ const extension=await admin.request('/admin/order-items/'+item.id+'/rental-adjustment',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({adjustedRentalStart:date,adjustedRentalEnd:date,adjustedRentalHours:4,adjustedPricePerDay:30})});assert.equal(extension.status,200,await extension.clone().text());
+ assert.equal(Number((await queryRows("SELECT amount FROM rental_order_payments WHERE order_id=? AND payment_type='rental_adjustment'",[order.orderId]))[0].amount),20);
+ const returned=await admin.request('/admin/order-items/'+item.id+'/return',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({actualReturnDate:date,actualReturnTime:'12:01',additionalChargeAmount:0,additionalChargePaymentMethod:'cash'})});assert.equal(returned.status,200,await returned.clone().text());
+ const [saved]=await queryRows('SELECT early_return_refund,late_fee,deposit_refund_amount FROM rental_order_items WHERE id=?',[item.id]);assert.equal(Number(saved.early_return_refund),0);assert.equal(Number(saved.late_fee),15);assert.equal(Number(saved.deposit_refund_amount),265);
+ await execute('UPDATE rental_products SET hourly_prices=NULL WHERE id=?',[TEST_PRODUCT.id]);
+});
+
+test('Neue Mietabläufe: frühe Tagesrückgabe erstellt separate Mieterstattung und rabattierte Korrektur',async()=>{
+ const admin=new SessionClient(),customer=new SessionClient();await login(admin,TEST_ADMIN);await login(customer,TEST_CUSTOMER);await seedBilling();
+ const start=futureDate(5130),end=futureDate(5134);await addCartItem(customer,start,end);
+ await createTestCoupon(admin,'EARLYRETURN10',10);const quote=await previewTestCoupon(customer,'EARLYRETURN10');const response=await submitCouponOrder(customer,quote);assert.equal(response.status,200,await response.clone().text());const order=await response.json();
+ const paid=await admin.request('/admin/order-payments/manual',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({orderId:order.orderId,paymentType:'initial_payment',amount:660})});assert.equal(paid.status,200,await paid.clone().text());
+ await admin.request('/admin/orders/'+order.orderId+'/invoice/sync',{method:'POST'});
+ const [item]=await queryRows('SELECT id FROM rental_order_items WHERE order_id=?',[order.orderId]);await signHandoverBeforePickup(admin,item.id);await admin.request('/admin/order-items/'+item.id+'/pickup',{method:'PUT'});
+ const returned=await admin.request('/admin/order-items/'+item.id+'/return',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({actualReturnDate:futureDate(5132),additionalChargeAmount:50,additionalChargeReason:'Reinigung',additionalChargePaymentMethod:'cash'})});assert.equal(returned.status,200,await returned.clone().text());
+ const [saved]=await queryRows('SELECT deposit,deposit_refund_amount,early_return_refund FROM rental_order_items WHERE id=?',[item.id]);assert.equal(Number(saved.deposit),300);assert.equal(Number(saved.deposit_refund_amount),250);assert.equal(Number(saved.early_return_refund),144);
+ const refunds=await queryRows("SELECT payment_type,amount FROM rental_order_payments WHERE order_id=? AND payment_type IN ('rental_refund','deposit_refund')",[order.orderId]);assert.deepEqual(refunds.map(r=>[r.payment_type,Number(r.amount)]).sort(),[['deposit_refund',-250],['rental_refund',-144]]);
+ const [credit]=await queryRows("SELECT gross_cents,customer_released_at FROM billing_documents WHERE order_id=? AND kind='credit'",[order.orderId]);assert.equal(Number(credit.gross_cents),-14400);assert.ok(credit.customer_released_at);
+ const cashRefund=await admin.request('/admin/order-payments/manual-refund',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({orderId:order.orderId,orderItemId:item.id,paymentType:'rental_refund',amount:144})});assert.equal(cashRefund.status,200,await cashRefund.clone().text());
+ const repeat=await admin.request('/admin/order-items/'+item.id+'/return',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({actualReturnDate:futureDate(5132)})});assert.equal(repeat.status,409);
+});
+
+for(const payBeforeReturn of [true,false])test('Neue Mietabläufe: Online-Mieterstattung bleibt idempotent, Zahlung vor Rückgabe '+payBeforeReturn,async()=>{
+ const admin=new SessionClient(),customer=new SessionClient();await login(admin,TEST_ADMIN);await login(customer,TEST_CUSTOMER);await seedBilling();
+ const offset=payBeforeReturn?5140:5150;const order=await createOrder(customer,'cash',futureDate(offset),futureDate(offset+4));
+ assert.equal((await offerInvoiceTransfer(admin,order.orderId)).status,200);
+ if(payBeforeReturn)await payCombinedTransfer(customer,order.orderId);
+ const [item]=await queryRows('SELECT id FROM rental_order_items WHERE order_id=?',[order.orderId]);await signHandoverBeforePickup(admin,item.id);
+ assert.equal((await admin.request('/admin/order-items/'+item.id+'/pickup',{method:'PUT'})).status,200);
+ const returned=await admin.request('/admin/order-items/'+item.id+'/return',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({actualReturnDate:futureDate(offset+2),additionalChargeAmount:50,additionalChargeReason:'Reinigung',additionalChargePaymentMethod:'cash'})});assert.equal(returned.status,200,await returned.clone().text());
+ if(!payBeforeReturn){assert.equal((await queryRows("SELECT id FROM rental_order_payments WHERE order_id=? AND payment_type='rental_refund'",[order.orderId])).length,0);await payCombinedTransfer(customer,order.orderId);}
+ for(let i=0;i<2;i++)assert.equal((await admin.request('/admin/orders/'+order.orderId+'/payments/sync',{method:'POST'})).status,200);
+ const refunds=await queryRows("SELECT payment_type,amount,payment_method,mollie_payment_id FROM rental_order_payments WHERE order_id=? AND amount<0",[order.orderId]);
+ assert.equal(refunds.filter(r=>r.payment_type==='rental_refund').length,1);assert.equal(Number(refunds.find(r=>r.payment_type==='rental_refund').amount),-160);
+ assert.equal(refunds.reduce((sum,r)=>sum+Number(r.amount),0),-410);
+ assert.ok(refunds.every(r=>r.payment_method==='online'&&r.mollie_payment_id));
 });
 
 test('E-Mail-Wechsel verlangt Passwort und Code, erhält Bestellungen und sperrt alte Sitzungen', async () => {

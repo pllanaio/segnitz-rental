@@ -277,6 +277,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     };
 
+    let canResumeCheckout = false;
     const setVerificationView = (waiting, message = '') => {
         if (resultIcon) {
             resultIcon.innerHTML = '<i class="bi bi-hourglass-split"></i>';
@@ -294,6 +295,13 @@ document.addEventListener('DOMContentLoaded', async () => {
                 button.textContent = 'Zahlungsstatus erneut prüfen';
                 button.addEventListener('click', verifyPaymentStatus);
                 finalDiv.append(button);
+                if (canResumeCheckout && !paymentType) {
+                    const resume = document.createElement('button');
+                    resume.type = 'button'; resume.className = 'btn btn-warning ms-2';
+                    resume.textContent = 'Zahlung bei Mollie fortsetzen';
+                    resume.addEventListener('click', () => retryMolliePayment(orderId));
+                    finalDiv.append(resume);
+                }
             }
         }
     };
@@ -350,6 +358,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                     if (!response.ok) continue;
                     const order = await response.json();
                     const status = order.payment_status || order.paymentStatus;
+                    canResumeCheckout = !paymentType && ['pending', 'open'].includes(status);
                     if (status === 'paid') { setPaymentSuccessView(order); return; }
                     if (definitiveStatuses.includes(status)) { setPaymentErrorView(status, order); return; }
                     if (status === 'authorized') setVerificationView(true, 'Mollie hat die Zahlung autorisiert. Die endgültige Zahlungsbestätigung steht noch aus. Bitte zahlen Sie nicht erneut.');
@@ -650,6 +659,10 @@ submitBtn.addEventListener('click', async (event) => {
         }
 
         if (result.checkoutUrl) {
+            const returnUrl = new URL(window.location.href);
+            returnUrl.searchParams.set('payment', 'return');
+            returnUrl.searchParams.set('orderId', String(result.orderId));
+            history.replaceState(null, '', returnUrl);
             window.location.href = result.checkoutUrl;
             return;
         }
@@ -813,6 +826,32 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 let selectedProductCard = null;
+function selectedHourlyTariff(){return Number(document.getElementById('modalRentalHours')?.value)||null;}
+function updateSelectedRentalPrice(){
+    const start=document.getElementById('modalRentalStart').value,end=document.getElementById('modalRentalEnd').value;
+    const info=document.getElementById('modalRentalInfo');
+    if(!start||!end){info.classList.add('d-none');return;}
+    const product=rentalProducts.find(p=>String(p.id)===String(selectedProductCard?.dataset.productId));if(!product)return;
+    const h=selectedHourlyTariff(),prices=typeof product.hourly_prices==='string'?JSON.parse(product.hourly_prices):product.hourly_prices;
+    const days=calculateRentalDays(start,end),rent=h?Number(h===8?product.price_per_day:prices[h]):days*Number(product.price_per_day),deposit=Number(product.deposit);
+    info.classList.remove('d-none','alert-danger');info.classList.add('alert-info');
+    info.textContent=(h?h+' Stunden ab '+document.getElementById('modalRentalStartTime').value:days+' Miettag'+(days===1?'':'e'))+
+        ' · Miete inkl. MwSt.: '+formatCurrency(rent)+' · Kaution: '+formatCurrency(deposit)+' · Gesamt: '+formatCurrency(rent+deposit);
+}
+function setupHourlySelector(){
+    let panel=document.getElementById('modalHourlyTariffs');
+    if(!panel){panel=document.createElement('div');panel.id='modalHourlyTariffs';panel.className='row g-3 mb-3';
+        panel.innerHTML='<div class="col-sm-7"><label for="modalRentalHours" class="form-label">Miettarif</label><select id="modalRentalHours" class="form-select"></select></div><div class="col-sm-5"><label for="modalRentalStartTime" class="form-label">Startzeit</label><input type="time" id="modalRentalStartTime" class="form-control" value="08:00"></div>';
+        document.getElementById('modalCalendarContainer').before(panel);
+        panel.querySelector('select').addEventListener('change',()=>{initProductCalendar();panel.querySelector('input').disabled=!selectedHourlyTariff();updateSelectedRentalPrice();});
+        panel.querySelector('input').addEventListener('input',updateSelectedRentalPrice);
+    }
+    const p=rentalProducts.find(p=>String(p.id)===String(selectedProductCard?.dataset.productId));
+    const prices=typeof p?.hourly_prices==='string'?JSON.parse(p.hourly_prices):p?.hourly_prices;
+    const select=panel.querySelector('select');select.replaceChildren(new Option('Tagesmiete',''));
+    if(prices)for(const h of [2,4,6,8])select.add(new Option(h+' Stunden · '+formatCurrency(h===8?p.price_per_day:prices[h]),h));
+    panel.hidden=!prices;panel.querySelector('input').disabled=true;
+}
 
 document.addEventListener("DOMContentLoaded", () => {
     const modalElement = document.getElementById('productDetailsModal');
@@ -935,6 +974,7 @@ async function showProductDetails(card) {
     }
 
     await loadProductAvailability(card.dataset.productId);
+    setupHourlySelector();
     initProductCalendar();
     const modal = new bootstrap.Modal(document.getElementById('productDetailsModal'));
     modal.show();
@@ -1425,7 +1465,8 @@ async function loadCart() {
 }
 
 async function addProductToCart(productId, rentalStart, rentalEnd) {
-    if (selectedRangeConflicts(rentalStart, rentalEnd)) {
+    const rentalHours=selectedHourlyTariff(),rentalStartTime=rentalHours?document.getElementById('modalRentalStartTime').value:null;
+    if (!rentalHours && selectedRangeConflicts(rentalStart, rentalEnd)) {
         showAlert('Dieses Produkt ist im ausgewählten Zeitraum bereits reserviert.', 'danger');
         return;
     }
@@ -1436,7 +1477,7 @@ async function addProductToCart(productId, rentalStart, rentalEnd) {
             && rentalEnd >= item.rentalStart;
     });
 
-    if (cartConflict) {
+    if (cartConflict && !rentalHours) {
         showAlert('Dieses Produkt befindet sich bereits im Warenkorb.', 'danger');
         return;
     }
@@ -1450,7 +1491,7 @@ async function addProductToCart(productId, rentalStart, rentalEnd) {
             body: JSON.stringify({
                 productId,
                 rentalStart,
-                rentalEnd
+                rentalEnd,rentalHours,rentalStartTime
             })
         });
 
@@ -1600,9 +1641,9 @@ function renderCart() {
                     <div>
                         <strong>${escapeHtml(item.title)}</strong><br>
                         <span class="small text-muted">
-                            ${item.rentalStart} bis ${item.rentalEnd} · ${days} Tag${days === 1 ? '' : 'e'}
+                            ${item.rentalStart} bis ${item.rentalEnd} · ${item.rentalHours ? item.rentalHours+' Stunden ab '+item.rentalStartTime : days+' Tag'+(days===1?'':'e')}
                         </span><br>
-                        <span>${formatCurrency(pricePerDay)} / Tag</span><br>
+                        <span>${formatCurrency(pricePerDay)} ${item.rentalHours?'für den Stundentarif':'/ Tag'}</span><br>
                         <span>Kaution: ${formatCurrency(deposit)}</span>
                     </div>
 
@@ -1699,7 +1740,7 @@ function renderCartReview() {
             <div class="border rounded p-3 mb-2">
                 <strong>${escapeHtml(item.title)}</strong><br>
                 Mietzeitraum: ${item.rentalStart} bis ${item.rentalEnd}<br>
-                Dauer: ${days} Tag${days === 1 ? '' : 'e'}<br>
+                Dauer: ${item.rentalHours ? item.rentalHours+' Stunden ab '+item.rentalStartTime : days+' Tag'+(days===1?'':'e')}<br>
                 Miete: ${formatCurrency(lineTotal)}<br>
                 Kaution: ${formatCurrency(deposit)}
             </div>
@@ -1775,13 +1816,13 @@ function initProductCalendar() {
         calendarContainer.innerHTML = '';
     }
 
-    const blockedRanges = currentBlockedPeriods.map(period => ({
+    const blockedRanges = currentBlockedPeriods.filter(period=>!selectedHourlyTariff()||!period.rentalHours).map(period => ({
         from: period.rentalStart.split('T')[0],
         to: period.rentalEnd.split('T')[0]
     }));
 
     productCalendar = flatpickr(rangeInput, {
-        mode: 'range',
+        mode: selectedHourlyTariff()?'single':'range',
         inline: true,
         disableMobile: true,
         appendTo: calendarContainer,
@@ -1793,7 +1834,7 @@ function initProductCalendar() {
         allowInput: false,
 
         onChange: function (selectedDates) {
-            if (selectedDates.length !== 2) {
+            if (selectedDates.length !== (selectedHourlyTariff()?1:2)) {
                 startInput.value = '';
                 endInput.value = '';
                 infoBox.classList.add('d-none');
@@ -1802,7 +1843,7 @@ function initProductCalendar() {
             }
 
             const startDate = productCalendar.formatDate(selectedDates[0], 'Y-m-d');
-            const endDate = productCalendar.formatDate(selectedDates[1], 'Y-m-d');
+            const endDate = productCalendar.formatDate(selectedDates[selectedHourlyTariff()?0:1], 'Y-m-d');
 
             startInput.value = startDate;
             endInput.value = endDate;
@@ -1811,7 +1852,7 @@ function initProductCalendar() {
 
             infoBox.classList.remove('d-none', 'alert-danger');
             infoBox.classList.add('alert-info');
-            infoBox.textContent = `Ausgewählter Mietzeitraum: ${days} Tag${days === 1 ? '' : 'e'}`;
+            updateSelectedRentalPrice();
         }
     });
 }
@@ -1831,6 +1872,9 @@ async function openCartItemEditModal(itemId) {
     document.getElementById('editCartRentalEnd').value = item.rentalEnd;
     document.getElementById('editCartRentalRange').value = `${item.rentalStart} bis ${item.rentalEnd}`;
 
+    let timeField=document.getElementById('editCartStartTime');
+    if(!timeField){const label=document.createElement('label');label.className='form-label d-block mt-3';label.id='editCartStartTimeLabel';label.textContent='Startzeit';timeField=document.createElement('input');timeField.type='time';timeField.id='editCartStartTime';timeField.className='form-control';label.append(timeField);document.getElementById('editCartRentalRange').after(label);}
+    document.getElementById('editCartStartTimeLabel').hidden=!item.rentalHours;timeField.value=item.rentalStartTime||'08:00';
     await loadProductAvailability(item.productId);
 
     if (cartEditCalendar) {
@@ -1838,19 +1882,19 @@ async function openCartItemEditModal(itemId) {
     }
 
     cartEditCalendar = flatpickr('#editCartRentalRange', {
-        mode: 'range',
+        mode: item.rentalHours?'single':'range',
         dateFormat: 'Y-m-d',
         locale: 'de',
         minDate: 'today',
-        defaultDate: [item.rentalStart, item.rentalEnd],
-        disable: currentBlockedPeriods.map(period => ({
+        defaultDate: item.rentalHours?[item.rentalStart]:[item.rentalStart, item.rentalEnd],
+        disable: currentBlockedPeriods.filter(period=>!item.rentalHours||!period.rentalHours).map(period => ({
             from: period.rentalStart,
             to: period.rentalEnd
         })),
         onChange: function (selectedDates) {
-            if (selectedDates.length === 2) {
+            if (selectedDates.length === (item.rentalHours?1:2)) {
                 const start = flatpickr.formatDate(selectedDates[0], 'Y-m-d');
-                const end = flatpickr.formatDate(selectedDates[1], 'Y-m-d');
+                const end = flatpickr.formatDate(selectedDates[item.rentalHours?0:1], 'Y-m-d');
 
                 document.getElementById('editCartRentalStart').value = start;
                 document.getElementById('editCartRentalEnd').value = end;
@@ -1885,7 +1929,8 @@ async function saveCartItemRentalPeriod() {
             },
             body: JSON.stringify({
                 rentalStart,
-                rentalEnd
+                rentalEnd,
+                rentalStartTime:document.getElementById('editCartStartTime')?.value
             })
         });
 
@@ -2353,4 +2398,8 @@ document.getElementById('checkoutCouponRemove').addEventListener('click', () => 
 document.getElementById('checkoutCouponCode').addEventListener('input', () => {
     if (appliedCoupon) { appliedCoupon = null; clearCouponSignature(); renderCartReview(); }
     document.getElementById('checkoutCouponStatus').textContent = 'Bitte den Code mit „Anwenden“ prüfen.';
+});
+
+window.addEventListener('pageshow', event => {
+    if (event.persisted && new URLSearchParams(location.search).get('payment') === 'return') location.reload();
 });

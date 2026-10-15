@@ -3,6 +3,7 @@ const router = express.Router();
 const mysql = require('mysql2/promise');
 const path = require('path');
 const fs = require('fs');
+const { normalizeHourlyPrices } = require('../services/rentalTariffs');
 const { normalizeProductAttributes, saveProductAttributes, generateProductKey } = require('../services/productAttributes');
 
 const dbConfig = require('../config/db');
@@ -161,6 +162,7 @@ router.get('/products/:id/availability', async (req, res) => {
 
         const [blockedPeriods] = await connection.execute(
             `SELECT 
+        roi.rental_hours AS rentalHours, TIME_FORMAT(roi.rental_start_time,'%H:%i') AS rentalStartTime,
         DATE_FORMAT(COALESCE(roi.adjusted_rental_start, roi.rental_start), '%Y-%m-%d') AS rentalStart,
         DATE_FORMAT(COALESCE(roi.adjusted_rental_end, roi.rental_end), '%Y-%m-%d') AS rentalEnd
      FROM rental_order_items roi
@@ -247,6 +249,7 @@ router.post('/products', checkAdmin, async (req, res) => {
         );
 
         await saveProductAttributes(connection, result.insertId, attributes);
+        await connection.execute('UPDATE rental_products SET hourly_prices=? WHERE id=?',[req.body.hourlyPrices?JSON.stringify(normalizeHourlyPrices(req.body.hourlyPrices,normalizedPricePerDay)):null,result.insertId]);
         await syncProductCategories(connection, result.insertId, normalizedCategories);
         await deleteUnusedCategories(connection);
 
@@ -259,7 +262,7 @@ router.post('/products', checkAdmin, async (req, res) => {
     } catch (error) {
         if (connection) await connection.rollback();
         console.error('Fehler beim Erstellen des Produkts:', error);
-        res.status(500).json({ error: 'Produkt konnte nicht gespeichert werden.' });
+        res.status(error.statusCode||500).json({ error: error.statusCode?error.message:'Produkt konnte nicht gespeichert werden.' });
     } finally {
         if (connection) await connection.end();
     }
@@ -327,6 +330,8 @@ router.put('/products/:id', checkAdmin, async (req, res) => {
         );
 
         await saveProductAttributes(connection, req.params.id, attributes);
+        if(Object.hasOwn(req.body,'hourlyPrices'))await connection.execute('UPDATE rental_products SET hourly_prices=? WHERE id=?',[req.body.hourlyPrices?JSON.stringify(normalizeHourlyPrices(req.body.hourlyPrices,normalizedPricePerDay)):null,req.params.id]);
+        else {const [[p]]=await connection.execute('SELECT hourly_prices FROM rental_products WHERE id=?',[req.params.id]);if(p.hourly_prices)await connection.execute('UPDATE rental_products SET hourly_prices=? WHERE id=?',[JSON.stringify(normalizeHourlyPrices(p.hourly_prices,normalizedPricePerDay)),req.params.id]);}
         await syncProductCategories(connection, req.params.id, normalizedCategories);
         await deleteUnusedCategories(connection);
 
@@ -336,7 +341,7 @@ router.put('/products/:id', checkAdmin, async (req, res) => {
     } catch (error) {
         if (connection) await connection.rollback();
         console.error('Fehler beim Aktualisieren des Produkts:', error);
-        res.status(500).json({ error: 'Produkt konnte nicht aktualisiert werden.' });
+        res.status(error.statusCode||500).json({ error: error.statusCode?error.message:'Produkt konnte nicht aktualisiert werden.' });
     } finally {
         if (connection) await connection.end();
     }
@@ -385,7 +390,7 @@ router.delete('/products/:id', checkAdmin, async (req, res) => {
             return res.status(error.statusCode).json({ error: error.message });
         }
         console.error('Fehler beim Deaktivieren des Produkts:', error);
-        res.status(500).json({ error: 'Produkt konnte nicht deaktiviert werden.' });
+        res.status(error.statusCode||500).json({ error: error.statusCode?error.message:'Produkt konnte nicht deaktiviert werden.' });
     }
 });
 

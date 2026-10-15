@@ -122,7 +122,7 @@ async function refreshReturnCaseProjection(connection, orderId) {
          FROM rental_order_payments refund
          WHERE refund.order_id = ?
          AND refund.payment_type IN (
-            'deposit_refund', 'order_cancellation_refund', 'duplicate_payment_refund'
+            'rental_refund', 'deposit_refund', 'order_cancellation_refund', 'duplicate_payment_refund'
          )
          AND NOT EXISTS (
             SELECT 1
@@ -189,7 +189,7 @@ async function refreshRefundProjection(connection, paymentRecord) {
         await refreshCancelledOrderProjection(connection, paymentRecord.order_id);
         return;
     }
-    if (['deposit_refund', 'duplicate_payment_refund'].includes(paymentRecord.payment_type)) {
+    if (['rental_refund', 'deposit_refund', 'duplicate_payment_refund'].includes(paymentRecord.payment_type)) {
         await refreshReturnCaseProjection(connection, paymentRecord.order_id);
     }
 }

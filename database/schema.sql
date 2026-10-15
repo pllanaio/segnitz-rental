@@ -74,6 +74,7 @@ CREATE TABLE customer_number_sequences (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE rental_products (
+    hourly_prices JSON NULL,
     id INT NOT NULL AUTO_INCREMENT,
     product_key VARCHAR(100) NOT NULL,
     product_kind VARCHAR(30) NULL,
@@ -157,6 +158,8 @@ CREATE TABLE rental_carts (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE rental_cart_items (
+    rental_hours TINYINT UNSIGNED NULL,
+    rental_start_time TIME NULL,
     id INT NOT NULL AUTO_INCREMENT,
     cart_id INT NOT NULL,
     product_id INT NOT NULL,
@@ -266,6 +269,13 @@ CREATE TABLE rental_orders (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE rental_order_items (
+    rental_hours TINYINT UNSIGNED NULL,
+    rental_start_time TIME NULL,
+    tariff_prices JSON NULL,
+    adjusted_rental_hours TINYINT UNSIGNED NULL,
+    actual_return_time TIME NULL,
+    late_fee DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    early_return_refund DECIMAL(10,2) NOT NULL DEFAULT 0.00,
     id INT NOT NULL AUTO_INCREMENT,
     order_id INT NOT NULL,
     product_id INT NOT NULL,
@@ -387,7 +397,7 @@ CREATE TABLE rental_order_payments (
         payment_type IN (
             'invoice_payment', 'initial_payment', 'rental', 'deposit', 'rental_adjustment',
             'return_additional_charge', 'deposit_refund',
-            'order_cancellation_refund', 'duplicate_payment_refund',
+            'rental_refund', 'order_cancellation_refund', 'duplicate_payment_refund',
             'chargeback', 'refund_record'
         )
         AND payment_status IN (
@@ -591,6 +601,7 @@ CREATE TABLE billing_sequences (
  series VARCHAR(30) PRIMARY KEY, next_number BIGINT UNSIGNED NOT NULL
 );
 CREATE TABLE billing_documents (
+ customer_released_at DATETIME NULL,
  xml_data LONGBLOB NULL, xml_sha256 CHAR(64) NULL,
  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
  order_id INT NOT NULL,

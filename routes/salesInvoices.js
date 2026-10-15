@@ -48,7 +48,7 @@ function registerSalesInvoiceRoutes(app, { checkAdmin, limiter, createConnection
             let pending=false;
             if(transfer.operationKey)try{await processEffect(transfer.operationKey);}catch(e){if(e.code!=='EXTERNAL_EFFECT_PENDING')throw e;pending=true;}
             await syncInvoice(createConnection,transfer.invoiceId);
-            res.json({pending,message:pending?'Der Mollie-Überweisungsauftrag wird vorbereitet. Bitte den Status erneut prüfen.':'Überweisung vereinbart. Die Mietrechnung mit 14 Tagen Zahlungsziel wird versandt; Miete und Kaution werden gemeinsam bezahlt.'});
+            res.json({pending,message:pending?'Der Mollie-Überweisungsauftrag wird vorbereitet. Bitte den Status erneut prüfen.':'Überweisung vereinbart. Die Zahlungsaufforderung mit 14 Tagen Zahlungsziel wird versandt; Miete und Kaution werden gemeinsam bezahlt.'});
         }catch(e){errorResponse(res,e);}
     });
     for (const admin of [false,true]) {
@@ -60,8 +60,8 @@ function registerSalesInvoiceRoutes(app, { checkAdmin, limiter, createConnection
                 const [[invoice]]=await c.execute('SELECT id,invoice_number AS invoiceNumber,status,amount,due_at AS dueAt,pdf_data IS NOT NULL AS hasPdf,last_error AS lastError FROM rental_invoices WHERE order_id=?',[order.id]);
                 const [deposits]=await c.execute("SELECT id,amount,payment_status AS status,payment_method AS method,checkout_url AS checkoutUrl,pos_terminal_id AS terminalId FROM rental_order_payments WHERE order_id=? AND payment_type='deposit' ORDER BY id DESC",[order.id]);
                 const balance=await invoiceBalance(c,order.id);
-                const [documents]=await c.execute('SELECT id,document_number AS number,kind,gross_cents AS grossCents,created_at AS createdAt FROM billing_documents WHERE order_id=? ORDER BY id',[order.id]);
-                if(!admin){if(invoice)delete invoice.lastError;for(const deposit of deposits)delete deposit.checkoutUrl;}
+                const [documents]=await c.execute('SELECT id,document_number AS number,kind,gross_cents AS grossCents,created_at AS createdAt FROM billing_documents WHERE order_id=?'+(admin?'':' AND customer_released_at IS NOT NULL')+' ORDER BY id',[order.id]);
+                if(!admin){if(invoice){delete invoice.lastError;if(!documents.some(d=>d.kind==='invoice')){invoice.hasPdf=0;invoice.invoiceNumber=null;}}for(const deposit of deposits)delete deposit.checkoutUrl;}
                 const [bankRefunds]=admin?await c.execute("SELECT id,amount FROM rental_order_payments WHERE order_id=? AND payment_type IN ('order_cancellation_refund','deposit_refund') AND payment_method='banktransfer' AND payment_status='pending'",[order.id]):[[]];
                 let simulationUrl=null;
                 if(admin&&deposits[0]?.terminalId&&posMode()==='test'){
@@ -73,8 +73,8 @@ function registerSalesInvoiceRoutes(app, { checkAdmin, limiter, createConnection
                 res.set('Cache-Control','no-store').json({paymentMethod:order.payment_method,paymentStatus:order.payment_status,invoice,balance,documents,bankRefunds,simulationUrl,canOfferTransfer:admin&&order.payment_method!=='invoice'&&order.payment_status==='pending'&&['confirmed','reserved','picked_up'].includes(order.status)&&!invoice?.hasPdf,combinedPayment:!!order.invoice_combined_payment,separateDeposit:order.payment_method==='invoice'&&!order.invoice_combined_payment,deposit:deposits[0]||null,pickupAllowed:await pickupAllowed(c,order),cancelled:['cancelled','expired'].includes(order.status)});
             }catch(e){errorResponse(res,e);}finally{if(c)await c.end();}
         });
-        app.get(base+'/documents/:documentId/xml',admin?checkAdmin:loggedIn,async(req,res)=>{let c;try{c=await createConnection();const order=await owned(c,req,req.params.id,admin);const [[d]]=await c.execute('SELECT document_number,xml_data FROM billing_documents WHERE id=? AND order_id=?',[req.params.documentId,order.id]);if(!d?.xml_data)throw fail('Keine strukturierte E-Rechnung vorhanden.',404);res.set('Cache-Control','no-store').type('application/xml').set('Content-Disposition','attachment; filename="'+d.document_number+'.xml"').send(d.xml_data);}catch(e){errorResponse(res,e);}finally{if(c)await c.end();}});
-        app.get(base+'/documents/:documentId/pdf',admin?checkAdmin:loggedIn,async(req,res)=>{let c;try{c=await createConnection();const order=await owned(c,req,req.params.id,admin);const [[d]]=await c.execute('SELECT document_number,pdf_data FROM billing_documents WHERE id=? AND order_id=?',[req.params.documentId,order.id]);if(!d)throw fail('Dokument nicht gefunden.',404);res.set('Cache-Control','no-store').type('pdf').set('Content-Disposition','attachment; filename="'+d.document_number+'.pdf"').send(d.pdf_data);}catch(e){errorResponse(res,e);}finally{if(c)await c.end();}});
+        app.get(base+'/documents/:documentId/xml',admin?checkAdmin:loggedIn,async(req,res)=>{let c;try{c=await createConnection();const order=await owned(c,req,req.params.id,admin);const [[d]]=await c.execute('SELECT document_number,xml_data FROM billing_documents WHERE id=? AND order_id=?'+(admin?'':' AND customer_released_at IS NOT NULL'),[req.params.documentId,order.id]);if(!d?.xml_data)throw fail('Keine strukturierte E-Rechnung vorhanden.',404);res.set('Cache-Control','no-store').type('application/xml').set('Content-Disposition','attachment; filename="'+d.document_number+'.xml"').send(d.xml_data);}catch(e){errorResponse(res,e);}finally{if(c)await c.end();}});
+        app.get(base+'/documents/:documentId/pdf',admin?checkAdmin:loggedIn,async(req,res)=>{let c;try{c=await createConnection();const order=await owned(c,req,req.params.id,admin);const [[d]]=await c.execute('SELECT document_number,pdf_data FROM billing_documents WHERE id=? AND order_id=?'+(admin?'':' AND customer_released_at IS NOT NULL'),[req.params.documentId,order.id]);if(!d)throw fail('Dokument nicht gefunden.',404);res.set('Cache-Control','no-store').type('pdf').set('Content-Disposition','attachment; filename="'+d.document_number+'.pdf"').send(d.pdf_data);}catch(e){errorResponse(res,e);}finally{if(c)await c.end();}});
         if(admin)app.post(base+'/bank-transfer',checkAdmin,limiter,(req,res)=>res.status(409).json({error:'Überweisungen und Erstattungen werden ausschließlich durch Mollie bestätigt. Manuelle Bankbuchungen sind nicht möglich.'}));
         if(admin)app.post(base+'/pay',checkAdmin,limiter,async(req,res)=>{try{
             const method=req.body.method;if(!['online','banktransfer'].includes(method))throw fail('Ungültige Zahlungsart.',400);
@@ -97,6 +97,7 @@ function registerSalesInvoiceRoutes(app, { checkAdmin, limiter, createConnection
             let c;try{c=await createConnection();const order=await owned(c,req,req.params.id,admin);
                 const [[invoice]]=await c.execute('SELECT pdf_data FROM rental_invoices WHERE order_id=?',[order.id]);
                 if(!invoice?.pdf_data)throw fail('Die Rechnung wird noch bereitgestellt.',409);
+                if(!admin){const [[released]]=await c.execute("SELECT id,pdf_data FROM billing_documents WHERE order_id=? AND customer_released_at IS NOT NULL AND kind='invoice' AND JSON_EXTRACT(snapshot_json,'$.scope') IS NULL ORDER BY id DESC LIMIT 1",[order.id]);if(!released)throw fail('Die Rechnung wird nach Zahlungseingang bereitgestellt.',409);invoice.pdf_data=released.pdf_data;}
                 res.set('Cache-Control','no-store').type('pdf').set('Content-Disposition',`attachment; filename="Rechnung-${order.order_no.replace(/[^a-zA-Z0-9_-]/g,'_')}.pdf"`).send(invoice.pdf_data);
             }catch(e){errorResponse(res,e);}finally{if(c)await c.end();}
         });

@@ -198,7 +198,7 @@ async function mergeGuestCartIntoUserCart(connection, req, userEmail) {
     }
 
     const [guestItems] = await connection.execute(
-        `SELECT product_id, rental_start, rental_end, quantity
+        `SELECT product_id, rental_start, rental_end, quantity, rental_hours, rental_start_time
          FROM rental_cart_items
          WHERE cart_id = ?`,
         [guestCartId]
@@ -210,21 +210,23 @@ async function mergeGuestCartIntoUserCart(connection, req, userEmail) {
             userCartId,
             item.product_id,
             item.rental_start,
-            item.rental_end
+            item.rental_end,
+            null,
+            { rentalHours: item.rental_hours, rentalStartTime: item.rental_start_time }
         );
 
         if (!conflict) {
             try {
                 await connection.execute(
                     `INSERT INTO rental_cart_items
-                     (cart_id, product_id, rental_start, rental_end, quantity)
-                     VALUES (?, ?, ?, ?, ?)`,
+                     (cart_id, product_id, rental_start, rental_end, quantity, rental_hours, rental_start_time)
+                     VALUES (?, ?, ?, ?, ?, ?, ?)`,
                     [
                         userCartId,
                         item.product_id,
                         item.rental_start,
                         item.rental_end,
-                        item.quantity || 1
+                        item.quantity || 1, item.rental_hours, item.rental_start_time
                     ]
                 );
             } catch (error) {
@@ -249,7 +251,7 @@ async function mergeGuestCartIntoUserCart(connection, req, userEmail) {
     return userCartId;
 }
 
-async function checkCartItemConflict(connection, cartId, productId, rentalStart, rentalEnd, excludeCartItemId = null) {
+async function checkCartItemConflict(connection, cartId, productId, rentalStart, rentalEnd, excludeCartItemId = null, tariff = null) {
     let sql = `
         SELECT id
         FROM rental_cart_items
@@ -260,6 +262,11 @@ async function checkCartItemConflict(connection, cartId, productId, rentalStart,
     `;
 
     const params = [cartId, productId, rentalEnd, rentalStart];
+    if(tariff?.rentalHours){
+        sql=sql.replace('rental_start <= ?', "TIMESTAMP(rental_start,COALESCE(rental_start_time,'00:00:00')) < TIMESTAMPADD(HOUR,?,TIMESTAMP(?,?))")
+            .replace('rental_end >= ?', "IF(rental_hours IS NULL,DATE_ADD(rental_end,INTERVAL 1 DAY),TIMESTAMPADD(HOUR,rental_hours,TIMESTAMP(rental_start,rental_start_time))) > TIMESTAMP(?,?)");
+        params.splice(2,2,tariff.rentalHours,rentalStart,tariff.rentalStartTime,rentalStart,tariff.rentalStartTime);
+    }
 
     if (excludeCartItemId) {
         sql += ` AND id != ?`;
@@ -280,10 +287,10 @@ async function getCartItemsForOrder(connection, cartId) {
             ci.product_id AS productId,
             DATE_FORMAT(ci.rental_start, '%Y-%m-%d') AS rentalStart,
             DATE_FORMAT(ci.rental_end, '%Y-%m-%d') AS rentalEnd,
-            ci.quantity,
+            p.price_per_day AS dailyTariffPrice, ci.quantity, ci.rental_hours AS rentalHours, TIME_FORMAT(ci.rental_start_time,'%H:%i') AS rentalStartTime, p.hourly_prices AS tariffPrices,
             p.product_key AS productKey,
             p.title,
-            p.price_per_day AS pricePerDay,
+            CASE WHEN ci.rental_hours IS NULL THEN p.price_per_day WHEN ci.rental_hours=8 THEN p.price_per_day ELSE CAST(JSON_UNQUOTE(JSON_EXTRACT(p.hourly_prices,CONCAT('$.\"',ci.rental_hours,'\"'))) AS DECIMAL(10,2)) END AS pricePerDay,
             p.deposit
          FROM rental_cart_items ci
          JOIN rental_products p ON p.id = ci.product_id
@@ -292,7 +299,7 @@ async function getCartItemsForOrder(connection, cartId) {
         [cartId]
     );
 
-    return items;
+    return items.map(item=>({...item,...require('./rentalTariffs').quoteTariff({price_per_day:item.dailyTariffPrice,hourly_prices:item.tariffPrices},item)}));
 }
 
 module.exports = {

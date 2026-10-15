@@ -16,15 +16,17 @@ function orderSettlement(order) {
         const rate = cents(item.adjustedPricePerDay ?? item.pricePerDay);
         const original = Math.max(0, originalDays * cents(item.pricePerDay) - cents(item.discountAmount));
         const rental = item.adjustedRentalTotal != null ? cents(item.adjustedRentalTotal) : Math.max(0, days(start, end) * rate - cents(item.discountAmount));
-        add(item, 'Ursprüngliche Miete', originalDays + ' Miettage · inkl. MwSt.' + (Number(item.discountAmount) ? ' · Gutschein berücksichtigt' : ''), original);
+        add(item, 'Ursprüngliche Miete', (item.rentalHours?item.rentalHours+' Stunden ab '+item.rentalStartTime:originalDays+' Miettage')+' · inkl. MwSt.' + (Number(item.discountAmount) ? ' · Gutschein berücksichtigt' : ''), original);
         if (rental !== original) add(item, rental > original ? 'Mietverlängerung / Mietanpassung' : 'Mietkorrektur', 'Abgerechneter Mietzeitraum: ' + start + ' – ' + end, rental - original);
         const returned = String(item.itemStatus || '').startsWith('returned_') || Boolean(item.returnedAt);
         deposit += cents(item.deposit);
         if (!returned) { held += cents(item.deposit); continue; }
         returnedCount++;
+        if(Number(item.earlyReturnRefund))add(item,'Vorzeitige Rückgabe','Vollständig ungenutzte Miettage · Rabatt berücksichtigt',-cents(item.earlyReturnRefund));
         retained += cents(item.depositDeductionAmount ?? Math.max(Number(item.deposit || 0) - Number(item.depositRefundAmount || 0), 0));
         const lateDays = Math.max(0, Math.round((day(item.actualReturnDate) - day(end)) / 86400000)) || 0;
-        if (lateDays) add(item, 'Verspätete Rückgabe', lateDays + ' Tage × ' + (rate / 100).toLocaleString('de-DE', {style:'currency',currency:'EUR'}) + (item.lateDescription ? ' · ' + item.lateDescription : ''), lateDays * rate);
+        if(item.rentalHours&&Number(item.lateFee))add(item,'Überschreitung Stundentarif','Auf den nächstgrößeren vereinbarten Tarif aufgestuft',cents(item.lateFee));
+        if (!item.rentalHours&&lateDays) add(item, 'Verspätete Rückgabe', lateDays + ' Tage × ' + (rate / 100).toLocaleString('de-DE', {style:'currency',currency:'EUR'}) + (item.lateDescription ? ' · ' + item.lateDescription : ''), lateDays * rate);
         if (Number(item.additionalChargeAmount)) add(item, 'Reparatur / weitere Kosten', item.additionalChargeReason || item.damageDescription || 'Keine Begründung hinterlegt', cents(item.additionalChargeAmount));
     }
     let paid = 0, refunded = 0;
@@ -58,7 +60,7 @@ function renderOrderReturnProtocol(order, admin) {
     return '<section class="order-sheet-section order-return-protocol"><h3>Rückgabeprotokoll</h3>'+(!returned.length?'<p class="settlement-note">Noch kein Rückgabeprotokoll vorhanden. Es erscheint hier, sobald eine Rückgabe erfasst wurde.</p>':returned.map(item=>{
         const status = ({returned_ok:'Ordnungsgemäß zurückgegeben',returned_late:'Verspätet zurückgegeben',returned_damaged:'Beschädigt zurückgegeben',returned_late_damaged:'Verspätet und beschädigt'})[item.itemStatus] || 'Rückgabe erfasst';
         const note = (label, value) => value ? '<div><dt>'+label+'</dt><dd>'+esc(value)+'</dd></div>' : '';
-        return '<article class="return-protocol-card"><header><strong>'+esc(item.title)+'</strong><span>'+esc(status)+'</span></header><dl>'+note('Geplante Rückgabe',date(item.adjustedRentalEnd||item.rentalEnd))+note('Tatsächliche Rückgabe',date(item.actualReturnDate))+note('Erfasst am',date(item.returnedAt))+note('Schäden',item.damageDescription)+note('Verspätung',item.lateDescription)+note('Begründung der Mehrkosten',item.additionalChargeReason)+note('Kautionsverrechnung',item.depositDeductionReason)+note('Bemerkungen',item.returnNotes)+'</dl><div class="return-protocol-photos">'+(item.returnImages||[]).map(photo=>{
+        return '<article class="return-protocol-card"><header><strong>'+esc(item.title)+'</strong><span>'+esc(status)+'</span></header><dl>'+note('Geplante Rückgabe',date(item.adjustedRentalEnd||item.rentalEnd))+note('Tatsächliche Rückgabe',date(item.actualReturnDate)+(item.actualReturnTime?' · '+item.actualReturnTime+' Uhr':''))+note('Erfasst am',date(item.returnedAt))+note('Schäden',item.damageDescription)+note('Verspätung',item.lateDescription)+note('Begründung der Mehrkosten',item.additionalChargeReason)+note('Kautionsverrechnung',item.depositDeductionReason)+note('Bemerkungen',item.returnNotes)+'</dl><div class="return-protocol-photos">'+(item.returnImages||[]).map(photo=>{
             const path=String(photo.imagePath||'').replace(/^\//,'');
             if(!path || path.includes(':') || path.startsWith('/'))return '';
             return '<div><a href="/'+esc(path)+'" target="_blank" rel="noopener"><img src="/'+esc(path)+'" alt="Rückgabefoto '+esc(item.title)+'"></a>'+(admin&&typeof isReturnFinalized==='function'&&!isReturnFinalized(item)?'<button class="btn btn-outline-danger btn-sm" data-backend-action="delete-return-image" data-image-id="'+Number(photo.id)+'" data-order-id="'+Number(order.id)+'">Foto löschen</button>':'')+'</div>';

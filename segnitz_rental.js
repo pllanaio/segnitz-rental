@@ -1032,13 +1032,14 @@ app.post('/data', guestOrderLimiter, async (req, res) => {
         }
 
         const paymentMethod = req.body.paymentMethod;
-        const orderAccessGrant = req.session.user ? null : createOrderAccessGrant();
+        const adminGuestOrder = req.session.role === 'global_admin';
+        const orderAccessGrant = (!req.session.user || adminGuestOrder) ? createOrderAccessGrant() : null;
 
         const submittedEmail =
             getFormValue(formData, 'CustomerEmail') ||
             getFormValue(formData, 'email');
 
-        const email = normalizeEmail(req.session.user || submittedEmail);
+        const email = normalizeEmail(adminGuestOrder ? submittedEmail : (req.session.user || submittedEmail));
 
         const firstName = String(getFormValue(formData, 'FirstName') || '').trim();
         const lastName = String(getFormValue(formData, 'LastName') || '').trim();
@@ -1072,7 +1073,7 @@ app.post('/data', guestOrderLimiter, async (req, res) => {
         }
 
         if (
-            req.session.user &&
+            req.session.user && !adminGuestOrder &&
             submittedEmail &&
             String(submittedEmail).trim().toLowerCase() !== String(req.session.user).toLowerCase()
         ) {
@@ -1089,7 +1090,7 @@ app.post('/data', guestOrderLimiter, async (req, res) => {
                  FROM users
                  WHERE username = ?
                  LIMIT 1`,
-                [email]
+                [req.session.user]
             );
 
             const account = accountRows[0];
@@ -1130,7 +1131,7 @@ app.post('/data', guestOrderLimiter, async (req, res) => {
 
         await connection.beginTransaction();
 
-        const userId = await getUserIdByEmail(connection, email);
+        const userId = adminGuestOrder ? null : await getUserIdByEmail(connection, email);
         const cartId = await getOrCreateActiveCart(connection, req, { forUpdate: true });
         const cartItems = await getCartItemsForOrder(connection, cartId);
 
@@ -1173,7 +1174,7 @@ app.post('/data', guestOrderLimiter, async (req, res) => {
                 item.rentalStart,
                 item.rentalEnd,
                 null,
-                true
+                true,item
             );
 
             if (!available) {
@@ -1247,8 +1248,8 @@ app.post('/data', guestOrderLimiter, async (req, res) => {
         for (const item of orderSummary.items) {
             await connection.execute(
                 `INSERT INTO rental_order_items
-                (order_id, product_id, rental_start, rental_end, price_per_day, deposit, discount_amount)
-                VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                (order_id, product_id, rental_start, rental_end, price_per_day, deposit, discount_amount,rental_hours,rental_start_time,tariff_prices)
+                VALUES (?, ?, ?, ?, ?, ?, ?,?,?,?)`,
                 [
                     orderId,
                     item.productId,
@@ -1256,7 +1257,7 @@ app.post('/data', guestOrderLimiter, async (req, res) => {
                     item.rentalEnd,
                     item.pricePerDay,
                     item.deposit,
-                    item.discountAmount || 0
+                    item.discountAmount || 0, item.rentalHours||null,item.rentalStartTime||null,item.tariffPrices?JSON.stringify(typeof item.tariffPrices==='string'?JSON.parse(item.tariffPrices):item.tariffPrices):null
                 ]
             );
 
@@ -2087,7 +2088,7 @@ app.get('/my-orders', async (req, res) => {
             `SELECT
                 ro.id,
                 ro.order_no,
-                EXISTS(SELECT 1 FROM rental_invoices ri WHERE ri.order_id=ro.id AND ri.pdf_data IS NOT NULL) AS hasInvoice,
+                EXISTS(SELECT 1 FROM billing_documents bd WHERE bd.order_id=ro.id AND bd.kind='invoice' AND bd.customer_released_at IS NOT NULL AND JSON_EXTRACT(bd.snapshot_json,'$.scope') IS NULL) AS hasInvoice,
                 ro.customer_email,
                 ro.customer_first_name,
                 ro.customer_last_name,
@@ -2244,6 +2245,7 @@ app.get('/my-orders/:id', async (req, res) => {
                 p.manufacturer, p.model, p.product_key AS productKey,
                 DATE_FORMAT(roi.rental_start, '%Y-%m-%d') AS rentalStart,
                 DATE_FORMAT(roi.rental_end, '%Y-%m-%d') AS rentalEnd,
+                roi.rental_hours AS rentalHours, roi.adjusted_rental_hours AS adjustedRentalHours, TIME_FORMAT(roi.rental_start_time,'%H:%i') AS rentalStartTime, roi.tariff_prices AS tariffPrices, TIME_FORMAT(roi.actual_return_time,'%H:%i') AS actualReturnTime, roi.early_return_refund AS earlyReturnRefund, roi.late_fee AS lateFee,
                 roi.price_per_day AS pricePerDay,
                 roi.discount_amount AS discountAmount,
                 roi.deposit AS deposit,
@@ -2474,7 +2476,7 @@ async function refreshReturnCaseStatus(connection, orderId) {
          FROM rental_order_payments refund
          WHERE refund.order_id = ?
          AND refund.payment_type IN (
-            'deposit_refund',
+            'rental_refund', 'deposit_refund',
             'order_cancellation_refund',
             'duplicate_payment_refund'
          )
@@ -2732,7 +2734,7 @@ async function createOnlineCancellationRefund(connection, {
          WHERE order_id = ?
          AND mollie_payment_id = ?
          AND payment_type IN (
-            'deposit_refund',
+            'rental_refund', 'deposit_refund',
             'order_cancellation_refund',
             'duplicate_payment_refund', 'refund_record', 'chargeback'
          )
@@ -2770,8 +2772,9 @@ async function createOnlineCancellationRefund(connection, {
 }
 
 async function refundExcessInvoicePayment(connection,order,paymentId){
+    await require('./services/earlyReturnRefunds').refundEarlyReturns(connection,order.id,persistOnlineRefundIntent);
     const balance=await require('./services/salesInvoices').invoiceBalance(connection,order.id);
-    const [[refunds]]=await connection.execute(`SELECT COALESCE(SUM(ABS(r.amount)),0) amount FROM rental_order_payments r WHERE r.order_id=? AND r.amount<0 AND r.payment_type IN ('order_cancellation_refund','duplicate_payment_refund','refund_record','chargeback') AND r.payment_status NOT IN ('failed','cancelled') AND EXISTS(SELECT 1 FROM rental_order_payments s WHERE s.order_id=r.order_id AND s.mollie_payment_id=r.mollie_payment_id AND s.payment_type='invoice_payment')`,[order.id]);
+    const [[refunds]]=await connection.execute(`SELECT COALESCE(SUM(ABS(r.amount)),0) amount FROM rental_order_payments r WHERE r.order_id=? AND r.amount<0 AND r.payment_type IN ('rental_refund','order_cancellation_refund','duplicate_payment_refund','refund_record','chargeback') AND r.payment_status NOT IN ('failed','cancelled') AND EXISTS(SELECT 1 FROM rental_order_payments s WHERE s.order_id=r.order_id AND s.mollie_payment_id=r.mollie_payment_id AND s.payment_type='invoice_payment')`,[order.id]);
     const excess=Math.max(0,balance.paidCents-Math.round(Number(refunds.amount)*100)-balance.dueCents)/100;if(excess<=0)return;
     const [[source]]=await connection.execute("SELECT amount FROM rental_order_payments WHERE order_id=? AND mollie_payment_id=? AND payment_type='invoice_payment' AND payment_status='paid' LIMIT 1",[order.id,paymentId]);
     const [[used]]=await connection.execute("SELECT COALESCE(SUM(ABS(amount)),0) amount FROM rental_order_payments WHERE order_id=? AND mollie_payment_id=? AND amount<0 AND payment_status NOT IN ('failed','cancelled')",[order.id,paymentId]);
@@ -2786,7 +2789,7 @@ async function createInvoiceCancellationRefunds(connection,order,item){
         const groups=new Map();
         for(const source of sources){const key=source.payment_method+':'+(source.mollie_payment_id||'');if(!groups.has(key))groups.set(key,{source,paid:0,requested:0});const g=groups.get(key);g.paid+=Number(source.amount);if(!item)g.requested+=Number(source.amount);else if(['initial_payment','invoice_payment'].includes(source.payment_type))g.requested+=calculateRentalDays(item.rental_start,item.rental_end)*Number(item.price_per_day)-Number(item.discount_amount||0)+Number(item.deposit);else if(Number(source.order_item_id)===Number(item.id))g.requested+=Number(source.amount);}
         for(const {source,paid,requested} of groups.values()){
-            const [[prior]]=await connection.execute("SELECT COALESCE(SUM(ABS(amount)),0) amount FROM rental_order_payments WHERE order_id=? AND payment_type IN ('order_cancellation_refund','deposit_refund','duplicate_payment_refund','refund_record','chargeback') AND payment_status NOT IN ('failed','cancelled') AND payment_method=? AND mollie_payment_id <=> ?",[order.id,source.payment_method,source.mollie_payment_id]);
+            const [[prior]]=await connection.execute("SELECT COALESCE(SUM(ABS(amount)),0) amount FROM rental_order_payments WHERE order_id=? AND payment_type IN ('order_cancellation_refund','rental_refund', 'deposit_refund','duplicate_payment_refund','refund_record','chargeback') AND payment_status NOT IN ('failed','cancelled') AND payment_method=? AND mollie_payment_id <=> ?",[order.id,source.payment_method,source.mollie_payment_id]);
             const amount=roundMoney(Math.min(requested,Math.max(0,paid-Number(prior.amount))));if(amount<=0)continue;
             const [[exists]]=await connection.execute("SELECT id FROM rental_order_payments WHERE order_id=? AND order_item_id <=> ? AND payment_type='order_cancellation_refund' AND payment_method=? AND mollie_payment_id <=> ? AND payment_status NOT IN ('failed','cancelled')",[order.id,item?.id||null,source.payment_method,source.mollie_payment_id]);if(exists)continue;
             if(source.mollie_payment_id)await createOnlineCancellationRefund(connection,{order,itemId:item?.id||null,paymentId:source.mollie_payment_id,requestedAmount:amount,note:'Stornierung'});
@@ -2798,7 +2801,7 @@ async function createInvoiceCancellationRefunds(connection,order,item){
     const [sources]=await connection.execute("SELECT * FROM rental_order_payments WHERE order_id=? AND payment_status='paid' AND payment_type IN ('invoice_payment','initial_payment','deposit','rental_adjustment') ORDER BY id",[order.id]);
     for(const source of sources){
         if(item&&source.payment_type==='rental_adjustment'&&Number(source.order_item_id)!==Number(item.id))continue;
-        const [[prior]]=await connection.execute("SELECT COALESCE(SUM(ABS(amount)),0) amount FROM rental_order_payments WHERE order_id=? AND payment_type IN ('order_cancellation_refund','deposit_refund','duplicate_payment_refund','refund_record','chargeback') AND payment_status NOT IN ('failed','cancelled') AND mollie_payment_id <=> ? AND payment_method=?",[order.id,source.mollie_payment_id,source.payment_method]);
+        const [[prior]]=await connection.execute("SELECT COALESCE(SUM(ABS(amount)),0) amount FROM rental_order_payments WHERE order_id=? AND payment_type IN ('order_cancellation_refund','rental_refund', 'deposit_refund','duplicate_payment_refund','refund_record','chargeback') AND payment_status NOT IN ('failed','cancelled') AND mollie_payment_id <=> ? AND payment_method=?",[order.id,source.mollie_payment_id,source.payment_method]);
         const available=Math.max(0,Math.round((Number(source.amount)-Number(prior.amount))*100));
         const category=source.payment_type==='deposit'?'deposit':source.payment_type==='rental_adjustment'?'extension':'rent';
         const amount=Math.min(available,category==='deposit'?depositRemaining:category==='rent'?rentRemaining:Infinity)/100;
@@ -3218,6 +3221,7 @@ app.get('/admin/orders/:id', checkAdmin, async (req, res) => {
                 p.manufacturer, p.model, p.product_key AS productKey,
                 DATE_FORMAT(roi.rental_start, '%Y-%m-%d') AS rentalStart,
                 DATE_FORMAT(roi.rental_end, '%Y-%m-%d') AS rentalEnd,
+                roi.rental_hours AS rentalHours, roi.adjusted_rental_hours AS adjustedRentalHours, TIME_FORMAT(roi.rental_start_time,'%H:%i') AS rentalStartTime, roi.tariff_prices AS tariffPrices, TIME_FORMAT(roi.actual_return_time,'%H:%i') AS actualReturnTime, roi.early_return_refund AS earlyReturnRefund, roi.late_fee AS lateFee,
                 roi.price_per_day AS pricePerDay,
                 roi.discount_amount AS discountAmount,
                 roi.deposit,
@@ -3689,6 +3693,7 @@ app.put('/admin/order-items/:itemId/cancel', checkAdmin, adminReturnMutationLimi
     roi.item_status,
     roi.rental_start,
     roi.rental_end,
+    roi.rental_hours, roi.adjusted_rental_hours, roi.rental_start_time, roi.tariff_prices,
     roi.price_per_day,
     roi.discount_amount,
     roi.deposit,
@@ -4072,6 +4077,7 @@ app.post('/admin/order-items/:itemId/send-return-summary', checkAdmin, async (re
                 DATE_FORMAT(roi.adjusted_rental_end, '%Y-%m-%d') AS adjustedRentalEnd,
                 DATE_FORMAT(roi.actual_return_date, '%Y-%m-%d') AS actualReturnDate,
                 roi.adjusted_price_per_day AS adjustedPricePerDay,
+                roi.rental_hours AS rentalHours, roi.adjusted_rental_hours AS adjustedRentalHours, TIME_FORMAT(roi.rental_start_time,'%H:%i') AS rentalStartTime, roi.tariff_prices AS tariffPrices, TIME_FORMAT(roi.actual_return_time,'%H:%i') AS actualReturnTime, roi.early_return_refund AS earlyReturnRefund, roi.late_fee AS lateFee,
                 roi.price_per_day AS pricePerDay,
                 roi.discount_amount AS discountAmount,
                 roi.return_status AS returnStatus,
@@ -4123,7 +4129,7 @@ app.post('/admin/order-items/:itemId/send-return-summary', checkAdmin, async (re
              WHERE order_id = ?
              AND order_item_id = ?
              AND payment_type IN (
-                'rental_adjustment', 'deposit_refund', 'return_additional_charge'
+                'rental_adjustment', 'rental_refund', 'deposit_refund', 'return_additional_charge'
              )
              ORDER BY id DESC`,
             [
@@ -4201,6 +4207,7 @@ app.put('/admin/order-items/:itemId/rental-adjustment', checkAdmin, async (req, 
     roi.id,
     roi.order_id,
     roi.product_id,
+    roi.rental_hours, roi.adjusted_rental_hours, roi.rental_start_time, roi.tariff_prices,
     roi.price_per_day,
     roi.discount_amount,
     DATE_FORMAT(roi.rental_start, '%Y-%m-%d') AS rental_start,
@@ -4254,14 +4261,17 @@ FOR UPDATE`,
         const currentEnd = item.adjusted_rental_end || item.rental_end;
 
         const finalStart = adjustedRentalStart || currentStart;
-        const finalEnd = adjustedRentalEnd || currentEnd;
+        const newHours=item.rental_hours?Number(req.body.adjustedRentalHours):null;
+        if(item.rental_hours&&(!Number.isInteger(newHours)||newHours%2||newHours<=Number(item.adjusted_rental_hours||item.rental_hours)||newHours>240))throw Object.assign(new Error('Bitte einen größeren Stundentarif in 2-Stunden-Schritten wählen (höchstens 240 Stunden).'),{statusCode:400});
+        const hourlyEnd=item.rental_hours?new Date(Date.parse(String(item.rental_start).slice(0,10)+'T'+String(item.rental_start_time).slice(0,5)+':00Z')+newHours*3600000-1).toISOString().slice(0,10):null;
+        const finalEnd = hourlyEnd || adjustedRentalEnd || currentEnd;
         const currentPricePerDay = Number(
             item.adjusted_price_per_day || item.price_per_day || 0
         );
         const submittedPricePerDay = adjustedPricePerDay === null || adjustedPricePerDay === undefined || adjustedPricePerDay === ''
             ? currentPricePerDay
             : Number(adjustedPricePerDay);
-        const finalPricePerDay = currentPricePerDay;
+        const finalPricePerDay = item.rental_hours?require('./services/rentalTariffs').hourlyCharge(item.tariff_prices,newHours*60):currentPricePerDay;
 
         if (!isStrictIsoDate(String(finalStart).slice(0, 10)) || !isStrictIsoDate(String(finalEnd).slice(0, 10))) {
             await connection.rollback();
@@ -4299,14 +4309,14 @@ FOR UPDATE`,
             });
         }
 
-        if (String(finalEnd).slice(0, 10) <= String(currentEnd).slice(0, 10)) {
+        if (!item.rental_hours && String(finalEnd).slice(0, 10) <= String(currentEnd).slice(0, 10)) {
             await connection.rollback();
             return res.status(400).json({
                 error: 'Es sind nur Verlängerungen möglich. Verkürzungen werden über die Rückgabe abgewickelt.'
             });
         }
 
-        const days = calculateRentalDays(finalStart, finalEnd);
+        const days = item.rental_hours?1:calculateRentalDays(finalStart, finalEnd);
         const adjustedRentalTotal = roundMoney(Math.max(0, days * finalPricePerDay - Number(item.discount_amount || 0)));
 
         const available = await checkProductAvailability(
@@ -4315,7 +4325,7 @@ FOR UPDATE`,
             finalStart,
             finalEnd,
             req.params.itemId,
-            true
+            true,item.rental_hours?{rentalHours:newHours,rentalStartTime:item.rental_start_time}:null
         );
 
         if (!available) {
@@ -4329,7 +4339,7 @@ FOR UPDATE`,
 
         const extensionDays = calculateRentalDays(extensionStart, finalEnd);
 
-        const amountDue = roundMoney(Math.max(extensionDays * finalPricePerDay, 0));
+        const amountDue = roundMoney(Math.max(item.rental_hours?finalPricePerDay-currentPricePerDay:extensionDays * finalPricePerDay, 0));
         if (amountDue > 0) {
             const [existingOpenRentalAdjustments] = await connection.execute(
                 `SELECT id
@@ -4357,13 +4367,13 @@ FOR UPDATE`,
              SET adjusted_rental_start = ?,
                  adjusted_rental_end = ?,
                  adjusted_price_per_day = ?,
-                 adjusted_rental_total = ?
+                 adjusted_rental_total = ?, adjusted_rental_hours=?
              WHERE id = ?`,
             [
                 String(finalStart).slice(0, 10),
                 String(finalEnd).slice(0, 10),
                 finalPricePerDay,
-                adjustedRentalTotal,
+                adjustedRentalTotal,newHours,
                 req.params.itemId
             ]
         );
@@ -4403,7 +4413,7 @@ FOR UPDATE`,
 
             paymentUrl = null;
         } else if (amountDue > 0) {
-            paymentOperationKey = `rental-adjustment-${item.order_id}-${req.params.itemId}-${String(finalEnd).slice(0, 10)}-${amountDue.toFixed(2)}`;
+            paymentOperationKey = `rental-adjustment-${item.order_id}-${req.params.itemId}-${String(finalEnd).slice(0, 10)}-${amountDue.toFixed(2)}-${newHours||0}`;
             const [paymentRecord] = await connection.execute(
                 `INSERT INTO rental_order_payments
                  (order_id, order_item_id, payment_type, payment_method, payment_status,
@@ -4433,7 +4443,7 @@ FOR UPDATE`,
                 application: {
                     kind: 'payment_records',
                     additionalInvoice: item.payment_method==='invoice',
-                    additionalInvoicePeriod: {start:new Date(Date.parse(String(currentEnd).slice(0,10)+'T12:00:00Z')+86400000).toISOString().slice(0,10),end:String(finalEnd).slice(0,10)},
+                    additionalInvoicePeriod: {start:item.rental_hours?String(finalStart).slice(0,10)+' '+String(item.rental_start_time).slice(0,5):extensionStart,end:String(finalEnd).slice(0,10)+(item.rental_hours?' ('+newHours+' Stunden gesamt)':'')},
                     paymentRecordIds: [paymentRecord.insertId],
                     successMail: {
                         operationKey: `mail-rental-adjustment-${paymentOperationKey}`,
@@ -4469,7 +4479,7 @@ FOR UPDATE`,
                 amountDue,
                 {
                     connection,
-                    operationKey: `mail-rental-adjustment-${item.order_id}-${req.params.itemId}-${String(finalEnd).slice(0, 10)}-${amountDue.toFixed(2)}`
+                    operationKey: `mail-rental-adjustment-${item.order_id}-${req.params.itemId}-${String(finalEnd).slice(0, 10)}-${amountDue.toFixed(2)}-${newHours||0}`
                 }
             );
         }
@@ -4628,6 +4638,7 @@ app.put('/admin/order-items/:itemId/return', checkAdmin, adminReturnMutationLimi
             `SELECT 
     roi.id,
     roi.order_id,
+    roi.rental_hours, roi.adjusted_rental_hours, roi.rental_start_time, roi.tariff_prices,
     roi.price_per_day,
     roi.discount_amount,
     DATE_FORMAT(roi.rental_start, '%Y-%m-%d') AS rental_start,
@@ -4721,14 +4732,16 @@ FOR UPDATE`,
             });
         }
 
-        const days = calculateRentalDays(finalStart, finalEnd);
+        const days = item.rental_hours?1:calculateRentalDays(finalStart, finalEnd);
         const adjustedRentalTotal = roundMoney(Math.max(0, days * finalPricePerDay - Number(item.discount_amount || 0)));
         const deposit = Number(item.deposit || 0);
         const plannedReturnDate = agreedEnd;
         const lateDays = calculateLateDays(actualReturnDate, plannedReturnDate);
-        const lateFee = roundMoney(lateDays * finalPricePerDay);
+        const hourlyLate=require('./services/rentalTariffs').hourlyLateFee(item,actualReturnDate,req.body.actualReturnTime);
+        const lateFee = hourlyLate?hourlyLate.amount:roundMoney(lateDays * finalPricePerDay);
+        const earlyCredit=require('./services/rentalTariffs').earlyReturnCredit({...item,adjusted_rental_start:finalStart,adjusted_rental_end:finalEnd,adjusted_price_per_day:finalPricePerDay},actualReturnDate);
         const normalizedIsDamaged = isDamaged === true || Number(isDamaged) === 1;
-        const normalizedIsLate = lateDays > 0;
+        const normalizedIsLate = hourlyLate?hourlyLate.minutesLate>0:lateDays > 0;
 
         const normalizedAdditionalChargeAmount =
             additionalChargeAmount === null || additionalChargeAmount === undefined || additionalChargeAmount === ''
@@ -4965,6 +4978,9 @@ FOR UPDATE`,
             );
         }
 
+        await connection.execute('UPDATE rental_order_items SET actual_return_time=?,early_return_refund=?,late_fee=? WHERE id=?',[item.rental_hours?req.body.actualReturnTime:null,earlyCredit.amount,lateFee,item.id]);
+        await require('./services/salesInvoices').createEarlyReturnCredits(connection,item.order_id);
+        await require('./services/earlyReturnRefunds').refundEarlyReturns(connection,item.order_id,persistOnlineRefundIntent);
         const initialPaymentMethod = await getDepositPaymentMethod(connection, item.order_id, item.payment_method);
 
         const [openBlockingPayments] = await connection.execute(
@@ -5612,6 +5628,7 @@ app.post('/orders/:id/mollie-checkout', async (req, res) => {
             `SELECT id, product_id,
                     DATE_FORMAT(rental_start, '%Y-%m-%d') AS rentalStart,
                     DATE_FORMAT(rental_end, '%Y-%m-%d') AS rentalEnd,
+                    rental_hours AS rentalHours, TIME_FORMAT(rental_start_time,'%H:%i') AS rentalStartTime,
                     price_per_day AS pricePerDay,
                     discount_amount AS discountAmount,
                     deposit
@@ -5682,6 +5699,7 @@ app.post('/orders/:id/mollie-checkout', async (req, res) => {
             `SELECT id, product_id,
                     DATE_FORMAT(rental_start, '%Y-%m-%d') AS rentalStart,
                     DATE_FORMAT(rental_end, '%Y-%m-%d') AS rentalEnd,
+                    rental_hours AS rentalHours, TIME_FORMAT(rental_start_time,'%H:%i') AS rentalStartTime,
                     price_per_day AS pricePerDay,
                     discount_amount AS discountAmount,
                     deposit
@@ -5709,7 +5727,7 @@ app.post('/orders/:id/mollie-checkout', async (req, res) => {
                 WHERE refund.order_id = initialPayment.order_id
                 AND refund.mollie_payment_id = initialPayment.mollie_payment_id
                 AND refund.payment_type IN (
-                    'deposit_refund',
+                    'rental_refund', 'deposit_refund',
                     'order_cancellation_refund',
                     'duplicate_payment_refund'
                 )
@@ -5729,7 +5747,7 @@ app.post('/orders/:id/mollie-checkout', async (req, res) => {
                 item.rentalStart,
                 item.rentalEnd,
                 item.id,
-                true
+                true,item
             );
             if (!available) {
                 allItemsAvailable = false;
@@ -6948,7 +6966,7 @@ app.post('/admin/order-payments/:id/retry-refund', checkAdmin, adminReturnMutati
 
         const failedRefund = refundRows[0];
         const retryableTypes = [
-            'deposit_refund',
+            'rental_refund', 'deposit_refund',
             'order_cancellation_refund',
             'duplicate_payment_refund'
         ];
@@ -7009,7 +7027,7 @@ app.post('/admin/order-payments/:id/retry-refund', checkAdmin, adminReturnMutati
              FROM rental_order_payments
              WHERE order_id = ?
              AND mollie_payment_id = ?
-             AND payment_type IN ('deposit_refund', 'order_cancellation_refund', 'duplicate_payment_refund', 'refund_record', 'chargeback')
+             AND payment_type IN ('rental_refund', 'deposit_refund', 'order_cancellation_refund', 'duplicate_payment_refund', 'refund_record', 'chargeback')
              AND payment_status NOT IN ('failed', 'cancelled')
              FOR UPDATE`,
             [failedRefund.order_id, failedRefund.mollie_payment_id]
@@ -7108,7 +7126,7 @@ app.post('/admin/order-payments/manual-refund', checkAdmin, adminReturnMutationL
         return res.status(400).json({ error: 'Ungültige Rückerstattungsdaten.' });
     }
 
-    if (!['deposit_refund', 'order_cancellation_refund'].includes(paymentType)) {
+    if (!['rental_refund', 'deposit_refund', 'order_cancellation_refund'].includes(paymentType)) {
         return res.status(400).json({
             error: 'Diese Zahlungsart ist keine Rückerstattung vor Ort.'
         });
@@ -7213,7 +7231,7 @@ app.post('/admin/order-payments/manual-refund', checkAdmin, adminReturnMutationL
                 `SELECT COALESCE(SUM(ABS(amount)), 0) AS amount
                  FROM rental_order_payments
                  WHERE order_id = ? AND payment_method = 'cash'
-                 AND payment_type IN ('deposit_refund', 'order_cancellation_refund')
+                 AND payment_type IN ('rental_refund', 'deposit_refund', 'order_cancellation_refund')
                  AND payment_status = 'paid'`,
                 [orderId]
             );
@@ -7306,6 +7324,9 @@ async function getDepositPaymentMethod(connection, orderId, historicalMethod) {
 }
 
 async function refundEligibleDepositsAfterPaymentsSettled(connection, orderId) {
+    const [[paidOrder]]=await connection.execute('SELECT * FROM rental_orders WHERE id=?',[orderId]);
+    if(paidOrder)await require('./services/documentDelivery').releasePaidDocuments(connection,paidOrder);
+    await require('./services/earlyReturnRefunds').refundEarlyReturns(connection,orderId,persistOnlineRefundIntent);
     const [items] = await connection.execute(
         `SELECT
             roi.id,
@@ -7555,7 +7576,8 @@ async function reconcileMolliePayment(paymentId) {
                 roi.item_status,
                 DATE_FORMAT(roi.rental_start, '%Y-%m-%d') AS rental_start,
                 DATE_FORMAT(roi.rental_end, '%Y-%m-%d') AS rental_end,
-                roi.price_per_day,
+                roi.rental_hours, roi.adjusted_rental_hours, roi.rental_start_time, roi.tariff_prices,
+    roi.price_per_day,
     roi.discount_amount,
                 roi.deposit
              FROM rental_order_payments rop

@@ -585,7 +585,7 @@ function calculateOrderItemFinancials(item) {
 
     const pricePerDay = Number(item.adjustedPricePerDay || item.pricePerDay || 0);
     const lateFee = lateDays * pricePerDay;
-    const rentalTotal = Math.max(0, effectiveDays * pricePerDay - Number(item.discountAmount || 0));
+    const rentalTotal = item.adjustedRentalTotal!=null?Number(item.adjustedRentalTotal):Math.max(0,(item.rentalHours?1:effectiveDays)*pricePerDay-Number(item.discountAmount||0));
     const originalRentalTotal = Math.max(0, originalDays * Number(item.pricePerDay || 0) - Number(item.discountAmount || 0));
     const rentalAdjustment = rentalTotal - originalRentalTotal;
 

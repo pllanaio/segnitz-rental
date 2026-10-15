@@ -15,7 +15,7 @@ const LABELS = {
     invoice_payment: 'Mietrechnung', banktransfer: 'Banküberweisung',
     rental: 'Miete', deposit: 'Kaution', initial_payment: 'Miete und Kaution', rental_adjustment: 'Mietverlängerung',
     return_additional_charge: 'Rückgabe-Nachzahlung', deposit_refund: 'Kautionsrückerstattung',
-    order_cancellation_refund: 'Stornoerstattung', duplicate_payment_refund: 'Erstattung Doppelzahlung',
+    rental_refund:'Mieterstattung',order_cancellation_refund: 'Stornoerstattung', duplicate_payment_refund: 'Erstattung Doppelzahlung',
     chargeback: 'Rückbelastung', charged_back: 'Rückbelastet', refund_record: 'Mollie-Erstattung',
     cash: 'Zahlung vor Ort', online: 'Onlinezahlung', invoice: 'Überweisung (14 Tage)'
 };
@@ -69,7 +69,8 @@ async function captureReceipt(connection, orderId, kind, itemId = null) {
             const end = iso(item.adjusted_rental_end || item.rental_end).slice(0, 10);
             const days = Math.max(1, Math.round((Date.parse(end) - Date.parse(start)) / 86400000) + 1);
             return {
-                id: item.id, title: item.title, start, end, status: item.item_status,
+                id: item.id, title: item.title+(item.rental_hours?' – '+(item.adjusted_rental_hours||item.rental_hours)+' Stunden ab '+String(item.rental_start_time).slice(0,5):''), start, end, status: item.item_status,
+                rentalRefund:Number(item.early_return_refund||0),lateFee:Number(item.late_fee||0),returnTime:item.actual_return_time?String(item.actual_return_time).slice(0,5):null,
                 originalStart: iso(item.rental_start), originalEnd: iso(item.rental_end),
                 rental: Number(item.adjusted_rental_total ?? Math.max(0, days * Number(item.adjusted_price_per_day ?? item.price_per_day) - Number(item.discount_amount || 0))),
                 discountAmount: Number(item.discount_amount || 0),
@@ -147,9 +148,11 @@ async function renderReceiptPdf(receipt, operationKey = '') {
             row('Ursprüngliche Kaution', money(item.deposit));
             if (item.status === 'cancelled') row('Position', 'Storniert');
             if (['return', 'completed'].includes(receipt.kind) && item.returnDate) {
-                row('Rückgabe', `${date(item.returnDate)} · ${label(item.returnStatus)}`);
+                row('Rückgabe', `${date(item.returnDate)}${item.returnTime?' '+item.returnTime+' Uhr':''} · ${label(item.returnStatus)}`);
                 row('Kaution zurückzuzahlen', money(item.refund));
+                if(item.rentalRefund>0)row('Mieterstattung für ungenutzte Tage', money(item.rentalRefund));
                 row('Kaution einbehalten / verrechnet', money(item.retained));
+                if(item.lateFee>0)row('Verspätung / Tarifüberschreitung',money(item.lateFee));
                 row('Zusatzkosten bei Rückgabe', money(item.extra));
                 if (item.damage) row('Schaden', item.damage);
                 if (item.extraReason) row('Grund der Zusatzkosten', item.extraReason);

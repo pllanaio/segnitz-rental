@@ -320,7 +320,7 @@ test('normalisiert die exakten MySQL-8.4-Istwerte aus dem CI-Schema-Gate', () =>
     const paymentLifecycleActual =
         "(payment_type in(_utf8mb4\\\\'invoice_payment\\\\',_utf8mb4\\\\'initial_payment\\\\',_utf8mb4\\\\'rental\\\\'," +
         "_utf8mb4\\\\'deposit\\\\',_utf8mb4\\\\'rental_adjustment\\\\'," +
-        "_utf8mb4\\\\'return_additional_charge\\\\',_utf8mb4\\\\'deposit_refund\\\\'," +
+        "_utf8mb4\\\\'return_additional_charge\\\\',_utf8mb4\\\\'deposit_refund\\\\',_utf8mb4\\\\'rental_refund\\\\'," +
         "_utf8mb4\\\\'order_cancellation_refund\\\\',_utf8mb4\\\\'duplicate_payment_refund\\\\'," +
         "_utf8mb4\\\\'chargeback\\\\',_utf8mb4\\\\'refund_record\\\\'))and" +
         "(payment_status in(_utf8mb4\\\\'pending\\\\',_utf8mb4\\\\'open\\\\'," +

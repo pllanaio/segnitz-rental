@@ -734,7 +734,44 @@ const migrations = [
         checksumSource:'Bind additional payment attempts to their immutable invoice v1',
         checksumDependencies:[readSqlStatements,removeSqlComments,quoteIdentifier,columnExists,ensureColumn,indexExists],
         async up(connection){await ensureColumn(connection,'rental_order_payments','billing_document_id','BIGINT UNSIGNED NULL');if(!await indexExists(connection,'rental_order_payments','idx_payment_document'))await connection.query('ALTER TABLE rental_order_payments ADD INDEX idx_payment_document (billing_document_id)');}
+    },
+    {
+        version: '20260930_18_customer_document_release', checksumVersion: 1,
+        checksumSource: 'Release invoice originals only after payment; correction documents remain available v1',
+        checksumDependencies: [readSqlStatements,removeSqlComments,quoteIdentifier, columnExists, ensureColumn],
+        async up(connection) {
+            await ensureColumn(connection, 'billing_documents', 'customer_released_at', 'DATETIME NULL');
+            await connection.execute(`UPDATE billing_documents d JOIN rental_invoices i ON i.id=d.invoice_id
+                SET d.customer_released_at=d.created_at
+                WHERE d.customer_released_at IS NULL AND (d.kind='credit' OR
+                    COALESCE(JSON_UNQUOTE(JSON_EXTRACT(d.snapshot_json,'$.paidAt')),'null')<>'null' OR
+                    (JSON_EXTRACT(d.snapshot_json,'$.scope') IS NULL AND i.status='paid' AND i.invoice_number=d.document_number) OR
+                    EXISTS(SELECT 1 FROM rental_order_payments p WHERE p.billing_document_id=d.id AND p.payment_status IN ('paid','offset')))`);
+        }
     }
+,
+    {
+        version:'20260930_19_rental_tariffs',checksumVersion:1,
+        checksumSource:'Hourly tariff snapshots and separate early-return rental credits v1',
+        checksumDependencies:[readSqlStatements,removeSqlComments,quoteIdentifier,columnExists,ensureColumn,constraintExists],
+        async up(connection){
+            await ensureColumn(connection,'rental_products','hourly_prices','JSON NULL');
+            for(const table of ['rental_cart_items','rental_order_items']){
+                await ensureColumn(connection,table,'rental_hours','TINYINT UNSIGNED NULL');
+                await ensureColumn(connection,table,'rental_start_time','TIME NULL');
+            }
+            await ensureColumn(connection,'rental_order_items','tariff_prices','JSON NULL');
+            await ensureColumn(connection,'rental_order_items','adjusted_rental_hours','TINYINT UNSIGNED NULL');
+            await ensureColumn(connection,'rental_order_items','actual_return_time','TIME NULL');
+            await ensureColumn(connection,'rental_order_items','early_return_refund','DECIMAL(10,2) NOT NULL DEFAULT 0.00');
+            await ensureColumn(connection,'rental_order_items','late_fee','DECIMAL(10,2) NOT NULL DEFAULT 0.00');
+            await connection.execute('UPDATE rental_order_items SET late_fee=GREATEST(DATEDIFF(actual_return_date,COALESCE(adjusted_rental_end,rental_end)),0)*COALESCE(adjusted_price_per_day,price_per_day) WHERE is_late=1 AND rental_hours IS NULL');
+            if(await constraintExists(connection,'rental_order_payments','chk_rental_order_payments_lifecycle'))await connection.query('ALTER TABLE rental_order_payments DROP CHECK chk_rental_order_payments_lifecycle');
+            await connection.query(`ALTER TABLE rental_order_payments ADD CONSTRAINT chk_rental_order_payments_lifecycle CHECK (payment_type IN ('invoice_payment','initial_payment','rental','deposit','rental_adjustment','return_additional_charge','deposit_refund','rental_refund','order_cancellation_refund','duplicate_payment_refund','chargeback','refund_record') AND payment_status IN ('pending','open','authorized','paid','failed','cancelled','expired','charged_back','offset','replaced','refunded'))`);
+
+        }
+    }
+
 ];
 module.exports = {
     columnExists,

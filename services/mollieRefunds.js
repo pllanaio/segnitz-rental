@@ -17,7 +17,7 @@ async function syncMollieRefundsForPayment(connection, paymentId, prefetchedRefu
             await connection.execute(
                 `UPDATE rental_order_payments SET mollie_refund_id = ?
                  WHERE external_operation_key = ? AND mollie_payment_id = ?
-                 AND payment_type IN ('deposit_refund', 'order_cancellation_refund', 'duplicate_payment_refund')
+                 AND payment_type IN ('rental_refund', 'deposit_refund', 'order_cancellation_refund', 'duplicate_payment_refund')
                  AND (mollie_refund_id IS NULL OR mollie_refund_id = ?)`,
                 [refund.id, refund.metadata.operationKey, paymentId, refund.id]
             );

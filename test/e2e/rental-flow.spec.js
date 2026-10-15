@@ -862,7 +862,7 @@ test('Kalender und Warenkorb-Datumswahl funktionieren ohne CDN', async ({ page }
     const days = page.locator('#modalCalendarContainer .flatpickr-day:not(.flatpickr-disabled):not(.prevMonthDay):not(.nextMonthDay)');
     await days.nth(4).click();
     await days.nth(6).click();
-    await expect(page.locator('#modalRentalInfo')).toContainText('3 Tage');
+    await expect(page.locator('#modalRentalInfo')).toContainText('3 Miettage');
     await page.locator('#selectProductFromModal').click();
     await expect(page.locator('#cartItemCount')).toHaveText('1');
     await page.locator('[data-bs-target="#cartModal"]').click();

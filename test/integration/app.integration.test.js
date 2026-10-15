@@ -272,7 +272,9 @@ test('blockiert laufende Zahlungsreservierungen in der öffentlichen Verfügbark
     assert.equal(response.status, 200);
     assert.deepEqual(await response.json(), expectedPeriods.map(({ rentalStart, rentalEnd }) => ({
         rentalStart,
-        rentalEnd
+        rentalEnd,
+        rentalHours:null,
+        rentalStartTime:null
     })));
 });
 

@@ -61,6 +61,7 @@ function buildOrderSummary(orderNo, cartItems, status = 'reserved') {
         depositTotal += lineDepositTotal;
 
         return {
+            rentalHours:item.rentalHours||null, rentalStartTime:item.rentalStartTime||null, tariffPrices:item.tariffPrices||null,
             productId: item.productId,
             productKey: item.productKey,
             title: item.title,

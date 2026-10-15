@@ -15,12 +15,12 @@ async function invoiceCard(container,orderId,admin=false) {
     const documents=data.documents||[];
     const archive=await invoiceFetch((admin?'/admin/invoices':'/my-invoices')+'?orderId='+Number(orderId));
     if(container.closest('.order-sheet')) {
-        container.innerHTML='<div class="invoice-documents">'+invoiceDocumentRows(archive.items,admin)+'</div>'+(archive.items.length?'':'<p class="text-muted">Rechnungen erscheinen hier, sobald sie ausgestellt wurden.</p>');
+        container.innerHTML='<div class="invoice-documents">'+invoiceDocumentRows(archive.items,admin)+'</div>'+(archive.items.length?'':'<p class="text-muted">Bezahlte Rechnungen sowie Storno- und Korrekturbelege erscheinen hier nach ihrer Freigabe.</p>');
         styleOrderSheetDocuments(container,admin);
         return;
     }
     container.innerHTML=`<h3 class="h5">Rechnungen &amp; Dokumente</h3><div class="invoice-documents">${invoiceDocumentRows(archive.items,admin)}</div>
-        ${!archive.items.length?'<p class="text-muted">Rechnungen erscheinen hier, sobald sie ausgestellt wurden.</p>':''}
+        ${!archive.items.length?'<p class="text-muted">Bezahlte Rechnungen sowie Storno- und Korrekturbelege erscheinen hier nach ihrer Freigabe.</p>':''}
 
         ${admin&&(data.separateDeposit||data.combinedPayment)&&data.balance?.openCents>0&&!data.cancelled?`<p><strong>Offene ursprüngliche Mietrechnung:</strong> ${invoiceMoney(data.balance.openCents/100)}</p>`:''}
         ${admin&&(data.separateDeposit||data.combinedPayment)?'<p>Überweisungen werden über Mollie abgewickelt. Der Kunde erhält die Zahlungsdaten per E-Mail; der Zahlungseingang wird automatisch bestätigt.</p>':''}

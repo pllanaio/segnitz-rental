@@ -30,7 +30,8 @@ async function checkProductAvailability(
     rentalStart,
     rentalEnd,
     excludeOrderItemId = null,
-    lockConflicts = false
+    lockConflicts = false,
+    tariff = null
 ) {
     let sql = `
         SELECT roi.id
@@ -52,6 +53,11 @@ async function checkProductAvailability(
     `;
 
     const params = [productId, rentalEnd, rentalStart];
+    if(tariff?.rentalHours){
+        sql=sql.replace('COALESCE(roi.adjusted_rental_start, roi.rental_start) <= ?', "TIMESTAMP(COALESCE(roi.adjusted_rental_start,roi.rental_start),COALESCE(roi.rental_start_time,'00:00:00')) < TIMESTAMPADD(HOUR, ?, TIMESTAMP(?,?))")
+            .replace('COALESCE(roi.adjusted_rental_end, roi.rental_end) >= ?', "IF(roi.rental_hours IS NULL,DATE_ADD(COALESCE(roi.adjusted_rental_end,roi.rental_end),INTERVAL 1 DAY),TIMESTAMPADD(HOUR,COALESCE(roi.adjusted_rental_hours,roi.rental_hours),TIMESTAMP(roi.rental_start,roi.rental_start_time))) > TIMESTAMP(?,?)");
+        params.splice(1,2,tariff.rentalHours,rentalStart,tariff.rentalStartTime,rentalStart,tariff.rentalStartTime);
+    }
 
     if (excludeOrderItemId) {
         sql += ` AND roi.id != ?`;

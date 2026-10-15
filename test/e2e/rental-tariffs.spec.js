@@ -1,0 +1,52 @@
+'use strict';
+const {test,expect}=require('@playwright/test');
+const {TEST_ADMIN,TEST_PRODUCT}=require('../support/test-database');
+const path=require('node:path');
+const os=require('node:os');
+
+test('Stundentarife verwalten, Zeitraumpreis auswählen und Startzeit im Warenkorb ändern',async({page})=>{
+ const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ await page.goto('/login.html');
+ await page.locator('#username').fill(TEST_ADMIN.email);await page.locator('#password').fill(TEST_ADMIN.password);
+ await page.getByRole('button',{name:'Einloggen'}).click();await page.waitForURL(/backend/);
+ await page.locator('#productList .card').filter({hasText:TEST_PRODUCT.title}).getByRole('button',{name:'Bearbeiten',exact:true}).click();
+ await page.locator('#productKind').selectOption('Baumaschine');
+ await page.locator('#hourlyEnabled').check();
+ for(const [h,price] of [[2,'20'],[4,'30'],[6,'40']])await page.locator('#price'+h+'Hours').fill(price);
+ const saved=page.waitForResponse(r=>r.url().endsWith('/products/'+TEST_PRODUCT.id)&&r.request().method()==='PUT');
+ await page.getByRole('button',{name:'Änderungen speichern'}).click();expect((await saved).status()).toBe(200);
+ await page.goto('/index.html');
+ await page.locator('#productGrid .product-card').filter({hasText:TEST_PRODUCT.title}).getByRole('button',{name:'Details'}).click();
+ await page.locator('#modalRentalHours').selectOption('2');await page.locator('#modalRentalStartTime').fill('09:00');
+ await page.locator('#modalCalendarContainer .flatpickr-next-month').click();
+ await page.locator('#modalCalendarContainer .flatpickr-day:not(.flatpickr-disabled):not(.prevMonthDay):not(.nextMonthDay)').nth(12).click();
+ await expect(page.locator('#modalRentalInfo')).toContainText('2 Stunden ab 09:00');
+ await expect(page.locator('#modalRentalInfo')).toContainText('20,00');
+ await expect(page.locator('#modalRentalInfo')).toContainText('170,00');
+ await page.screenshot({path:path.join(os.tmpdir(),'segnitz-tariff-desktop.png')});
+ await page.setViewportSize({width:390,height:844});
+ await page.locator('#modalRentalInfo').scrollIntoViewIfNeeded();
+ await page.screenshot({path:path.join(os.tmpdir(),'segnitz-tariff-mobile.png')});
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+ await page.locator('#selectProductFromModal').click();await expect(page.locator('#cartItemCount')).toHaveText('1');
+ await page.locator('[data-bs-target="#cartModal"]').click();
+ await page.getByRole('button',{name:'Zeitraum ändern'}).click();
+ await expect(page.locator('#editCartStartTime')).toHaveValue('09:00');
+ await page.locator('#editCartStartTime').fill('10:00');
+ const updated=page.waitForResponse(r=>r.url().includes('/cart/items/')&&r.request().method()==='PUT');
+ await page.locator('#cartItemEditModal').getByRole('button',{name:/speichern/i}).click();expect((await updated).status()).toBe(200);
+ const cart=await (await page.request.get('/cart')).json();expect(cart.items[0].rentalStartTime).toBe('10:00');
+ expect(errors).toEqual([]);
+});
+
+test('offener Mollie-Vorgang lässt sich nach Zurück-Navigation geprüft fortsetzen',async({page})=>{
+ test.setTimeout(45000);
+ const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ await page.route('**/orders/1/payment-status/sync**',r=>r.fulfill({json:{id:1,payment_status:'pending',status:'pending_payment'}}));
+ await page.route('**/orders/1/mollie-checkout',r=>r.fulfill({json:{checkoutUrl:'/index.html?resumed=1'}}));
+ await page.goto('/index.html?payment=return&orderId=1');
+ const resume=page.getByRole('button',{name:'Zahlung bei Mollie fortsetzen'});
+ await expect(resume).toBeVisible({timeout:30000});
+ await resume.click();await expect(page).toHaveURL(/resumed=1/);
+ expect(errors).toEqual([]);
+});

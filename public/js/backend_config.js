@@ -269,6 +269,7 @@ async function saveProduct(event) {
         title: document.getElementById('title').value.trim(),
         description: document.getElementById('description').value.trim(),
         pricePerDay: Number(document.getElementById('pricePerDay').value),
+        hourlyPrices:document.getElementById('hourlyEnabled').checked?Object.fromEntries([2,4,6].map(h=>[h,Number(document.getElementById('price'+h+'Hours').value)])):null,
         deposit: Number(document.getElementById('deposit').value),
         imagePath: '',
         category: categories[0] || '',
@@ -330,6 +331,9 @@ function editProduct(id) {
     document.getElementById('title').value = product.title;
     document.getElementById('description').value = product.description || '';
     document.getElementById('pricePerDay').value = product.price_per_day;
+    const hourlyPrices=typeof product.hourly_prices==='string'?JSON.parse(product.hourly_prices):product.hourly_prices;
+    document.getElementById('hourlyEnabled').checked=!!hourlyPrices;
+    for(const h of [2,4,6])document.getElementById('price'+h+'Hours').value=hourlyPrices?.[h]||'';
     document.getElementById('deposit').value = product.deposit;
     const categoryNames = Array.isArray(product.categories)
         ? product.categories.map(category =>
@@ -1027,7 +1031,7 @@ function renderOrderPaymentActionPanel(order) {
     });
 
     const openCancellationRefunds = payments.filter(payment =>
-        payment.paymentType === 'order_cancellation_refund' &&
+        ['rental_refund','order_cancellation_refund'].includes(payment.paymentType) &&
         payment.paymentMethod === 'cash' &&
         hasOriginalCashPayment(payment) &&
         ['pending', 'open'].includes(payment.paymentStatus)
@@ -1037,7 +1041,7 @@ function renderOrderPaymentActionPanel(order) {
         actions.push(`
             <div class="cash-action-row">
                 <div>
-                    <div class="cash-action-title">Storno-Rückerstattung</div>
+                    <div class="cash-action-title">${payment.paymentType==='rental_refund'?'Mieterstattung – vorzeitige Rückgabe':'Storno-Rückerstattung'}</div>
                     <div class="small text-muted">Der bereits kassierte Betrag ist vor Ort zurückzuzahlen.</div>
                 </div>
 
@@ -1048,9 +1052,9 @@ function renderOrderPaymentActionPanel(order) {
                         data-backend-action="open-manual-refund"
                         data-order-id="${payment.orderId}"
                         data-item-id="${payment.orderItemId || ''}"
-                        data-payment-type="order_cancellation_refund"
+                        data-payment-type="${payment.paymentType}"
                         data-amount="${Math.abs(Number(payment.amount || 0))}">
-                        Storno vor Ort erstatten
+                        Erstattung in bar erfassen
                     </button>
                 </div>
             </div>
@@ -1058,6 +1062,7 @@ function renderOrderPaymentActionPanel(order) {
     });
 
     const retryableRefundTypes = new Set([
+        'rental_refund',
         'deposit_refund',
         'order_cancellation_refund',
         'duplicate_payment_refund'
@@ -2071,7 +2076,7 @@ function formatPaymentType(type) {
         deposit: 'Kaution',
         rental_adjustment: 'Nachzahlung Mietzeitraum',
         return_additional_charge: 'Nachzahlung Rückgabe',
-        deposit_refund: 'Kautionsrückerstattung',
+        rental_refund:'Mieterstattung',deposit_refund: 'Kautionsrückerstattung',
         order_cancellation_refund: 'Storno-Rückerstattung',
         duplicate_payment_refund: 'Erstattung einer Doppelzahlung',
         refund_record: 'Erstattung über Mollie',
@@ -2275,6 +2280,12 @@ function openRentalPeriodModal(orderId, itemId) {
         return;
     }
 
+    let hoursField=document.getElementById('rentalPeriodHours');
+    if(!hoursField){const wrapper=document.createElement('div');wrapper.id='rentalPeriodHoursField';wrapper.className='mt-3';wrapper.innerHTML='<label class="form-label" for="rentalPeriodHours">Neue gesamte Mietdauer</label><select id="rentalPeriodHours" class="form-select"></select>';document.getElementById('rentalPeriodEnd').after(wrapper);hoursField=wrapper.querySelector('select');hoursField.addEventListener('change',updateRentalPeriodPreview);}
+    document.getElementById('rentalPeriodHoursField').hidden=!item.rentalHours;
+    document.getElementById('rentalPeriodEnd').disabled=!!item.rentalHours;
+    hoursField.replaceChildren();
+    if(item.rentalHours)for(let h=Number(item.adjustedRentalHours||item.rentalHours)+2;h<=240;h+=2)hoursField.add(new Option(h+' Stunden',h));
     document.getElementById('rentalPeriodOrderId').value = orderId;
     document.getElementById('rentalPeriodItemId').value = itemId;
     document.getElementById('rentalPeriodPaymentMethod').value = 'online';
@@ -2298,6 +2309,14 @@ function updateRentalPeriodPreview() {
 
     if (!item) return;
 
+    if(item.rentalHours){
+        const hours=Number(document.getElementById('rentalPeriodHours').value),prices=typeof item.tariffPrices==='string'?JSON.parse(item.tariffPrices):item.tariffPrices;
+        const total=hours?SegnitzTariffs.hourlyCharge(prices,hours*60):Number(item.adjustedPricePerDay||item.pricePerDay);
+        const end=hours?new Date(Date.parse(item.rentalStart+'T'+item.rentalStartTime+':00Z')+hours*3600000):null;
+        if(end)document.getElementById('rentalPeriodEnd').value=new Date(end.getTime()-1).toISOString().slice(0,10);
+        document.getElementById('rentalPeriodPreview').textContent=hours?'Neue Dauer: '+hours+' Stunden · Rückgabe: '+end.toISOString().slice(0,16).replace('T',' ')+' · Nachzahlung: '+(total-Number(item.adjustedPricePerDay||item.pricePerDay)).toLocaleString('de-DE',{style:'currency',currency:'EUR'}):'Maximale Verlängerungsdauer erreicht.';
+        return;
+    }
     const start = document.getElementById('rentalPeriodStart').value || item.rentalStart;
     const end = document.getElementById('rentalPeriodEnd').value;
     const price = Number(item.adjustedPricePerDay || item.pricePerDay || 0);
@@ -2403,6 +2422,8 @@ function openOrderItemReturnModal(orderId, itemId) {
     document.getElementById('returnOrderId').value = orderId;
     document.getElementById('returnItemId').value = itemId;
     document.getElementById('returnActualDate').value = item.actualReturnDate || todayDateString();
+    document.getElementById('returnTimeField').hidden=!item.rentalHours;
+    document.getElementById('returnActualTime').value=item.actualReturnTime||new Date().toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'});
     const returnAdjustedStartInput = document.getElementById('returnAdjustedStart');
     const returnAdjustedEndInput = document.getElementById('returnAdjustedEnd');
 
@@ -2456,9 +2477,11 @@ function applyOrderItemReturnModalRules(triggerSource = 'auto') {
 
     const lateDays = calculateLateDays(actualReturnDate, adjustedEnd);
     const pricePerDay = Number(item.adjustedPricePerDay || item.pricePerDay || 0);
-    const lateFee = lateDays * pricePerDay;
+    let hourlyLate=null;try{hourlyLate=SegnitzTariffs.hourlyLateFee(tariffSnapshot(item),actualReturnDate,document.getElementById('returnActualTime').value);}catch{}
+    const lateFee = hourlyLate?hourlyLate.amount:lateDays * pricePerDay;
+    let earlyCredit={amount:0,days:0};try{earlyCredit=SegnitzTariffs.earlyReturnCredit(tariffSnapshot(item),actualReturnDate);}catch{}
 
-    isLateInput.checked = lateDays > 0;
+    isLateInput.checked = hourlyLate?hourlyLate.minutesLate>0:lateDays > 0;
 
     const isLate = isLateInput.checked;
     const isDamaged = isDamagedInput.checked;
@@ -2524,7 +2547,7 @@ function applyOrderItemReturnModalRules(triggerSource = 'auto') {
 
         <div class="checkout-summary-row">
             <span>Verspätung</span>
-            <strong>${lateDays} Tag${lateDays === 1 ? '' : 'e'}</strong>
+            <strong>${hourlyLate?hourlyLate.minutesLate+' Minuten':lateDays+' Tage'}</strong>
         </div>
 
         ${lateFee > 0 ? `
@@ -2543,6 +2566,7 @@ function applyOrderItemReturnModalRules(triggerSource = 'auto') {
 
         <hr>
 
+        ${earlyCredit.amount>0?`<div class="checkout-summary-row"><span>Mieterstattung · ${earlyCredit.days} ungenutzte Tage</span><strong class="text-success">${earlyCredit.amount.toFixed(2)} €</strong></div><p class="small text-muted">Separater Korrekturbeleg; Auszahlung über das ursprüngliche Zahlungsmittel.</p>`:''}
         <div class="summary-section-label">Kaution</div>
 
         <div class="checkout-summary-row">
@@ -2597,6 +2621,7 @@ async function saveOrderItemRentalAdjustment(itemId, orderId) {
     const payload = {
         adjustedRentalStart: document.getElementById('rentalPeriodStart').value || null,
         adjustedRentalEnd: document.getElementById('rentalPeriodEnd').value || null,
+        adjustedRentalHours:document.getElementById('rentalPeriodHours')?.value||null,
         adjustedPricePerDay: normalizeDecimalInput(
             document.getElementById('rentalPeriodPricePerDay').value
         ),
@@ -2647,6 +2672,7 @@ async function saveOrderItemReturn(itemId, orderId) {
 
     const payload = {
         actualReturnDate: document.getElementById('returnActualDate').value || null,
+        actualReturnTime:document.getElementById('returnActualTime').value||null,
         adjustedRentalStart: document.getElementById('returnAdjustedStart').value || null,
         adjustedRentalEnd: document.getElementById('returnAdjustedEnd').value || null,
         adjustedPricePerDay: normalizeDecimalInput(
@@ -2862,7 +2888,7 @@ function calculateOrderItemFinancials(item) {
 
     const pricePerDay = Number(item.adjustedPricePerDay || item.pricePerDay || 0);
     const lateFee = lateDays * pricePerDay;
-    const rentalTotal = Math.max(0, effectiveDays * pricePerDay - Number(item.discountAmount || 0));
+    const rentalTotal = item.adjustedRentalTotal!=null?Number(item.adjustedRentalTotal):Math.max(0,(item.rentalHours?1:effectiveDays)*pricePerDay-Number(item.discountAmount||0));
     const originalRentalTotal = Math.max(0, originalDays * Number(item.pricePerDay || 0) - Number(item.discountAmount || 0));
     const rentalAdjustment = rentalTotal - originalRentalTotal;
 
@@ -3438,3 +3464,7 @@ function logout() {
             console.error('Netzwerkfehler beim Logout:', error);
         });
 }
+
+function tariffSnapshot(item){return {rental_hours:item.rentalHours,adjusted_rental_hours:item.adjustedRentalHours,rental_start:item.rentalStart,rental_end:item.rentalEnd,rental_start_time:item.rentalStartTime,tariff_prices:item.tariffPrices,adjusted_rental_start:item.adjustedRentalStart,adjusted_rental_end:item.adjustedRentalEnd,price_per_day:item.pricePerDay,adjusted_price_per_day:item.adjustedPricePerDay,discount_amount:item.discountAmount};}
+
+document.addEventListener('DOMContentLoaded',()=>{document.getElementById('returnActualTime')?.addEventListener('input',()=>document.getElementById('returnActualDate').dispatchEvent(new Event('change',{bubbles:true})));});
