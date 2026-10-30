@@ -1,10 +1,7 @@
 'use strict';
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
-const vm=require('node:vm');
-const fs=require('node:fs');
-const scope=vm.createContext({});
-vm.runInContext(fs.readFileSync(require.resolve('../public/js/order_details.js'),'utf8'),scope);
+const scope=require('../frontend/lib/orders.js');
 test('combined payments hide rental/deposit allocations but retain distinct failed attempts',()=>{
  const order={payment_method:'invoice',invoice_combined_payment:1,payments:[
   {id:1,paymentType:'invoice_payment',paymentStatus:'cancelled',providerPaymentKey:'old',amount:750},
@@ -32,7 +29,6 @@ test('payment labels and picked-up tone are shared across views',()=>{
  assert.equal(scope.paymentStatusLabel('paid'),'Bezahlt');
 });
 
-vm.runInContext(fs.readFileSync(require.resolve('../public/js/order_settlement.js'),'utf8'),scope);
 function settlementFixture(){return {items:[{id:30,title:'Radlader',rentalStart:'2026-09-28',rentalEnd:'2026-10-02',pricePerDay:1500,deposit:20000,itemStatus:'returned_late_damaged',actualReturnDate:'2026-10-11',additionalChargeAmount:2500,additionalChargeReason:'Reparatur Hydraulik',depositDeductionAmount:16000,depositRefundAmount:4000}],payments:[{id:1,paymentType:'initial_payment',paymentStatus:'paid',amount:27500}]};}
 test('late damaged return explains costs and the 4000 EUR refund without double charging deposit',()=>{
  const result=scope.orderSettlement(settlementFixture());assert.equal(result.costs,2350000);assert.equal(result.retained,1600000);assert.equal(result.balance,-400000);assert.equal(result.held,0);assert.equal(result.lines[1].amount,1350000);assert.equal(result.lines[2].reason,'Reparatur Hydraulik');

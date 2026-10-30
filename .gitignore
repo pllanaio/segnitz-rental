@@ -13,3 +13,8 @@ uploads/
 public/json/
 public/pdf/
 public/templates/
+
+# Next.js frontend build output
+frontend/.next/
+frontend/out/
+frontend/next-env.d.ts

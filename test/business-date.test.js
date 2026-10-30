@@ -6,7 +6,7 @@ const path = require('node:path');
 const { test } = require('node:test');
 
 const { addIsoCalendarDays, formatDateInTimeZone } = require('../utils/businessDate');
-const browserDate = require('../public/js/date_utils');
+const browserDate = require('../frontend/lib/dateUtils.js');
 
 test('liefert nachts das Berliner Kalenderdatum statt des vorherigen UTC-Tags', () => {
     assert.equal(
@@ -27,19 +27,26 @@ test('addiert reine Kalendertage stabil über Sommer- und Winterzeitwechsel', ()
     }
 });
 
-test('Frontendpfade laden den lokalen Datumshelper vor ihren Konfigurationen', () => {
-    const publicRoot = path.resolve(__dirname, '../public');
+test('Frontend verwendet für lokale Kalendertage den Datumshelper statt UTC-Datumsstrings', () => {
+    const frontendRoot = path.resolve(__dirname, '../frontend');
+    const sources = ['components/shop/ProductDetailsModal.jsx', 'components/admin/OrderModals.jsx']
+        .map(file => fs.readFileSync(path.join(frontendRoot, file), 'utf8'));
 
-    for (const [htmlFile, scriptFile] of [
-        ['index.html', 'frontend_config.js'],
-        ['backend.html', 'backend_config.js']
-    ]) {
-        const html = fs.readFileSync(path.join(publicRoot, htmlFile), 'utf8');
-        assert.ok(html.indexOf('js/date_utils.js') < html.indexOf(`js/${scriptFile}`));
+    for (const source of sources) {
+        assert.match(source, /formatLocalDate\(\)/);
     }
 
-    const frontend = fs.readFileSync(path.join(publicRoot, 'js/frontend_config.js'), 'utf8');
-    const backend = fs.readFileSync(path.join(publicRoot, 'js/backend_config.js'), 'utf8');
-    assert.doesNotMatch(frontend, /new Date\(\)\.toISOString\(\)/);
-    assert.doesNotMatch(backend, /new Date\(\)\.toISOString\(\)/);
+    for (const directory of ['pages', 'components', 'lib']) {
+        for (const file of listSources(path.join(frontendRoot, directory))) {
+            assert.doesNotMatch(fs.readFileSync(file, 'utf8'), /new Date\(\)\.toISOString\(\)/, file);
+        }
+    }
 });
+
+function listSources(directory) {
+    return fs.readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
+        const entryPath = path.join(directory, entry.name);
+        if (entry.isDirectory()) return listSources(entryPath);
+        return /\.(?:js|jsx)$/.test(entry.name) ? [entryPath] : [];
+    });
+}

@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
-const { escapeHtml } = require('../public/js/safe_html');
+const { escapeHtml } = require('../frontend/lib/safeHtml.js');
 
 const root = path.resolve(__dirname, '..');
 
@@ -29,22 +29,29 @@ test('escapeHtml behandelt leere Werte und typische Attributausbrüche determini
     );
 });
 
-test('alle betroffenen Seiten laden die zentrale Escape-Hilfe vor ihren Renderern', () => {
-    const pages = [
-        ['public/index.html', 'js/frontend_config.js'],
-        ['public/backend.html', 'js/backend_config.js'],
-        ['public/profile.html', 'js/profile_config.js']
-    ];
+function listFrontendSources(directory) {
+    return fs.readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
+        const entryPath = path.join(directory, entry.name);
+        if (entry.isDirectory()) return listFrontendSources(entryPath);
+        return /\.(?:js|jsx)$/.test(entry.name) ? [entryPath] : [];
+    });
+}
 
-    for (const [pagePath, renderer] of pages) {
-        const source = fs.readFileSync(path.join(root, pagePath), 'utf8');
-        assert.ok(source.indexOf('js/safe_html.js') > -1, pagePath);
-        assert.ok(source.indexOf('js/safe_html.js') < source.indexOf(renderer), pagePath);
+test('React-Seiten rendern Kunden- und API-Daten nur als Text', () => {
+    const files = ['pages', 'components', 'lib']
+        .flatMap(directory => listFrontendSources(path.join(root, 'frontend', directory)));
+
+    assert.ok(files.length > 20);
+    for (const file of files) {
+        const source = fs.readFileSync(file, 'utf8');
+        const relative = path.relative(root, file);
+        assert.doesNotMatch(source, /dangerouslySetInnerHTML/, relative);
+        assert.doesNotMatch(source, /\.(?:innerHTML|outerHTML)\s*=|insertAdjacentHTML/, relative);
     }
 });
 
 test('globale API-Hinweise werden als Text statt als HTML gerendert', () => {
-    const source = fs.readFileSync(path.join(root, 'public/js/alerts.js'), 'utf8');
+    const source = fs.readFileSync(path.join(root, 'frontend/lib/alerts.js'), 'utf8');
 
     assert.match(source, /messageNode\.textContent = String\(message/);
     assert.doesNotMatch(source, /alertBox\.innerHTML/);

@@ -34,3 +34,7 @@ public/templates/
 public/img/products/
 public/img/returns/
 uploads/
+
+frontend/.next/
+frontend/out/
+test-results/

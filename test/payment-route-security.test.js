@@ -10,7 +10,7 @@ const source = fs.readFileSync(
     'utf8'
 );
 const frontendSource = fs.readFileSync(
-    path.join(__dirname, '..', 'public', 'js', 'frontend_config.js'),
+    path.join(__dirname, '..', 'frontend', 'pages', 'index.jsx'),
     'utf8'
 );
 
@@ -48,7 +48,7 @@ test('führt Payment-Synchronisierung nur über den schreibenden Owner-Endpunkt 
 });
 
 test('behandelt vorgemerkte Online-Zahlungen nicht als Zahlung vor Orts-Erfolg', () => {
-    const pendingBranch = frontendSource.indexOf('if (paymentPending)');
+    const pendingBranch = frontendSource.indexOf('if (orderResult.paymentPending === true)');
     const cashConfirmation = frontendSource.indexOf("'Bestellung bestätigt – Zahlung bei Abholung'");
 
     assert.notEqual(pendingBranch, -1, 'paymentPending-Zweig fehlt im Checkout-Frontend');
@@ -56,6 +56,7 @@ test('behandelt vorgemerkte Online-Zahlungen nicht als Zahlung vor Orts-Erfolg',
     assert.ok(pendingBranch < cashConfirmation, 'paymentPending muss vor der Zahlung vor Ortsansicht verzweigen');
     assert.match(frontendSource, /result\.paymentPending \|\| !result\.checkoutUrl/);
     assert.match(frontendSource, /data-frontend-action="retry-payment"/);
+    assert.match(frontendSource, /<RetryPaymentButton orderId=\{final\.orderId\}>Zahlungsseite erneut laden/);
 });
 
 test('lädt Mollie-Status für die Rückgabe vor der Datenbanktransaktion und revalidiert unter Locks', () => {

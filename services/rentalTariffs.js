@@ -1,2 +1,2 @@
 'use strict';
-module.exports=require('../public/js/rental_tariffs');
+module.exports=require('../shared/rentalTariffs');

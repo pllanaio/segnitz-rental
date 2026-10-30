@@ -581,13 +581,15 @@ test('Registrierung persistiert Benutzer und Verifikations-Mail in derselben Tra
 test('Verifikations- und Reset-Tokens werden scanner-sicher und ohne Query-Referrer transportiert', () => {
     const appSource = fs.readFileSync(path.join(__dirname, '..', 'segnitz_rental.js'), 'utf8');
     const loginSource = fs.readFileSync(
-        path.join(__dirname, '..', 'public', 'js', 'login_config.js'),
+        path.join(__dirname, '..', 'frontend', 'pages', 'login.jsx'),
         'utf8'
     );
     const verificationPage = fs.readFileSync(
-        path.join(__dirname, '..', 'public', 'verify-email.html'),
+        path.join(__dirname, '..', 'frontend', 'pages', 'verify-email.jsx'),
         'utf8'
     );
+    const pageHead = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'components', 'PageHead.jsx'), 'utf8');
+    const appShell = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'pages', '_app.jsx'), 'utf8');
 
     assert.match(appSource, /app\.get\('\/verify-email'[\s\S]*?res\.redirect\(`\/verify-email\.html#token=/u);
     assert.match(appSource, /app\.post\('\/verify-email\/complete'/u);
@@ -595,10 +597,12 @@ test('Verifikations- und Reset-Tokens werden scanner-sicher und ohne Query-Refer
     assert.match(appSource, /\/login\.html#resetToken=\$\{token\}/u);
     assert.match(loginSource, /window\.location\.hash\.slice\(1\)/u);
     assert.match(loginSource, /window\.history\.replaceState/u);
-    assert.match(verificationPage, /<meta name="referrer" content="no-referrer">/u);
+    assert.match(verificationPage, /window\.location\.hash\.slice\(1\)/u);
+    assert.match(verificationPage, /window\.history\.replaceState/u);
+    assert.match(verificationPage, /referrer="no-referrer"/u);
+    assert.match(pageHead, /<meta name="referrer" content=\{referrer\} \/>/u);
     assert.ok(
-        verificationPage.indexOf('/js/csrf.js') > -1 &&
-        verificationPage.indexOf('/js/csrf.js') < verificationPage.indexOf('/js/verify_email_config.js'),
+        /^if \(typeof window !== 'undefined'\) \{\n    installCsrfFetch\(window\);/mu.test(appShell),
         'Die Browser-Verifikation muss den CSRF-Fetch-Wrapper vor ihrer POST-Logik laden.'
     );
 });
@@ -615,7 +619,7 @@ test('Auth-Version-Prüfung überspringt nur explizit öffentliche statische Ass
     );
 
     assert.match(classifier, /pathname\.startsWith\('\/css\/'\)/u);
-    assert.match(classifier, /pathname\.startsWith\('\/js\/'\)/u);
+    assert.match(classifier, /pathname\.startsWith\('\/_next\/static\/'\)/u);
     assert.match(classifier, /pathname\.startsWith\('\/img\/products\/'\)/u);
     assert.match(classifier, /PUBLIC_BRAND_ASSET_PATHS\.has\(pathname\)/u);
     assert.doesNotMatch(classifier, /pathname\.startsWith\('\/img\/'\)/u);

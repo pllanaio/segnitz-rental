@@ -417,11 +417,20 @@ function isSetupAssetPath(pathname) {
         pathname === '/ready' ||
         pathname === '/live' ||
         pathname === '/favicon.ico' ||
-        pathname === '/js/setup_config.js' ||
-        pathname === '/js/verify_email_config.js' ||
-        pathname === '/js/bootstrap.bundle.min.js' ||
+        pathname.startsWith('/_next/static/') ||
         pathname.startsWith('/css/') ||
         pathname.startsWith('/img/');
+}
+
+// Build-Ausgabe des React/Next.js-Frontends (npm run build:frontend).
+const FRONTEND_BUILD_DIRECTORY = path.join(__dirname, 'frontend', 'out');
+const FRONTEND_STATIC_ASSET_DIRECTORY = path.join(FRONTEND_BUILD_DIRECTORY, '_next', 'static') + path.sep;
+
+if (!fs.existsSync(path.join(FRONTEND_BUILD_DIRECTORY, 'index.html'))) {
+    console.error(
+        `${new Date().toISOString()} - Frontend-Build fehlt in ${FRONTEND_BUILD_DIRECTORY}. ` +
+        'Bitte zuerst "npm run build:frontend" ausführen.'
+    );
 }
 
 const PUBLIC_BRAND_ASSET_PATHS = new Set([
@@ -447,8 +456,7 @@ function isPublicStaticAssetPath(pathname) {
         pathname === '/favicon.ico' ||
         PUBLIC_BRAND_ASSET_PATHS.has(pathname) ||
         pathname.startsWith('/css/') ||
-        pathname.startsWith('/vendor/flatpickr/4.6.13/') ||
-        pathname.startsWith('/js/') ||
+        pathname.startsWith('/_next/static/') ||
         pathname.startsWith('/img/products/');
 }
 
@@ -678,7 +686,7 @@ app.use('/', cartRoutes);
 
 // Spezifische Route für die Startseite
 app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+    res.sendFile(path.join(FRONTEND_BUILD_DIRECTORY, 'index.html'));
 });
 
 app.get('/auth-status', (req, res) => {
@@ -697,11 +705,11 @@ app.get('/auth-status', (req, res) => {
 });
 
 app.get('/index.html', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+    res.sendFile(path.join(FRONTEND_BUILD_DIRECTORY, 'index.html'));
 });
 
 app.get('/backend.html', checkAdmin, (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'backend.html'));
+    res.sendFile(path.join(FRONTEND_BUILD_DIRECTORY, 'backend.html'));
 });
 
 app.get('/verify-email.html', (req, res) => {
@@ -709,7 +717,7 @@ app.get('/verify-email.html', (req, res) => {
         'Cache-Control': 'no-store',
         'Referrer-Policy': 'no-referrer'
     });
-    res.sendFile(path.join(__dirname, 'public', 'verify-email.html'));
+    res.sendFile(path.join(FRONTEND_BUILD_DIRECTORY, 'verify-email.html'));
 });
 
 app.get('/img/returns/:filename', async (req, res) => {
@@ -760,7 +768,16 @@ app.get('/img/returns/:filename', async (req, res) => {
 // Never fall through to express.static for private return-image paths.
 app.use('/img/returns', (req, res) => res.sendStatus(404));
 
-// Statische Dateien bereitstellen
+// Statische Dateien bereitstellen: zuerst das gebaute React/Next.js-Frontend,
+// danach Stylesheets, Bilder und hochgeladene Produktbilder aus public/.
+app.use(express.static(FRONTEND_BUILD_DIRECTORY, {
+    index: false,
+    setHeaders(res, filePath) {
+        if (filePath.startsWith(FRONTEND_STATIC_ASSET_DIRECTORY)) {
+            res.set('Cache-Control', 'public, max-age=31536000, immutable');
+        }
+    }
+}));
 app.use(express.static("public"));
 
 const loginLimiter = rateLimit({

@@ -62,9 +62,14 @@ Mollie und Microsoft Graph werden im Testmodus deterministisch ersetzt. Es werde
 
 ```bash
 npx playwright install chromium
+npm run build:frontend
 node test/support/test-database.js
 npm run test:e2e
 ```
+
+Die Browser- und die UI-Prüfungen der Integrationstests benötigen das gebaute
+React-Frontend (`frontend/out`). Die Unit-Tests prüfen zusätzlich, dass die
+gebauten Seiten keine Inline-Skripte enthalten und alle Seiten erzeugt wurden.
 
 Die Browser-Suite prüft den Produktkatalog, dynamische Warenkorb- und
 Bestellaktionen, Fehlermeldungen beim Login, Kunden- und Adminlogin, die

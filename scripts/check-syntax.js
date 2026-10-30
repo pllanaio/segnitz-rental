@@ -5,7 +5,7 @@ const { readdirSync, statSync } = require('node:fs');
 const path = require('node:path');
 
 const root = path.resolve(__dirname, '..');
-const excludedDirectories = new Set(['.git', 'node_modules']);
+const excludedDirectories = new Set(['.git', 'node_modules', '.next', 'out']);
 const files = [];
 
 function collectJavaScriptFiles(directory) {

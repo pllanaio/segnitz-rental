@@ -1,6 +1,38 @@
 ## Segnitz Rental Manager
 Modular rental tool for several types of products including tools, cars and construction machinery with database integration, pdf signing option and payment gateway integration
 
+## Frontend (React / Next.js)
+
+Die Oberfläche ist eine React-Anwendung auf Basis von Next.js (Pages Router) im
+Verzeichnis `frontend/`. Sie wird als statischer Export gebaut
+(`frontend/out/*.html` und `frontend/out/_next/static/…`) und weiterhin vom
+Express-Server ausgeliefert. Backend, APIs, Sessions, CSRF-Schutz und die
+Content-Security-Policy bleiben unverändert; alle URLs (`/index.html`,
+`/backend.html`, `/profile.html`, `/login.html`, …) bestehen weiter.
+
+```bash
+npm ci
+npm run build:frontend   # erzeugt frontend/out (Pflicht vor npm start)
+npm start
+```
+
+- `frontend/pages/` – je eine Seite pro bisheriger HTML-Datei
+- `frontend/components/` – Shop, Checkout, Bestellblatt, Admin-Ansichten und Dialoge
+- `frontend/lib/` – reine Logik (Preise, Zahlungen, Rückgaben, Filter); per Unit-Test geprüft
+- `shared/rentalTariffs.js` – Tariflogik, die Server und Browser gemeinsam nutzen
+- `public/` enthält nur noch Stylesheets, Bilder und die Produktbild-Uploads
+
+Der Build verwendet bewusst Webpack (`next build --webpack`): Turbopack fügt ein
+Inline-Skript ein, das die CSP ohne `'unsafe-inline'` blockieren würde. Ein
+Unit-Test prüft die gebauten Seiten auf Inline-Skripte. Next.js, React und die
+übrigen Build-Werkzeuge sind devDependencies; das Docker-Image baut das Frontend
+in einer eigenen Stufe und enthält zur Laufzeit nur die statischen Dateien.
+
+Für Skripte und Browsertests bleiben die früheren globalen Funktionen
+`openOrderDetails`, `renderOrderDetails`, `openMyOrderDetails`,
+`renderOrderPaymentActionPanel`, `renderClearOrderCalculation`,
+`renderOrderReturnProtocol` und `getReturnBadge` verfügbar.
+
 ## Datenbank
 
 Beim Programmstart wird die Datenbank vor dem Öffnen des HTTP-Ports automatisch

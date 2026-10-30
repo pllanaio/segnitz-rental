@@ -1,3 +1,19 @@
+# Build stage: compiles the React/Next.js frontend into static files. Next.js,
+# React and the other build tools are devDependencies and stay out of the
+# runtime image.
+FROM node:24.19.0-alpine3.23@sha256:244cc2b53f46f9e876304391d17682b0ddae9ac33491f4857e25e35a36ba7995 AS frontend-build
+
+ENV NEXT_TELEMETRY_DISABLED=1
+
+WORKDIR /build
+
+COPY package*.json ./
+RUN npm ci --ignore-scripts
+
+COPY frontend ./frontend
+COPY shared ./shared
+RUN npm run build:frontend
+
 FROM node:24.19.0-alpine3.23@sha256:244cc2b53f46f9e876304391d17682b0ddae9ac33491f4857e25e35a36ba7995
 
 ENV NODE_ENV=production \
@@ -21,6 +37,7 @@ RUN npm ci --omit=dev \
     && npm cache clean --force
 
 COPY --chown=node:node . .
+COPY --from=frontend-build --chown=node:node /build/frontend/out ./frontend/out
 
 USER root
 
